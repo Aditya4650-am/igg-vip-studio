@@ -3789,3 +3789,76 @@ button.premium-button:active:not(:disabled) {
   min-width: 0 !important;
   overflow-wrap: anywhere !important;
 }
+
+
+/* ══════════════════════════════════════════════════════════════════
+   PROFILE-ICON-POLISH — real game icons sized to be visible, never cut
+   (badges / frames / titles use object-fit: contain inside a bigger well)
+   ══════════════════════════════════════════════════════════════════ */
+
+.app-root .chip-asset {
+  width: 2.85rem !important;   /* 46px outer well */
+  height: 2.85rem !important;
+  border-radius: 0.65rem !important;
+  padding: 0.22rem !important;
+  border: 1px solid rgba(167, 139, 250, 0.38) !important;
+  background:
+    linear-gradient(150deg, rgba(255, 255, 255, 0.1), rgba(10, 14, 26, 0.72)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 4px 14px rgba(0, 0, 0, 0.28),
+    0 0 14px rgba(124, 58, 237, 0.16) !important;
+}
+.app-root .chip-asset-img {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 2.5rem !important;   /* 40px artwork — full badge/frame/title */
+  max-height: 2.5rem !important;
+  object-fit: contain !important;  /* contain, never cover — nothing is cut */
+  object-position: center !important;
+}
+.app-root .inventory-chip:hover .chip-asset {
+  border-color: rgba(196, 181, 253, 0.6) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 0 20px rgba(124, 58, 237, 0.3),
+    0 6px 18px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Cards tab collection tiles: premium card-suit emojis, one per slot. */
+.app-root .cards-tile {
+  position: relative !important;
+}
+.app-root .cards-tile .cards-tile-icon {
+  width: 1.35rem !important;
+  height: 1.35rem !important;
+  color: #d8b4fe !important;
+  filter: drop-shadow(0 0 4px rgba(167, 139, 250, 0.4)) !important;
+}
+.app-root .cards-tile::before {
+  font-family: "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", sans-serif !important;
+  font-size: 0.95rem !important;
+  line-height: 1 !important;
+  opacity: 0.9 !important;
+}
+.app-root .cards-tile:nth-of-type(4n + 1)::before { content: "\2660\FE0F"; }  /* spades   */
+.app-root .cards-tile:nth-of-type(4n + 2)::before { content: "\2665\FE0F"; }  /* hearts   */
+.app-root .cards-tile:nth-of-type(4n + 3)::before { content: "\2666\FE0F"; }  /* diamonds */
+.app-root .cards-tile:nth-of-type(4n + 4)::before { content: "\2663\FE0F"; }  /* clubs    */
+.app-root .cards-tile--on::before {
+  color: #fde68a !important;
+  filter: drop-shadow(0 0 5px rgba(251, 191, 36, 0.55)) !important;
+}
+.app-root .cards-tile--on .cards-tile-icon { color: #fde68a !important; }
+
+/* Cards quick-set chips: premium pill with subtle inner glow */
+.app-root .cards-chip-btn {
+  font-family: var(--font-sans) !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.03em !important;
+}
+.app-root .cards-chip-btn--max::before {
+  content: "\2726\FE0F";
+  margin-right: 0.25rem;
+  font-family: "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", sans-serif;
+}

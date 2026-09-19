@@ -2019,7 +2019,7 @@ export function StudioApp() {
               </Button>
               <Button className="tool-action tool-action--season w-full" variant="amber" disabled={!session || busy} onClick={() => void tool("season")}>
                 <span className="tool-asset" aria-hidden="true">
-                  <img src="/game-icons/Season pass.png" alt="" className="tool-asset-img" draggable={false} />
+                  <img src="/game-icons/Season_pass.png" alt="" className="tool-asset-img" draggable={false} />
                 </span>
                 {tr("season")}
               </Button>
