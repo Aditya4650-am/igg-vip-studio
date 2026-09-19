@@ -1,0 +1,12 @@
+[phases.setup]
+nixPkgs = ["python311", "nodejs_22"]
+
+# Explicit install/build phases so Nixpacks never auto-runs a Python
+# pip install against a missing requirements file. The Node build is the
+# only build; Python is provided at runtime for scripts/township/*.py.
+[phases.install]
+cmds = ["npm install --include=dev"]
+
+[phases.build]
+cmds = ["npm run build"]
+

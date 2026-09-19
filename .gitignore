@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build output
+.output/
+.vercel/output/
+dist/
+build/
+
+# Client build artifacts
+client/build/
+client/dist/
+client/*.log
+
+# Env / secrets
+.env
+.env.local
+.grok/app-env.json
+
+# Logs
+*.log
+npm-install.log
+dev-server.log
+
+# OS
+.DS_Store
+Thumbs.db

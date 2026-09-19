@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: igg-vip-studio
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: NPM_CONFIG_PRODUCTION=false npm install && npm run build
+    startCommand: node .output/server/index.mjs
+    envVars:
+      - key: NITRO_PRESET
+        value: node-server
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: GROK_PROJECT_ID
+        value: igg-vip-studio
+      - key: IGG_VIP_MASTER
+        sync: false
+      - key: IGG_VIP_OWNER
+        sync: false
