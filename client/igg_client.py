@@ -35,10 +35,25 @@ APP_VERSION = "1.1.0"
 # %APPDATA%\IGG-VIP-Studio\server.txt
 DEFAULT_SERVER_URL = "https://igg-vip-studio-07u9.onrender.com"
 
-GAME_PACKAGE = "com.playrix.township"
-SAVE_DIR = f"/sdcard/Android/data/{GAME_PACKAGE}/files"
+# Both Township package variants are supported, exactly like the v1.15 client.
+# Global is preferred; the Vietnam build remains a supported fallback.
+GAME_PACKAGES = ["com.playrix.township", "com.playrix.township.vn"]
+
+# The REAL save lives in the protected /data/data/<pkg>/saves/ folder (needs
+# root via su). The public /sdcard/Android/data path is a red herring that made
+# the tool read an empty file and report "ADB error / not connected".
+def save_path_for_package(pkg: str) -> str:
+    return f"/data/data/{pkg}/saves/{SAVE_FILE}"
+
+def localinfo_path_for_package(pkg: str) -> str:
+    return f"/data/data/{pkg}/saves/{LOCAL_INFO_FILE}"
+
 SAVE_FILE = "mGameInfo.xml"
 LOCAL_INFO_FILE = "mLocalInfo.xml"
+
+# Track which package each device actually uses, so push goes back to the same
+# package the pull came from (v1.15 behavior).
+_active_package: dict[str, str] = {}
 
 
 def _app_data_dir() -> Path:
@@ -250,62 +265,132 @@ class NativeBridge:
             "message": "ok" if devices else "adb found but no device connected",
         }
 
+    # ADB — package helpers (v1.15 exact semantics)
+    def _pkgs_for(self, serial: str) -> list[str]:
+        preferred = _active_package.get(serial)
+        out: list[str] = []
+        for p in [preferred, *GAME_PACKAGES]:
+            if p and p not in out:
+                out.append(p)
+        return out
+
+    def _is_pkg_installed(self, adb: str, serial: str, pkg: str) -> bool:
+        code, out, _ = _run_adb(adb, ["-s", serial, "shell", "pm", "path", pkg], timeout=10)
+        return code == 0 and b"package:" in out
+
+    def _pull_privileged(self, adb: str, serial: str, remote: str) -> bytes | None:
+        tries = [
+            ["-s", serial, "exec-out", "su", "-c", f"cat '{remote}'"],
+            ["-s", serial, "exec-out", "su", "0", "cat", remote],
+        ]
+        for args in tries:
+            code, out, _ = _run_adb(adb, args, timeout=60)
+            if code == 0 and len(out) > 64:
+                return out
+        tmp = "/data/local/tmp/igg_pull_tmp.bin"
+        code, _, _ = _run_adb(adb, ["-s", serial, "shell", f"su -c 'cp \"{remote}\" {tmp} && chmod 644 {tmp}'"], timeout=30)
+        if code == 0:
+            with tempfile.TemporaryDirectory() as td:
+                local = Path(td) / "pull.bin"
+                code2, _, _ = _run_adb(adb, ["-s", serial, "pull", tmp, str(local)], timeout=60)
+                if code2 == 0 and local.exists():
+                    buf = local.read_bytes()
+                    if len(buf) > 64:
+                        return buf
+        if remote.startswith("/data/data/"):
+            pkg = remote.split("/data/data/")[1].split("/")[0]
+            rel = remote.split(f"/data/data/{pkg}/")[1]
+            code, out, _ = _run_adb(adb, ["-s", serial, "exec-out", "run-as", pkg, "cat", rel], timeout=60)
+            if code == 0 and len(out) > 64:
+                return out
+        return None
+
     def forceStop(self, serial: str) -> dict:
         adb = _find_adb()
         if not adb:
-            return {"ok": False, "package": GAME_PACKAGE, "error": "adb not found"}
-        _run_adb(adb, ["-s", serial, "shell", "am", "force-stop", GAME_PACKAGE])
-        return {"ok": True, "package": GAME_PACKAGE}
-
-    def _pull_b64(self, adb: str, serial: str, remote_dir: str, fname: str) -> tuple[bytes, str]:
-        remote = f"{remote_dir}/{fname}"
-        with tempfile.TemporaryDirectory() as td:
-            local = Path(td) / fname
-            code, _, err = _run_adb(adb, ["-s", serial, "pull", remote, str(local)])
-            if code == 0 and local.exists():
-                return local.read_bytes(), fname
-            code2, out2, _ = _run_adb(adb, ["-s", serial, "shell", "cat", remote])
-            if code2 == 0 and out2:
-                return out2, fname
-            msg = (err or b"pull failed").decode("utf-8", "replace").strip() or "pull failed"
-            raise RuntimeError(msg)
+            return {"ok": False, "package": "", "error": "adb not found"}
+        errs: list[str] = []
+        for pkg in self._pkgs_for(serial):
+            code, _, err = _run_adb(adb, ["-s", serial, "shell", "am", "force-stop", pkg], timeout=10)
+            if code == 0:
+                _active_package[serial] = pkg
+                return {"ok": True, "package": pkg}
+            errs.append(f"{pkg}: {err.decode('utf-8','replace').strip()}")
+        return {"ok": False, "package": "", "error": " | ".join(errs)}
 
     def pull(self, serial: str) -> dict:
         adb = _find_adb()
         if not adb:
             raise RuntimeError("adb not found - connect an emulator first")
-        data, fname = self._pull_b64(adb, serial, SAVE_DIR, SAVE_FILE)
-        return {"b64": base64.b64encode(data).decode("ascii"), "file": fname}
+        errs: list[str] = []
+        for pkg in self._pkgs_for(serial):
+            if not self._is_pkg_installed(adb, serial, pkg):
+                errs.append(f"{pkg}: package not installed")
+                continue
+            remote = save_path_for_package(pkg)
+            buf = self._pull_privileged(adb, serial, remote)
+            if buf and len(buf) >= 8:
+                _active_package[serial] = pkg
+                head = buf[: min(len(buf), 256)].decode("utf-8", "replace").lstrip("\ufeff").lstrip()
+                return {"b64": base64.b64encode(buf).decode("ascii"), "file": remote, "package": pkg, "plain": head.startswith("<")}
+            errs.append(f"{pkg}: could not read {remote}")
+        raise RuntimeError("Could not read mGameInfo from emulator. Tried: " + " | ".join(errs) + ". Check Root and open Township at least once.")
 
     def pullLocalInfo(self, serial: str) -> dict:
         adb = _find_adb()
         if not adb:
             raise RuntimeError("adb not found - connect an emulator first")
-        data, fname = self._pull_b64(adb, serial, SAVE_DIR, LOCAL_INFO_FILE)
-        return {"b64": base64.b64encode(data).decode("ascii"), "file": fname, "package": GAME_PACKAGE}
+        errs: list[str] = []
+        for pkg in self._pkgs_for(serial):
+            if not self._is_pkg_installed(adb, serial, pkg):
+                errs.append(f"{pkg}: package not installed")
+                continue
+            remote = localinfo_path_for_package(pkg)
+            buf = self._pull_privileged(adb, serial, remote)
+            if buf and len(buf) >= 8:
+                _active_package[serial] = pkg
+                return {"b64": base64.b64encode(buf).decode("ascii"), "file": remote, "package": pkg}
+            errs.append(f"{pkg}: could not read {remote}")
+        raise RuntimeError("Could not read mLocalInfo from emulator. Tried: " + " | ".join(errs) + ". Check Root and open Township at least once.")
 
     def push(self, serial: str, b64: str, options: dict | None = None) -> dict:
         options = options or {}
         adb = _find_adb()
         if not adb:
             raise RuntimeError("adb not found - connect an emulator first")
-        if not options.get("alreadyStopped"):
-            _run_adb(adb, ["-s", serial, "shell", "am", "force-stop", GAME_PACKAGE])
-            time.sleep(0.4)
         data = base64.b64decode(b64)
+        if len(data) > 24 * 1024 * 1024:
+            raise RuntimeError("Save output exceeds the 24 MB safety limit.")
+        head = data[: min(len(data), 256)].decode("utf-8", "replace").lstrip("\ufeff").lstrip()
+        if not head.startswith("<"):
+            raise RuntimeError("Save must be plain XML (v1.15 plaintext mode).")
+        if len(data) < 16:
+            raise RuntimeError("Save output too short to push.")
+        if not options.get("alreadyStopped"):
+            _ = self.forceStop(serial)
+            time.sleep(0.4)
         with tempfile.TemporaryDirectory() as td:
             local = Path(td) / SAVE_FILE
             local.write_bytes(data)
-            code, _, err = _run_adb(adb, ["-s", serial, "push", str(local), f"{SAVE_DIR}/{SAVE_FILE}"])
+            tmp = "/data/local/tmp/mGameInfo_push.bin"
+            code, _, err = _run_adb(adb, ["-s", serial, "push", str(local), tmp], timeout=60)
             if code != 0:
-                raise RuntimeError(err.decode("utf-8", "replace").strip() or "push failed")
-            bak = Path(td) / "mGameInfo.bak"
-            bak.write_bytes(data)
-            _run_adb(adb, ["-s", serial, "push", str(bak), f"{SAVE_DIR}/mGameInfo.bak"])
-        if options.get("restart"):
-            _run_adb(adb, ["-s", serial, "shell", "monkey", "-p", GAME_PACKAGE,
-                           "-c", "android.intent.category.LAUNCHER", "1"])
-        return {"ok": True}
+                raise RuntimeError("adb push failed: " + err.decode("utf-8", "replace").strip())
+            errs: list[str] = []
+            for pkg in self._pkgs_for(serial):
+                xml_path = save_path_for_package(pkg)
+                bak_path = xml_path.replace("/mGameInfo.xml", "/mGameInfo.bak")
+                shell = f"su -c 'cp \"{tmp}\" \"{xml_path}\"; cp \"{tmp}\" \"{bak_path}\"; chmod 600 \"{xml_path}\" \"{bak_path}\"'"
+                code2, out2, err2 = _run_adb(adb, ["-s", serial, "shell", shell], timeout=30)
+                combined = (out2 + err2).decode("utf-8", "replace").strip()
+                if code2 == 0 and not __import__("re").search(r"permission denied|not found|no such file|failed|error:", combined, __import__("re").I):
+                    _active_package[serial] = pkg
+                    if options.get("restart", True):
+                        _run_adb(adb, ["-s", serial, "shell", "monkey", "-p", pkg, "-c", "android.intent.category.LAUNCHER", "1"], timeout=12)
+                    return {"ok": True, "package": pkg, "paths": {"xml": xml_path, "bak": bak_path}, "size": len(data), "plaintext": True, "relaunched": options.get("restart", True)}
+                errs.append(f"{pkg}: {combined or 'su cp failed'}")
+            raise RuntimeError("Push failed — " + " | ".join(errs))
+
     # self-update
     def installUpdate(self, release: dict) -> dict:
         try:

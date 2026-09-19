@@ -25,3 +25,12 @@ dev-server.log
 # OS
 .DS_Store
 Thumbs.db
+
+# Reference material (uploaded zip + extracted copy) — not part of the deploy
+REF_V1154/
+IGG-VIP-v1.15.4-*.zip
+STYLES.zip
+
+# Python bytecode
+__pycache__/
+*.pyc
