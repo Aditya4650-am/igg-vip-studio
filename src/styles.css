@@ -3701,3 +3701,91 @@ button.premium-button:active:not(:disabled) {
   content: none !important;
   display: none !important;
 }
+
+
+/* ══════════════════════════════════════════════════════════════════
+   UI-POLISH-V2 — centered sidebar actions, retired sliding pill,
+   unified premium kicker typography. Project rules applied:
+   R1 single icon + one uppercase label per tab pill-button;
+   R2 stat cards render icon well + title + mono value;
+   R3 Inter for all UI text, emoji stack only for emoji glyphs.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* 1) The sliding .tab-pill was sized for 9 tabs and drifts between
+      the 10 current tabs. Per-tab active styling carries the effect. */
+.app-root .feature-tabs .tab-pill {
+  display: none !important;
+}
+.app-root button.feature-tab {
+  position: relative !important;
+}
+.app-root button.feature-tab--active::after {
+  content: "" !important;
+  position: absolute !important;
+  left: 14% !important;
+  right: 14% !important;
+  bottom: 0.35rem !important;
+  height: 2px !important;
+  border-radius: 2px !important;
+  background: linear-gradient(90deg, transparent, rgba(248, 222, 160, 0.9), transparent) !important;
+  box-shadow: 0 0 10px rgba(248, 222, 160, 0.45) !important;
+  pointer-events: none !important;
+}
+
+/* 2) Sidebar action rows: icon + label professionally centered. */
+.app-root .tool-action {
+  justify-content: center !important;
+  text-align: center !important;
+  gap: 0.55rem !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.04em !important;
+  line-height: 1.2 !important;
+}
+.app-root .tool-action .tool-asset,
+.app-root .tool-action > svg,
+.app-root .tool-action .game-icon {
+  flex-shrink: 0 !important;
+}
+
+/* 3) Section kickers: one consistent premium type treatment. */
+.app-root .kicker,
+.app-root .sidebar-tools > .kicker,
+.app-root .sidebar-log > .kicker,
+.app-root .sidebar-device-block > .kicker,
+.app-root .app-sidebar .kicker {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.45rem !important;
+  font-family: var(--font-sans) !important;
+  font-size: 0.72rem !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.11em !important;
+  text-transform: uppercase !important;
+  color: rgba(248, 222, 160, 0.78) !important;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5) !important;
+  margin: 0 !important;
+}
+/* Kicker leading icons align on the text baseline (no float/clip). */
+.app-root .kicker::before,
+.app-root .sidebar-tools > .kicker::before,
+.app-root .sidebar-log > .kicker::before,
+.app-root .sidebar-device-block > .kicker::before {
+  display: inline-grid !important;
+  place-items: center !important;
+  margin: 0 !important;
+  width: 1.45rem !important;
+  height: 1.45rem !important;
+  font-size: 0.95rem !important;
+  border-radius: 0.4rem !important;
+  border: 1px solid rgba(167, 139, 250, 0.3) !important;
+  background: linear-gradient(150deg, rgba(124, 58, 237, 0.2), rgba(10, 14, 26, 0.65)) !important;
+}
+
+/* 4) Guard: no element may overflow its card horizontally. */
+.app-root .inventory-chip,
+.app-root .stat-card,
+.app-root .tool-action,
+.app-root .feature-tab {
+  min-width: 0 !important;
+  overflow-wrap: anywhere !important;
+}

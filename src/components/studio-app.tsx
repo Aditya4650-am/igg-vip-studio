@@ -2040,8 +2040,7 @@ export function StudioApp() {
 
         <section className="app-main flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg shadow-hairline">
           <nav
-            className="feature-tabs relative grid grid-cols-10 border-b border-border px-3 pt-3"
-            style={{ "--tab-x": `${TABS.indexOf(tab) * 100}%` } as CSSProperties}
+            className="feature-tabs relative grid grid-cols-5 border-b border-border px-3 pt-3 sm:grid-cols-10"
           >
             <span aria-hidden className={cn("tab-pill", tabReady && "ready")} />
             {TABS.map((id) => {
