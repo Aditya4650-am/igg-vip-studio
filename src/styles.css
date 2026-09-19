@@ -2248,24 +2248,36 @@ textarea {
 
 /* Emoji taxonomy stays presentation-only; the existing Lucide-style glyphs
    remain in place and continue to carry the accessible tab labels. */
+.feature-tab {
+  font-family: "Inter", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
 .feature-tab::before {
   display: inline-block;
-  margin-right: 0.08rem;
-  font-size: 0.95rem;
+  margin-right: 0.3rem;
+  font-size: 1.05rem;
   line-height: 1;
-  filter: saturate(0.86);
+  font-family: "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", sans-serif;
+  filter: saturate(1);
   transform: translateY(-0.02rem);
 }
 
-.feature-tab:nth-of-type(1)::before { content: "ðŸ“Š"; }
-.feature-tab:nth-of-type(2)::before { content: "ðŸ‘¤"; }
-.feature-tab:nth-of-type(3)::before { content: "ðŸ§‘"; }
-.feature-tab:nth-of-type(4)::before { content: "ðŸŽ¨"; }
-.feature-tab:nth-of-type(5)::before { content: "ðŸ”“"; }
-.feature-tab:nth-of-type(6)::before { content: "âœ¨"; }
-.feature-tab:nth-of-type(7)::before { content: "ðŸŽŸï¸"; }
-.feature-tab:nth-of-type(8)::before { content: "ðŸ“¦"; }
-.feature-tab:nth-of-type(9)::before { content: "ðŸ¬"; }
+.feature-tab:nth-of-type(1)::before { content: "\01F4CA"; }
+.feature-tab:nth-of-type(2)::before { content: "\01F464"; }
+.feature-tab:nth-of-type(3)::before { content: "\01F9D1"; }
+.feature-tab:nth-of-type(4)::before { content: "\01F3A8"; }
+.feature-tab:nth-of-type(5)::before { content: "\01F6E1"; }
+.feature-tab:nth-of-type(6)::before { content: "\02728"; }
+.feature-tab:nth-of-type(7)::before { content: "\01F3DF"; }
+.feature-tab:nth-of-type(8)::before { content: "\01F0CF"; }
+.feature-tab:nth-of-type(9)::before { content: "\01F6D2"; }
+.feature-tab:nth-of-type(10)::before { content: "\01F33E"; }
 
 .feature-tab--active::before {
   filter: saturate(1.1) drop-shadow(0 0 6px rgba(167, 139, 250, 0.28));
@@ -3268,6 +3280,208 @@ button.premium-button:active:not(:disabled) {
 /* All / None short buttons in group headers */
 .app-root .inventory-group header button {
   font-size: 0.7rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.05em !important;
+  text-transform: uppercase !important;
+}
+
+/* PREMIUM VISUAL SYSTEM UPGRADE: headings, feature cards, sidebar.
+   R1. Every tab pill shows exactly one icon + one uppercase label.
+   R2. Stat cards always render icon well + title + mono value field.
+   R3. All headings use Syne/Inter with fixed weight scale. */
+
+.app-root {
+  --premium-card-fill: linear-gradient(160deg, rgba(20, 28, 47, 0.98), rgba(10, 14, 26, 0.99));
+  --premium-card-edge: rgba(167, 139, 250, 0.22);
+  --premium-card-glow: 0 0 0 1px rgba(167, 139, 250, 0.1), 0 18px 44px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --premium-gold: #f8dea0;
+  --premium-gold-soft: rgba(248, 222, 160, 0.72);
+}
+
+.app-root .feature-tabs {
+  display: flex !important;
+  align-items: stretch !important;
+  gap: 0.4rem !important;
+  overflow-x: auto !important;
+  padding: 0.65rem 0.75rem 0 !important;
+  scrollbar-width: none !important;
+}
+.app-root .feature-tabs::-webkit-scrollbar { display: none !important; }
+.app-root button.feature-tab {
+  flex: 1 0 6.4rem !important;
+  min-height: 3.4rem !important;
+  border: 1px solid rgba(38, 50, 74, 0.85) !important;
+  border-bottom: 0 !important;
+  border-radius: 0.8rem 0.8rem 0 0 !important;
+  background: linear-gradient(180deg, rgba(21, 30, 50, 0.92), rgba(12, 17, 30, 0.96)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+  white-space: normal !important;
+}
+.app-root button.feature-tab span:not([class]) {
+  display: block !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+  line-height: 1.25 !important;
+}
+.app-root button.feature-tab--active {
+  border-color: rgba(167, 139, 250, 0.55) !important;
+  background: linear-gradient(180deg, rgba(124, 58, 237, 0.28), rgba(31, 24, 64, 0.96)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 18px rgba(124, 58, 237, 0.28) !important;
+}
+.app-root .feature-tab-icon {
+  width: 1.25rem !important;
+  height: 1.25rem !important;
+  flex-shrink: 0 !important;
+  color: #a78bfa !important;
+  filter: drop-shadow(0 0 6px rgba(167, 139, 250, 0.35)) !important;
+}
+.app-root button.feature-tab--active .feature-tab-icon { color: #f8dea0 !important; }
+.app-root .feature-tab::before {
+  color: #c4b5fd !important;
+  filter: saturate(1) drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5)) !important;
+}
+.app-root button.feature-tab--active::before {
+  filter: saturate(1.15) drop-shadow(0 0 6px rgba(248, 222, 160, 0.5)) !important;
+}
+
+.app-root .kicker,
+.app-root .inventory-group h3,
+.app-root .sidebar-tools .kicker,
+.app-root .sidebar-log .kicker,
+.app-root .cards-hero-title,
+.app-root .cards-friend-title,
+.app-root .cards-slots-title {
+  font-family: "Syne", "Inter", ui-sans-serif, system-ui, sans-serif !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.09em !important;
+  text-transform: uppercase !important;
+  color: rgba(248, 222, 160, 0.72) !important;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45) !important;
+}
+.app-root .inventory-group h3 { font-size: 0.74rem !important; }
+.app-root .kicker { font-size: 0.68rem !important; }
+
+.app-root .group-emoji {
+  display: inline-grid !important;
+  place-items: center !important;
+  width: 1.7rem !important;
+  height: 1.7rem !important;
+  font-family: "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", sans-serif !important;
+  font-size: 1.05rem !important;
+  line-height: 1 !important;
+  border-radius: 0.5rem !important;
+  border: 1px solid rgba(167, 139, 250, 0.35) !important;
+  background: linear-gradient(150deg, rgba(124, 58, 237, 0.22), rgba(10, 14, 26, 0.7)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 10px rgba(124, 58, 237, 0.2) !important;
+}
+.app-root .group-asset {
+  width: 2rem !important;
+  height: 2rem !important;
+  border-radius: 0.5rem !important;
+  border: 1px solid rgba(167, 139, 250, 0.35) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 10px rgba(124, 58, 237, 0.18) !important;
+}
+
+.app-root .inventory-chip {
+  border: 1px solid rgba(38, 50, 74, 0.85) !important;
+  border-radius: 0.7rem !important;
+  background: linear-gradient(160deg, rgba(20, 28, 47, 0.98), rgba(10, 14, 26, 0.99)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+  transition: border-color 160ms ease, box-shadow 180ms ease, transform 140ms ease !important;
+}
+.app-root .inventory-chip:hover {
+  border-color: rgba(167, 139, 250, 0.5) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 16px rgba(124, 58, 237, 0.22) !important;
+  transform: translateY(-1px) !important;
+}
+.app-root .inventory-chip[aria-pressed="true"] {
+  border-color: rgba(251, 191, 36, 0.55) !important;
+  background: linear-gradient(150deg, rgba(180, 83, 9, 0.2), rgba(14, 12, 8, 0.85)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 18px rgba(245, 158, 11, 0.2) !important;
+}
+.app-root .chip-label {
+  font-family: "Inter", "Segoe UI", ui-sans-serif, system-ui, sans-serif !important;
+  font-weight: 600 !important;
+  font-size: 0.8rem !important;
+  letter-spacing: 0.01em !important;
+  color: rgba(241, 245, 255, 0.95) !important;
+}
+.app-root .chip-asset {
+  border: 1px solid rgba(167, 139, 250, 0.32) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 10px rgba(124, 58, 237, 0.18) !important;
+}
+.app-root .chip-emoji {
+  border: 1px solid rgba(167, 139, 250, 0.32) !important;
+  background: linear-gradient(150deg, rgba(124, 58, 237, 0.2), rgba(10, 14, 26, 0.7)) !important;
+}
+.app-root .chip-emoji-glyph {
+  font-family: "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", sans-serif !important;
+  font-size: 1.2rem !important;
+  filter: saturate(1.05) !important;
+}
+
+.app-root .stat-card {
+  border: 1px solid rgba(38, 50, 74, 0.85) !important;
+  border-radius: 0.8rem !important;
+  background: linear-gradient(160deg, rgba(20, 28, 47, 0.98), rgba(10, 14, 26, 0.99)) !important;
+  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.1), 0 18px 44px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+  transition: border-color 160ms ease, box-shadow 180ms ease, transform 140ms ease !important;
+}
+.app-root .stat-card:hover {
+  border-color: rgba(167, 139, 250, 0.22) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 0 20px rgba(124, 58, 237, 0.24) !important;
+  transform: translateY(-1px) !important;
+}
+.app-root .stat-title {
+  font-family: "Syne", "Inter", ui-sans-serif, system-ui, sans-serif !important;
+  font-weight: 700 !important;
+  font-size: 0.78rem !important;
+  letter-spacing: 0.05em !important;
+  text-transform: uppercase !important;
+  color: rgba(241, 245, 255, 0.96) !important;
+}
+.app-root .stat-asset {
+  width: 2.1rem !important;
+  height: 2.1rem !important;
+  border-radius: 0.55rem !important;
+  border: 1px solid rgba(167, 139, 250, 0.35) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 10px rgba(124, 58, 237, 0.2) !important;
+}
+.app-root .stat-emoji {
+  display: inline-grid !important;
+  place-items: center !important;
+  width: 2.1rem !important;
+  height: 2.1rem !important;
+  font-family: "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", sans-serif !important;
+  font-size: 1.2rem !important;
+  border-radius: 0.55rem !important;
+  border: 1px solid rgba(167, 139, 250, 0.35) !important;
+  background: linear-gradient(150deg, rgba(124, 58, 237, 0.2), rgba(10, 14, 26, 0.7)) !important;
+}
+.app-root .stat-icon { color: #a78bfa !important; }
+.app-root .stat-card .field-stat,
+.app-root .field-stat {
+  font-family: "JetBrains Mono", ui-monospace, monospace !important;
+  font-weight: 700 !important;
+  font-size: 0.92rem !important;
+  border-radius: 0.6rem !important;
+  border: 1px solid rgba(56, 189, 248, 0.22) !important;
+  background: rgba(7, 10, 19, 0.6) !important;
+  color: #bae6fd !important;
+}
+
+.app-root .device-selector-card,
+.app-root .sidebar-tools,
+.app-root .sidebar-log {
+  border: 1px solid rgba(38, 50, 74, 0.85) !important;
+  border-radius: 0.9rem !important;
+  background: linear-gradient(160deg, rgba(20, 28, 47, 0.98), rgba(10, 14, 26, 0.99)) !important;
+  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.1), 0 18px 44px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+
+
+
   font-weight: 650 !important;
   letter-spacing: 0.03em !important;
 }
