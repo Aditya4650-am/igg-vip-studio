@@ -87,25 +87,61 @@ def get_device_id() -> str:
     return new_id
 # ── ADB helpers ──────────────────────────────────────────────────────────────
 def _find_adb() -> str | None:
+    """Locate an adb executable: bundled first, then PATH, then every common
+    emulator install location (MEmu / LDPlayer / Nox / BlueStacks / SDK)."""
     here = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-    candidates = [here / "adb" / "adb.exe", here / "adb.exe"]
+    candidates: list[Path] = [
+        here / "adb" / "adb.exe",
+        here / "adb.exe",
+    ]
     on_path = shutil.which("adb")
     if on_path:
         candidates.append(Path(on_path))
+
     local = os.environ.get("LOCALAPPDATA", "")
+    roaming = os.environ.get("APPDATA", "")
     pf = os.environ.get("ProgramFiles", "C:\\Program Files")
     pfx = os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)")
+    home = str(Path.home())
+    desktop = str(Path.home() / "Desktop")
+    onedrive = os.environ.get("OneDrive", "")
+
     for base in [
+        # Android SDK
         Path(local) / "Android" / "Sdk" / "platform-tools" / "adb.exe",
+        Path(pf) / "Android" / "platform-tools" / "adb.exe",
+        # MEmu (Program Files AND AppData AND LocalAppData)
+        Path(pf) / "Microvirt" / "MEmu" / "adb.exe",
+        Path(pfx) / "Microvirt" / "MEmu" / "adb.exe",
+        Path(local) / "Microvirt" / "MEmu" / "adb.exe",
+        Path(roaming) / "Microvirt" / "MEmu" / "adb.exe",
+        # LDPlayer (many install dir names)
+        Path(pf) / "LDPlayer" / "adb.exe",
+        Path(pf) / "LDPlayer" / "LDPlayer9" / "adb.exe",
+        Path(pf) / "ldplayer9box" / "adb.exe",
+        Path(pf) / "ldplayerbox" / "adb.exe",
+        Path(pfx) / "LDPlayer" / "LDPlayer9" / "adb.exe",
+        Path(local) / "LDPlayer" / "LDPlayer9" / "adb.exe",
+        Path(local) / "ldplayer9box" / "adb.exe",
+        # Nox
         Path(pf) / "Nox" / "bin" / "adb.exe",
         Path(pfx) / "Nox" / "bin" / "adb.exe",
+        # BlueStacks
         Path(local) / "Programs" / "BlueStacks_nxt" / "HD-Adb.exe",
         Path(pf) / "BlueStacks_nxt" / "HD-Adb.exe",
-        Path(local) / "LDPlayer" / "LDPlayer9" / "adb.exe",
-        Path(pf) / "LDPlayer" / "LDPlayer9" / "adb.exe",
-        Path(local) / "Microvirt" / "MEmu" / "adb.exe",
+        Path(pfx) / "BlueStacks_nxt" / "HD-Adb.exe",
+        Path(pf) / "BlueStacks" / "HD-Adb.exe",
+        # Genymotion
+        Path(local) / "Genymobile" / "Genymotion" / "tools" / "adb.exe",
+        # Loose platform-tools copies people commonly keep around
+        Path(home) / "platform-tools" / "adb.exe",
+        Path(desktop) / "platform-tools" / "adb.exe",
+        Path(home) / "Downloads" / "platform-tools" / "adb.exe",
     ]:
         candidates.append(base)
+    if onedrive:
+        candidates.append(Path(onedrive) / "Desktop" / "platform-tools" / "adb.exe")
+
     for c in candidates:
         try:
             if c and Path(c).exists():
@@ -113,6 +149,43 @@ def _find_adb() -> str | None:
         except Exception:
             continue
     return None
+
+
+# Ports used by the common Android emulators for their adb listener.
+_EMULATOR_PORTS = [5555, 5554, 62001, 62025, 21503, 7555, 5037]
+
+
+def _ensure_adb_ready(adb: str) -> list[dict]:
+    """Start the adb server and auto-connect known emulator ports, then list
+    devices. Returns the connected device list."""
+    # 1. Start the local adb server (no-op if already running).
+    _run_adb(adb, ["start-server"], timeout=20)
+
+    devices = _adb_devices(adb)
+    if devices:
+        return devices
+
+    # 2. Nothing attached: try the well-known emulator loopback ports.
+    for port in _EMULATOR_PORTS:
+        if port == 5037:  # that is the server port, never a device
+            continue
+        _run_adb(adb, ["connect", f"127.0.0.1:{port}"], timeout=8)
+    return _adb_devices(adb)
+
+
+def _adb_devices(adb: str) -> list[dict]:
+    code, out, _ = _run_adb(adb, ["devices"])
+    if code != 0:
+        return []
+    result: list[dict] = []
+    for line in out.decode("utf-8", "replace").splitlines()[1:]:
+        line = line.strip()
+        if not line or "\t" not in line:
+            continue
+        serial, state = line.split("\t", 1)
+        if state.strip() == "device":
+            result.append({"id": serial.strip(), "label": serial.strip()})
+    return result
 
 
 def _run_adb(adb: str, args: list[str], timeout: int = 30) -> tuple[int, bytes, bytes]:
@@ -162,18 +235,20 @@ class NativeBridge:
         adb = _find_adb()
         if not adb:
             return []
-        code, out, _ = _run_adb(adb, ["devices"])
-        if code != 0:
-            return []
-        result: list[dict] = []
-        for line in out.decode("utf-8", "replace").splitlines()[1:]:
-            line = line.strip()
-            if not line or "\t" not in line:
-                continue
-            serial, state = line.split("\t", 1)
-            if state.strip() == "device":
-                result.append({"id": serial.strip(), "label": serial.strip()})
-        return result
+        return _ensure_adb_ready(adb)
+
+    def adbInfo(self) -> dict:
+        """Diagnostics for the UI: which adb was found and what it sees."""
+        adb = _find_adb()
+        if not adb:
+            return {"found": False, "path": "", "devices": [], "message": "adb not found"}
+        devices = _ensure_adb_ready(adb)
+        return {
+            "found": True,
+            "path": adb,
+            "devices": devices,
+            "message": "ok" if devices else "adb found but no device connected",
+        }
 
     def forceStop(self, serial: str) -> dict:
         adb = _find_adb()

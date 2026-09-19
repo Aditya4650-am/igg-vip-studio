@@ -11,7 +11,12 @@ a = Analysis(
     ["igg_client.py"],
     pathex=[str(ROOT)],
     binaries=[],
-    datas=[],
+    datas=[
+        # Bundle adb so the client never depends on the user's PATH.
+        (str(ROOT / "adb" / "adb.exe"), "adb"),
+        (str(ROOT / "adb" / "AdbWinApi.dll"), "adb"),
+        (str(ROOT / "adb" / "AdbWinUsbApi.dll"), "adb"),
+    ],
     hiddenimports=[
         "webview",
         "webview.platforms.winforms",
