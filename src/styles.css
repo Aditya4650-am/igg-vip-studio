@@ -2272,19 +2272,19 @@ textarea {
 }
 
 .sidebar-device-block > .kicker::before {
-  content: "ðŸ–¥ï¸";
+  content: "🖥️";
   margin-right: 0.38rem;
   letter-spacing: 0;
 }
 
 .sidebar-tools > .kicker::before {
-  content: "âš¡";
+  content: "⚡";
   margin-right: 0.38rem;
   letter-spacing: 0;
 }
 
 .sidebar-log > .kicker::before {
-  content: "ðŸ“‹";
+  content: "📋";
   margin-right: 0.38rem;
   letter-spacing: 0;
 }
@@ -2397,9 +2397,9 @@ textarea {
   stroke-width: 2;
 }
 
-.state-badge--ready::before { content: "âœ“"; font-weight: 800; }
-.state-badge--season::before { content: "âœ¦"; font-weight: 800; }
-.state-badge--regatta::before { content: "â›µ"; }
+.state-badge--ready::before { content: "✓"; font-weight: 800; }
+.state-badge--season::before { content: "✦"; font-weight: 800; }
+.state-badge--regatta::before { content: "⛵"; }
 
 /* Use the exact uploaded logo in every in-app mark, with a little more
    breathing room in the header so the asset remains recognisable. */
@@ -3581,7 +3581,7 @@ button.premium-button:active:not(:disabled) {
    ══════════════════════════════════════════════════════════════════ */
 
 .app-root button.feature-tab {
-  font-family: "Inter", "Segoe UI", ui-sans-serif, system-ui, sans-serif !important;
+  font-family: var(--font-sans) !important;
   font-weight: 800 !important;
   letter-spacing: 0.03em !important;
   text-transform: uppercase !important;
@@ -3613,7 +3613,7 @@ button.premium-button:active:not(:disabled) {
 .app-root .cards-hero-title,
 .app-root .cards-friend-title,
 .app-root .cards-slots-title {
-  font-family: "Syne", "Inter", ui-sans-serif, system-ui, sans-serif !important;
+  font-family: "Inter", "Inter", ui-sans-serif, system-ui, sans-serif !important;
   font-weight: 700 !important;
   letter-spacing: 0.09em !important;
   text-transform: uppercase !important;
@@ -3670,14 +3670,14 @@ button.premium-button:active:not(:disabled) {
   transform: translateY(-1px) !important;
 }
 .app-root .stat-title {
-  font-family: "Syne", "Inter", ui-sans-serif, system-ui, sans-serif !important;
+  font-family: "Inter", "Inter", ui-sans-serif, system-ui, sans-serif !important;
   font-weight: 700 !important;
   letter-spacing: 0.05em !important;
   text-transform: uppercase !important;
 }
 .app-root .stat-card .field-stat,
 .app-root .field-stat {
-  font-family: "JetBrains Mono", ui-monospace, monospace !important;
+  font-family: var(--font-mono) !important;
   border-radius: 0.6rem !important;
   border: 1px solid rgba(56, 189, 248, 0.22) !important;
   background: rgba(7, 10, 19, 0.6) !important;
@@ -3692,4 +3692,12 @@ button.premium-button:active:not(:disabled) {
   border-radius: 0.9rem !important;
   background: linear-gradient(160deg, rgba(20, 28, 47, 0.98), rgba(10, 14, 26, 0.99)) !important;
   box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.1), 0 18px 44px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+
+
+/* TAB-ICON-DEDUPE: the tab bar already renders a crisp SVG GameIcon, so the
+   extra ::before emoji is removed to avoid a double-icon / mixed-font look. */
+.app-root .feature-tab::before {
+  content: none !important;
+  display: none !important;
 }
