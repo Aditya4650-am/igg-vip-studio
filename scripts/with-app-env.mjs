@@ -87,13 +87,13 @@ export function projectRoot() {
   return dirname(dirname(fileURLToPath(import.meta.url)));
 }
 
-function resolveCmd(root: string, command: string): string {
+function resolveCmd(root, command) {
   if (process.platform !== "win32") return command;
   const sh = join(root, "node_modules", ".bin", command + ".cmd");
-  const shStat = statSync(sh, { throwIfMissing: false });
+  const shStat = statSync(sh, { throwIfNoEntry: false });
   if (shStat?.isFile()) return sh;
   const exe = join(root, "node_modules", ".bin", command + ".exe");
-  if (statSync(exe, { throwIfMissing: false })?.isFile()) return exe;
+  if (statSync(exe, { throwIfNoEntry: false })?.isFile()) return exe;
   return command;
 }
 
