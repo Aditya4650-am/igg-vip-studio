@@ -29,11 +29,11 @@ from pathlib import Path
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 # Where the app UI comes from. Override with env IGG_VIP_URL or
 # %APPDATA%\IGG-VIP-Studio\server.txt
-DEFAULT_SERVER_URL = "https://igg-vip-studio.vercel.app"
+DEFAULT_SERVER_URL = "https://igg-vip-studio-07u9.onrender.com"
 
 GAME_PACKAGE = "com.playrix.township"
 SAVE_DIR = f"/sdcard/Android/data/{GAME_PACKAGE}/files"
