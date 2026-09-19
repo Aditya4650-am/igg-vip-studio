@@ -156,7 +156,7 @@ export const GAME_ICON_MAP = {
       "Christmas 2022": "/game-icons/Airport_Skin.png",
       "Easter 2023": "/game-icons/Easter_Fun_2023_Event_Easter_Airport_Skin.png",
       "Sweet": "/game-icons/Sweet_Birthday_Event_Sugary_Airport_Skin.png",
-      "Ireland": "/game-icons/Irish_Journey_Event_Rainbow's_End_Airport_Skin.png",
+      "Ireland": "/game-icons/Irish_Journey_Event_Rainbows_End_Airport_Skin.png",
       "Fashion": "/game-icons/Fashion_Pass_Event_Fashion_Airport_Skin.png",
       "Classic Music": "/game-icons/Music_Festival_Event_Symphony_Airport_Skin.png",
       "Arab": "/game-icons/Arabian_Pass_Event_Arabian_Airport_Skin.png",
@@ -248,7 +248,7 @@ export const GAME_ICON_MAP = {
     "Fortress": {
       "Pirate 1": "/game-icons/Pirate_Harbor.png",
       "Pirate 2": "/game-icons/Pirate_Galleon.png",
-      "Paris": "/game-icons/Sultan's_Palace.png",
+      "Paris": "/game-icons/Sultans_Palace.png",
       "Halloween 2021 A": "/game-icons/Vampire_Party_Event_Haunted_Tower_Skin.png",
       "Halloween 2021 B": "/game-icons/Vampire_Party_Event_Haunted_Tower_Skin.png",
       "Christmas": "/game-icons/Magical_Christmas_Event_2022_Santas_Residence_Skin.png",
