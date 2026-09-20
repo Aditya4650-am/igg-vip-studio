@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { decodeContainer, extractXml } from "./save-decode.server.ts";
+import { decodeContainer, extractXml, shellErrorMessage } from "./save-decode.server.ts";
 import { decodeLocalInfoBase64, maxBuildingsStash } from "./desban.server.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -36,6 +36,48 @@ for (const [name, b64] of Object.entries(fixtures.cases)) {
 
 test("save-decode: an unknown wrapper is rejected instead of mangled", () => {
   assert.equal(decodeContainer(Buffer.from([0x01, 0x02, 0x03, 0x04])), null);
+});
+
+// `adb exec-out` merges stderr into stdout, so a failed privileged read returns
+// the shell's diagnostic instead of the file. These are long enough to clear the
+// client's length guard, so the server has to recognise and name them rather
+// than reporting a bogus container format.
+const adbErrors = [
+  "cat: /data/data/com.playrix.township/saves/mLocalInfo.xml: Permission denied",
+  "cat: /data/data/com.playrix.township/saves/mLocalInfo.xml: No such file or directory",
+  "su: not found",
+  "/system/bin/sh: su: inaccessible or not found",
+];
+
+for (const message of adbErrors) {
+  test(`LocalInfo: reports a device read failure for ${JSON.stringify(message.slice(0, 24))}…`, () => {
+    const b64 = Buffer.from(message).toString("base64");
+    assert.throws(
+      () => decodeLocalInfoBase64(b64),
+      (err: Error) => {
+        // The old message blamed the format and printed the byte "0x63", which
+        // pointed at the decoder instead of the unrooted device.
+        assert.doesNotMatch(err.message, /định dạng/);
+        assert.match(err.message, /ADB|Root/i);
+        return true;
+      },
+    );
+  });
+}
+
+test("save-decode: real containers are not mistaken for shell output", () => {
+  for (const [name, b64] of Object.entries(fixtures.cases)) {
+    const raw = Buffer.from(b64, "base64");
+    assert.equal(shellErrorMessage(raw), null, `${name} must not look like a shell error`);
+  }
+});
+
+test("save-decode: a save whose text mentions a missing file is still a save", () => {
+  // The phrase matches must not fire on save content: this document would be
+  // rejected as a "shell error" if they were applied without the tag check.
+  const xml = '<Global><Var name="note" v="No such file or directory" t="s"/></Global>';
+  assert.equal(shellErrorMessage(Buffer.from(xml)), null);
+  assert.equal(shellErrorMessage(Buffer.from("\uFEFF" + xml)), null);
 });
 
 test("save-decode: the error names the byte actually seen", () => {

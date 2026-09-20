@@ -227,6 +227,31 @@ def _run_adb(adb: str, args: list[str], timeout: int = 30) -> tuple[int, bytes, 
     except Exception as e:  # noqa: BLE001
         return 1, b"", str(e).encode("utf-8", "replace")
 
+
+_PRINTABLE = frozenset(range(0x20, 0x7F)) | {0x09, 0x0A, 0x0D}
+
+
+def _is_probably_file(buf: bytes) -> bool:
+    """Reject shell diagnostics that `adb exec-out` merged into stdout.
+
+    exec-out writes stderr to the same pipe as stdout, so a failed
+    `su -c "cat '<file>'"` yields text like
+    `cat: /data/data/.../mLocalInfo.xml: Permission denied` instead of the file.
+    That text is long enough to pass a plain length check and would be sent to
+    the server as a "save", which then fails with a confusing format error.
+    A real save is either XML (starts with `<`, BOM/whitespace aside) or a
+    binary container with bytes outside the printable range; such text is neither.
+    """
+    head = buf[:512]
+    if any(b == 0 for b in head):
+        return True
+    if any(b not in _PRINTABLE for b in head):
+        return True
+    # Plain-text payloads are only a file when they are the document itself, so a
+    # leading `cat: …` diagnostic is rejected even if XML follows it.
+    return head.lstrip(b"\xef\xbb\xbf \t\r\n").startswith(b"<")
+
+
 class NativeBridge:
     """Exposed to the page as window.iggNative (method names match the app)."""
 
@@ -287,15 +312,42 @@ class NativeBridge:
         code, out, _ = _run_adb(adb, ["-s", serial, "shell", "pm", "path", pkg], timeout=10)
         return code == 0 and b"package:" in out
 
-    def _pull_privileged(self, adb: str, serial: str, remote: str) -> bytes | None:
+    def _pull_privileged(self, adb: str, serial: str, remote: str, diag: list[str] | None = None) -> bytes | None:
+        notes: list[str] = []
+
+        def accept(out: bytes) -> bytes | None:
+            # Length alone is not enough: exec-out can return a shell error
+            # message of any length. Only accept bytes that look like a file.
+            if len(out) > 64 and _is_probably_file(out):
+                return out
+            text = out[:200].decode("utf-8", "replace").strip()
+            if text:
+                notes.append(text)
+            return None
+
         tries = [
             ["-s", serial, "exec-out", "su", "-c", f"cat '{remote}'"],
             ["-s", serial, "exec-out", "su", "0", "cat", remote],
+            ["-s", serial, "exec-out", "su", "-c", f"cat \"{remote}\""],
         ]
         for args in tries:
             code, out, _ = _run_adb(adb, args, timeout=60)
-            if code == 0 and len(out) > 64:
-                return out
+            if code == 0:
+                ok = accept(out)
+                if ok is not None:
+                    return ok
+        if remote.startswith("/data/data/"):
+            pkg = remote.split("/data/data/")[1].split("/")[0]
+            rel = remote.split(f"/data/data/{pkg}/")[1]
+            for args in (
+                ["-s", serial, "exec-out", "run-as", pkg, "cat", rel],
+                ["-s", serial, "exec-out", "su", "-c", f"run-as {pkg} cat {rel}"],
+            ):
+                code, out, _ = _run_adb(adb, args, timeout=60)
+                if code == 0:
+                    ok = accept(out)
+                    if ok is not None:
+                        return ok
         tmp = "/data/local/tmp/igg_pull_tmp.bin"
         code, _, _ = _run_adb(adb, ["-s", serial, "shell", f"su -c 'cp \"{remote}\" {tmp} && chmod 644 {tmp}'"], timeout=30)
         if code == 0:
@@ -304,14 +356,11 @@ class NativeBridge:
                 code2, _, _ = _run_adb(adb, ["-s", serial, "pull", tmp, str(local)], timeout=60)
                 if code2 == 0 and local.exists():
                     buf = local.read_bytes()
-                    if len(buf) > 64:
-                        return buf
-        if remote.startswith("/data/data/"):
-            pkg = remote.split("/data/data/")[1].split("/")[0]
-            rel = remote.split(f"/data/data/{pkg}/")[1]
-            code, out, _ = _run_adb(adb, ["-s", serial, "exec-out", "run-as", pkg, "cat", rel], timeout=60)
-            if code == 0 and len(out) > 64:
-                return out
+                    ok = accept(buf)
+                    if ok is not None:
+                        return ok
+        if diag is not None:
+            diag.extend(notes)
         return None
 
     def forceStop(self, serial: str) -> dict:
@@ -337,12 +386,13 @@ class NativeBridge:
                 errs.append(f"{pkg}: package not installed")
                 continue
             remote = save_path_for_package(pkg)
-            buf = self._pull_privileged(adb, serial, remote)
+            diag: list[str] = []
+            buf = self._pull_privileged(adb, serial, remote, diag)
             if buf and len(buf) >= 8:
                 _active_package[serial] = pkg
                 head = buf[: min(len(buf), 256)].decode("utf-8", "replace").lstrip("\ufeff").lstrip()
                 return {"b64": base64.b64encode(buf).decode("ascii"), "file": remote, "package": pkg, "plain": head.startswith("<")}
-            errs.append(f"{pkg}: could not read {remote}")
+            errs.append(f"{pkg}: {diag[0]}" if diag else f"{pkg}: could not read {remote}")
         raise RuntimeError("Could not read mGameInfo from emulator. Tried: " + " | ".join(errs) + ". Check Root and open Township at least once.")
 
     def pullLocalInfo(self, serial: str) -> dict:
@@ -355,11 +405,15 @@ class NativeBridge:
                 errs.append(f"{pkg}: package not installed")
                 continue
             remote = localinfo_path_for_package(pkg)
-            buf = self._pull_privileged(adb, serial, remote)
+            diag: list[str] = []
+            buf = self._pull_privileged(adb, serial, remote, diag)
             if buf and len(buf) >= 8:
                 _active_package[serial] = pkg
                 return {"b64": base64.b64encode(buf).decode("ascii"), "file": remote, "package": pkg}
-            errs.append(f"{pkg}: could not read {remote}")
+            if diag:
+                errs.append(f"{pkg}: {diag[0]}")
+            else:
+                errs.append(f"{pkg}: could not read {remote}")
         raise RuntimeError("Could not read mLocalInfo from emulator. Tried: " + " | ".join(errs) + ". Check Root and open Township at least once.")
 
     def push(self, serial: str, b64: str, options: dict | None = None) -> dict:

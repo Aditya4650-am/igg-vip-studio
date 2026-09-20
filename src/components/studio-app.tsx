@@ -2684,9 +2684,15 @@ export function StudioApp() {
                       const cityId = cityManual || friendSel || "";
                       setBusy(true);
                       try {
-                        // Refresh at most once per minute; the version/FVer stays server-side and
-                        // FetchCity receives the current metadata without exposing it in the UI log.
-                        await refreshLocalInfoCached(false);
+                        // LocalInfo only refines the version metadata; the save itself already
+                        // carries <Version>. A stale or unreadable mLocalInfo (an unrooted
+                        // emulator, say) must not block FetchCity, so this is best-effort and
+                        // any error is surfaced as a warning instead of aborting the fetch.
+                        try {
+                          await refreshLocalInfoCached(false);
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : tr("actionFailed"));
+                        }
                         applySnap(await fetchCity({ data: { token, sessionId: session.sessionId, cityId } }), catalogs?.profile);
                         toast.success(tr("fetchCity"));
                       } catch (e) {

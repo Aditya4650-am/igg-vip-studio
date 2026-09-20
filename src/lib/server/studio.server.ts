@@ -4,6 +4,7 @@ import {
   postProcessDecrypt,
 } from "./township/crypto.server";
 import { applyStatChanges, parseStats, readAnyVar, STAT_ALIASES } from "./township/vars.server";
+import { shellErrorMessage } from "./township/save-decode.server";
 import { findUnbalancedTag } from "./township/xml-edit.server";
 import { applyBarnCapacity, applyBarnItems, barnInfo } from "./township/barn.server";
 import { injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, parseProfileUnlocked } from "./township/inject.server";
@@ -95,6 +96,13 @@ function encodeSave(s: Session): string | null {
 }
 
 function openSave(buf: Buffer) {
+  const shellErr = shellErrorMessage(buf);
+  if (shellErr) {
+    throw new Error(
+      `Không đọc được mGameInfo từ máy ảo (ADB trả về lỗi shell: "${shellErr}"). ` +
+        "Hãy kiểm tra giả lập đã Root chưa và mở Township ít nhất một lần.",
+    );
+  }
   const textHead = buf.subarray(0, 80).toString("utf8");
   if (/adb:|Permission denied|failed to stat|su:|not found/i.test(textHead)) {
     throw new Error("File kéo từ ADB bị lỗi (chưa Root / sai đường dẫn), không phải mGameInfo.");

@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CHAT_EMOJI_IDS } from "./chat-emoji.server";
-import { decodeContainer, extractXml } from "./save-decode.server";
+import { decodeContainer, extractXml, shellErrorMessage } from "./save-decode.server";
 import { writeVar } from "./vars.server";
 import { attrValue, insertInsideRoot } from "./xml-edit.server";
 
@@ -430,13 +430,21 @@ export function parseFriends(xml: string): Friend[] {
  * Decode a Township LocalInfo/mGameInfo payload into UTF-8 XML.
  *
  * Device builds wrap the document in one of several containers, so this
- * dispatches on the leading byte rather than assuming the 0x79 wrapper. The
- * error message names the byte actually seen, which makes a future unsupported
- * format diagnosable instead of looking like "wrong file".
+ * dispatches on the leading byte rather than assuming the 0x79 wrapper. When a
+ * read fails the client can hand us the shell's error text instead of the file
+ * (see `shellErrorMessage`), so that is detected first and reported as a device
+ * problem rather than an unknown format.
  */
 export function decodeLocalInfoBase64(b64: string) {
   const raw = Buffer.from(String(b64 || ''), 'base64');
   if (!raw.length) throw new Error('LocalInfo rỗng');
+  const shellErr = shellErrorMessage(raw);
+  if (shellErr) {
+    throw new Error(
+      `Không đọc được mLocalInfo từ máy ảo (ADB trả về lỗi shell: "${shellErr}"). ` +
+        'Hãy kiểm tra giả lập đã Root chưa và mở Township ít nhất một lần.',
+    );
+  }
   const decoded = decodeContainer(raw);
   if (decoded) {
     const xml = extractXml(decoded);

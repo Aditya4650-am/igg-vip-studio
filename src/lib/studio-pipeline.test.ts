@@ -50,6 +50,29 @@ function cardsValue(xml: string) {
   return xml.match(/<Var name="FullCardCollections"\s+v="([^"]*)"/)?.[1] ?? "";
 }
 
+test("unban works from the save's own version when LocalInfo is unreadable", () => {
+  // The reported failure: an unrooted emulator returns the shell's error text
+  // from the mLocalInfo read, and the UI aborted FetchCity before it ran, so
+  // `applyUnban` could never find a friend. FetchCity must use the <Version>
+  // already in mGameInfo instead.
+  const { sessionId } = load();
+  const attach = () => studio.attachLocalInfoBase64(token, sessionId, Buffer.from("cat: /data/data/com.playrix.township/saves/mLocalInfo.xml: Permission denied").toString("base64"));
+  assert.throws(attach, /Root/i);
+
+  studio.attachFriendXml(token, sessionId, friendSave);
+  const out = studio.applyUnban(token, sessionId, "completo");
+  assert.equal(out.unban?.applied, true);
+  balanced(Buffer.from(out.fileB64!, "base64").toString("utf8"));
+});
+
+test("unban: a broken save read is named as a device problem, not a format", () => {
+  const blob = Buffer.from("cat: /data/data/com.playrix.township/saves/mGameInfo.xml: Permission denied");
+  assert.throws(
+    () => studio.connectLoad(token, "test-device", undefined, undefined, blob.toString("base64")),
+    /Root|ADB/i,
+  );
+});
+
 test("cards: mine is written back and the friend counter is surfaced", () => {
   const { sessionId } = load();
   assert.equal(cardsValue(ownSave), "2");

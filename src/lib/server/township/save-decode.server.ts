@@ -108,12 +108,14 @@ function decodeXor(input: Buffer) {
 /**
  * `_decode_x54` / `_decode_x53`: length-prefixed delta+xor containers.
  *
- * The declared length is masked with the key table's *first byte*, not the
- * wrapper tag — 0x77 for 0x54 and 0x42 for 0x53's own table. Using the tag byte
- * instead silently decodes only part of the payload.
+ * The declared length is masked with a fixed byte that differs per wrapper:
+ * the reference `_decode_x54` uses `key_0x54[0]` (0x77) while `_decode_x53`
+ * uses the literal tag 0x53. They are not interchangeable — using one for the
+ * other miscomputes the length and silently truncates about half of all real
+ * payloads, which reads as a corrupt save rather than a decoder bug.
  */
-function decodeX54(raw: Buffer, table: Buffer) {
-  const declared = (raw[1]! ^ table[0]!) | (raw[2]! << 8);
+function decodeX54(raw: Buffer, table: Buffer, mask: number) {
+  const declared = (raw[1]! ^ mask) | (raw[2]! << 8);
   const len = Math.min(declared, raw.length - 3);
   const data = Buffer.from(raw.subarray(3, 3 + len));
   data[0] = u8(data[0]! - 0x54);
@@ -182,6 +184,34 @@ function stripTrailingNul(buf: Buffer) {
 }
 
 /**
+ * Detect an ADB/shell error message that was mistaken for file content.
+ *
+ * `adb exec-out` merges stderr into stdout, so a failed `su -c "cat …"` returns
+ * its diagnostic instead of the file. That text is long enough to clear the
+ * client's length guard, so it reaches us as a "save". Decoding it would fail
+ * with a misleading container error (its first byte is just `c`), and the real
+ * cause — no root, or a wrong package path — stays hidden.
+ */
+const SHELL_ERROR = /^\s*(cat|cp|su|sh|run-as|mv|ls|rm|chmod|adb)\s*[:/]|\bPermission denied\b|\bNo such file or directory\b|\bnot found\b|\bOperation not permitted\b|^\s*\/system\/bin\/sh\b/i;
+
+export function shellErrorMessage(buf: Buffer): string | null {
+  const head = buf.subarray(0, 512);
+  // A real container is binary (NUL bytes, control chars); shell diagnostics are
+  // plain text. Requiring printable content keeps the phrase matches below from
+  // firing on a coincidence inside compressed data.
+  for (const b of head) {
+    if (b === 0) return null;
+    if (b < 9 || (b > 13 && b < 32)) return null;
+  }
+  const text = head.toString("utf8").replace(/^\uFEFF/, "");
+  // A document that starts with `<` is a save, whatever words it contains; the
+  // phrase matches below are for diagnostics, which never start with a tag.
+  if (text.trimStart().startsWith("<")) return null;
+  if (!SHELL_ERROR.test(text)) return null;
+  return text.split(/\r?\n/).find((l) => l.trim())?.trim().slice(0, 200) ?? "ADB read failed";
+}
+
+/**
  * Decode any container the game may have used into raw XML.
  * Returns null when the wrapper is not recognised.
  */
@@ -198,8 +228,8 @@ export function decodeContainer(buf: Buffer): Buffer | null {
       return null;
     }
   }
-  if (first === 0x54 && xorKey === 0x68) return decodeX54(buf, keyTable(KEY_0X54));
-  if (first === 0x53 && xorKey === 0x6f) return decodeX54(buf, keyTable(KEY_0X53));
+  if (first === 0x54 && xorKey === 0x68) return decodeX54(buf, keyTable(KEY_0X54), KEY_0X54.charCodeAt(0));
+  if (first === 0x53 && xorKey === 0x6f) return decodeX54(buf, keyTable(KEY_0X53), 0x53);
   if (first === 0x79 && xorKey === 0x45) return stripTrailingNul(decode0x79(buf));
   if (first === 0x7d && xorKey === 0x41) return xorOnly(buf, keyTable(KEY_0X7D));
   if (first === 0x50 && buf[1] === 0x4c && buf[2] === 0x58 && buf[3] === 0x45) return decodePlxe(buf);
