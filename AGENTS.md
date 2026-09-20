@@ -60,6 +60,24 @@ real `bver`/`fver` pair from the device's `mLocalInfo.xml` — dummy versions ge
 HTTP 403 from `township.playrix.com` (verified from a clean network: the host
 itself resolves fine, so 403 means rejected metadata, not a blocked host).
 
+## Windows client
+
+Built by `.github/workflows/build-client.yml` on a `windows-latest` runner,
+because PyInstaller cannot cross-compile from Linux. Push a `v*` tag to build
+and attach the EXE to a GitHub release; manual dispatch builds an artifact.
+
+The EXE must be windowed (`console=False` in `igg_client.spec`). A console
+build is what puts a cmd window behind the app. The workflow asserts the PE
+subsystem is 2 so a console build cannot be released. Correspondingly, in
+windowed mode PyInstaller 6.x leaves `sys.stdout`/`sys.stderr` as `None`, so
+`igg_client.py` redirects them to `os.devnull` before importing pywebview —
+bottle prints a banner on import and would otherwise crash startup.
+
+Client auto-update (`installUpdate`) fetches `CLIENT_UPDATE_URL` over plain
+HTTP with no auth. This repository is private, so a GitHub release asset URL
+will not work for auto-update; it needs a publicly reachable URL, or a
+hosted binary on the Render service.
+
 ## Deployment
 
 Render only, via `render.yaml`. This **must** be a persistent server: FetchCity
