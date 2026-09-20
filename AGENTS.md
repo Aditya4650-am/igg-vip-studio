@@ -62,7 +62,12 @@ itself resolves fine, so 403 means rejected metadata, not a blocked host).
 
 ## Deployment
 
-Render only, via `render.yaml` + `nixpacks.toml` (Nixpacks installs `python311`
-and `nodejs_22`). Set `NITRO_PRESET=node-server`. This **must** be a persistent
-server: FetchCity shells out to Python, which a serverless/edge target cannot
-provide. Do not add a serverless preset.
+Render only, via `render.yaml`. This **must** be a persistent server: FetchCity
+shells out to Python, which a serverless/edge target cannot provide. Do not add
+a serverless preset.
+
+`nixpacks.toml` is a leftover hedge and Render ignores it — Render's native
+runtimes use Cloud Native Buildpacks (Paketo), not Nixpacks. Python does not
+need declaring: `python3` ships in Render's runtime image (Debian 12 bookworm)
+at both build and deploy time, which is what `spawn("python3", …)` relies on.
+Verify that assumption on a new host before trusting FetchCity there.

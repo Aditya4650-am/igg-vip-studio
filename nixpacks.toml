@@ -1,9 +1,10 @@
 [phases.setup]
 nixPkgs = ["python311", "nodejs_22"]
 
-# Explicit install/build phases so Nixpacks never auto-runs a Python
-# pip install against a missing requirements file. The Node build is the
-# only build; Python is provided at runtime for scripts/township/*.py.
+# Kept as a hedge for Nixpacks-based builders. Render's native Node runtime
+# does not read this file (Render uses Cloud Native Buildpacks, not Nixpacks),
+# but python3 already ships in Render's runtime image, so FetchCity's
+# `spawn("python3", …)` works there without it.
 [phases.install]
 cmds = ["npm install --include=dev"]
 
