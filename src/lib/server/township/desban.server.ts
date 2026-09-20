@@ -7,6 +7,12 @@ import { decodeContainer, extractXml, shellErrorMessage } from "./save-decode.se
 import { writeVar } from "./vars.server";
 import { attrValue, insertInsideRoot } from "./xml-edit.server";
 
+// Current Township API metadata, matching the reference client's defaults in
+// scripts/township/ts_township_core.py. Used only when mLocalInfo cannot supply
+// the real values, so FetchCity is not impossible on an unreadable install.
+const DEFAULT_BVER = "35.1.0";
+const DEFAULT_FVER = "3510";
+
 const INICIAL_VARS = [
   "levelup", "money", "moneyCash", "EarnedCoins", "residents", "wheatCounter",
   "plowFieldsAchiev", "defaultOrdersCount", "match3Life", "Match3Lives_infTime",
@@ -631,9 +637,13 @@ export function fetchCityXml(cityId: string, bver = "", fver = ""): Promise<stri
   if (!target || target.length < 4 || /\s/.test(target)) {
     return Promise.reject(new Error("City ID không hợp lệ"));
   }
-  if (!bver || !fver) {
-    return Promise.reject(new Error("Chưa có game version/FVer. Hãy Refresh LocalInfo trước khi Fetch City."));
-  }
+  // A real bver/fver pair keeps the request identical to the live client, and
+  // LocalInfo supplies it when readable. When it is missing we still try with
+  // the current known-good pair rather than refusing: FetchCity was otherwise
+  // impossible on any install whose mLocalInfo cannot be read, which also
+  // blocked unban (no friend) and the card copy that depends on it.
+  const useBver = bver || DEFAULT_BVER;
+  const useFver = fver || DEFAULT_FVER;
 
   return new Promise((resolve, reject) => {
     const script = scriptPath();
@@ -659,7 +669,7 @@ export function fetchCityXml(cityId: string, bver = "", fver = ""): Promise<stri
       }
 
       let out = "";
-      const py = spawn(bin, [script, target, bver, fver], {
+      const py = spawn(bin, [script, target, useBver, useFver], {
         cwd: dirname(script),
         timeout: 90000,
         windowsHide: true,

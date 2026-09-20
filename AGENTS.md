@@ -67,10 +67,32 @@ which the game's loader rejects).
 ## Fetch City / Unban
 
 `fetchCityXml()` spawns `scripts/township/fetch_city.py`, which prints a single
-JSON object on stdout: `{ok: true, xml_b64}` or `{ok: false, error}`. It needs a
-real `bver`/`fver` pair from the device's `mLocalInfo.xml` — dummy versions get
-HTTP 403 from `township.playrix.com` (verified from a clean network: the host
-itself resolves fine, so 403 means rejected metadata, not a blocked host).
+JSON object on stdout: `{ok: true, xml_b64}` or `{ok: false, error}`. It prefers
+the real `bver`/`fver` pair from the device's `mLocalInfo.xml` and falls back to
+the reference client's current defaults (`35.1.0`/`3510`) when LocalInfo is
+unreadable. It must not hard-reject a missing version: that guard made FetchCity
+impossible on installs whose mLocalInfo cannot be read, and because unban and the
+card-copy feature both need a friend city, one unreadable file blanked three
+features at once. Dummy or stale versions get HTTP 403 from
+`township.playrix.com` (verified from a clean network: the host itself resolves
+fine, so 403 means rejected metadata, not a blocked host).
+
+## Device paths
+
+The save is NOT always at `/data/data/<pkg>/saves/`. Layouts differ by build
+(`saves/`, `files/`, package root) and the usable root differs too
+(`/data/data`, `/data/user/0`, `/data/user_de/0`, and the public
+`/sdcard/Android/data/<pkg>/files`). Assuming one path produces
+`cat: …: No such file or directory` on a rooted device where the file plainly
+exists somewhere else. The client therefore resolves the path on the device
+(`_find_on_device` → `find … -name mGameInfo.xml`) and caches it per
+`(serial, package, filename)` so `push` writes back to the folder the `pull`
+came from. Static candidates remain as a fallback for unrooted devices, where
+`find` cannot read the private roots.
+
+`adb exec-out` is a raw pipe: a failed remote command still exits 0 and puts its
+stderr on stdout, so error text must never be accepted as file content (see
+`_is_probably_file`).
 
 ## Windows client
 

@@ -48,17 +48,48 @@ DEFAULT_SERVER_URL = "https://igg-vip-studio-07u9.onrender.com"
 # Global is preferred; the Vietnam build remains a supported fallback.
 GAME_PACKAGES = ["com.playrix.township", "com.playrix.township.vn"]
 
-# The REAL save lives in the protected /data/data/<pkg>/saves/ folder (needs
-# root via su). The public /sdcard/Android/data path is a red herring that made
-# the tool read an empty file and report "ADB error / not connected".
+SAVE_FILE = "mGameInfo.xml"
+LOCAL_INFO_FILE = "mLocalInfo.xml"
+
+# The save lives in the package's private storage and needs root via `su`, but
+# the exact folder differs between game builds (`saves/`, `files/`, or the
+# package root) and between the global and Vietnam packages. A single hardcoded
+# path silently fails with "No such file or directory" on installs that use a
+# different layout, so the real path is discovered on the device (see
+# `_find_on_device`) and these are only the fallbacks tried when discovery fails.
+_SAVE_SUBDIRS = ("saves", "files", "app_data", "")
+
+_SAVE_BASES = (
+    "/data/data/{pkg}",
+    "/data/user/0/{pkg}",
+    "/data/user_de/0/{pkg}",
+    "/sdcard/Android/data/{pkg}/files",
+    "/storage/emulated/0/Android/data/{pkg}/files",
+)
+
+
+def candidate_paths_for_package(pkg: str, filename: str) -> list[str]:
+    out: list[str] = []
+    for base in _SAVE_BASES:
+        root = base.format(pkg=pkg)
+        for sub in _SAVE_SUBDIRS:
+            path = f"{root}/{sub}/{filename}" if sub else f"{root}/{filename}"
+            if path not in out:
+                out.append(path)
+    return out
+
+
 def save_path_for_package(pkg: str) -> str:
     return f"/data/data/{pkg}/saves/{SAVE_FILE}"
+
 
 def localinfo_path_for_package(pkg: str) -> str:
     return f"/data/data/{pkg}/saves/{LOCAL_INFO_FILE}"
 
-SAVE_FILE = "mGameInfo.xml"
-LOCAL_INFO_FILE = "mLocalInfo.xml"
+
+# Real device paths discovered per (serial, package, filename), so push writes
+# back to exactly where the pull came from.
+_PATH_CACHE: dict[tuple[str, str, str], str] = {}
 
 # Track which package each device actually uses, so push goes back to the same
 # package the pull came from (v1.15 behavior).
@@ -252,6 +283,61 @@ def _is_probably_file(buf: bytes) -> bool:
     return head.lstrip(b"\xef\xbb\xbf \t\r\n").startswith(b"<")
 
 
+def _looks_like_shell_error(buf: bytes) -> bool:
+    """True when `buf` is shell diagnostics rather than file content."""
+    if not buf:
+        return False
+    if len(buf) > 64 and _is_probably_file(buf):
+        return False
+    text = buf[:200].decode("utf-8", "replace")
+    return bool(_SHELL_ERR_RE.search(text))
+
+
+_SHELL_ERR_RE = __import__("re").compile(
+    r"(permission denied|no such file|not found|is a directory|read-only"
+    r"|operation not permitted|inaccessible|unknown option|not debuggable)",
+    __import__("re").I,
+)
+
+
+def _find_on_device(adb: str, serial: str, pkg: str, filename: str) -> str | None:
+    """Ask the device where `filename` actually lives for this package.
+
+    Install layouts differ (`saves/`, `files/`, or the package root) and so do
+    the usable roots (`/data/data` vs `/data/user/0`), so a hardcoded path fails
+    on some builds with "No such file or directory". `find` needs root, and on
+    an unrooted device the whole call fails, in which case the caller falls back
+    to the static candidate list.
+    """
+    roots = " ".join(
+        base.format(pkg=pkg)
+        for base in (
+            "/data/data/{pkg}",
+            "/data/user/0/{pkg}",
+            "/data/user_de/0/{pkg}",
+            "/sdcard/Android/data/{pkg}",
+            "/storage/emulated/0/Android/data/{pkg}",
+        )
+    )
+    script = (
+        f"find {roots} -maxdepth 3 -name {filename} -type f 2>/dev/null | head -n 5"
+    )
+    for args in (
+        ["-s", serial, "exec-out", "su", "-c", script],
+        ["-s", serial, "shell", f"su -c '{script}'"],
+    ):
+        code, out, _ = _run_adb(adb, args, timeout=25)
+        if code != 0 or not out:
+            continue
+        if _looks_like_shell_error(out):
+            continue
+        for line in out.decode("utf-8", "replace").splitlines():
+            path = line.strip().lstrip("\ufeff")
+            if path.startswith("/") and path.endswith(filename):
+                return path
+    return None
+
+
 class NativeBridge:
     """Exposed to the page as window.iggNative (method names match the app)."""
 
@@ -376,6 +462,26 @@ class NativeBridge:
             errs.append(f"{pkg}: {err.decode('utf-8','replace').strip()}")
         return {"ok": False, "package": "", "error": " | ".join(errs)}
 
+    def _read_candidates(self, adb: str, serial: str, pkg: str, filename: str, diag: list[str]) -> tuple[str, bytes] | None:
+        """Read `filename` for `pkg`, discovering the real path on the device.
+
+        Returns the path that worked together with its bytes, or None. The
+        discovered path is cached per (serial, pkg, filename) so a later push
+        writes back to the same location.
+        """
+        known = _PATH_CACHE.get((serial, pkg, filename))
+        discovered = _find_on_device(adb, serial, pkg, filename)
+        ordered: list[str] = []
+        for path in [discovered, known, *candidate_paths_for_package(pkg, filename)]:
+            if path and path not in ordered:
+                ordered.append(path)
+        for remote in ordered:
+            buf = self._pull_privileged(adb, serial, remote, diag)
+            if buf and len(buf) >= 8:
+                _PATH_CACHE[(serial, pkg, filename)] = remote
+                return remote, buf
+        return None
+
     def pull(self, serial: str) -> dict:
         adb = _find_adb()
         if not adb:
@@ -385,15 +491,18 @@ class NativeBridge:
             if not self._is_pkg_installed(adb, serial, pkg):
                 errs.append(f"{pkg}: package not installed")
                 continue
-            remote = save_path_for_package(pkg)
             diag: list[str] = []
-            buf = self._pull_privileged(adb, serial, remote, diag)
-            if buf and len(buf) >= 8:
+            found = self._read_candidates(adb, serial, pkg, SAVE_FILE, diag)
+            if found:
+                remote, buf = found
                 _active_package[serial] = pkg
                 head = buf[: min(len(buf), 256)].decode("utf-8", "replace").lstrip("\ufeff").lstrip()
                 return {"b64": base64.b64encode(buf).decode("ascii"), "file": remote, "package": pkg, "plain": head.startswith("<")}
-            errs.append(f"{pkg}: {diag[0]}" if diag else f"{pkg}: could not read {remote}")
-        raise RuntimeError("Could not read mGameInfo from emulator. Tried: " + " | ".join(errs) + ". Check Root and open Township at least once.")
+            errs.append(f"{pkg}: {diag[0]}" if diag else f"{pkg}: could not read {SAVE_FILE} in any known folder")
+        raise RuntimeError(
+            "Could not read mGameInfo from emulator. Tried: " + " | ".join(errs)
+            + ". Check Root and open Township at least once."
+        )
 
     def pullLocalInfo(self, serial: str) -> dict:
         adb = _find_adb()
@@ -404,17 +513,17 @@ class NativeBridge:
             if not self._is_pkg_installed(adb, serial, pkg):
                 errs.append(f"{pkg}: package not installed")
                 continue
-            remote = localinfo_path_for_package(pkg)
             diag: list[str] = []
-            buf = self._pull_privileged(adb, serial, remote, diag)
-            if buf and len(buf) >= 8:
+            found = self._read_candidates(adb, serial, pkg, LOCAL_INFO_FILE, diag)
+            if found:
+                remote, buf = found
                 _active_package[serial] = pkg
                 return {"b64": base64.b64encode(buf).decode("ascii"), "file": remote, "package": pkg}
-            if diag:
-                errs.append(f"{pkg}: {diag[0]}")
-            else:
-                errs.append(f"{pkg}: could not read {remote}")
-        raise RuntimeError("Could not read mLocalInfo from emulator. Tried: " + " | ".join(errs) + ". Check Root and open Township at least once.")
+            errs.append(f"{pkg}: {diag[0]}" if diag else f"{pkg}: could not read {LOCAL_INFO_FILE} in any known folder")
+        raise RuntimeError(
+            "Could not read mLocalInfo from emulator. Tried: " + " | ".join(errs)
+            + ". Check Root and open Township at least once."
+        )
 
     def push(self, serial: str, b64: str, options: dict | None = None) -> dict:
         options = options or {}
@@ -441,8 +550,10 @@ class NativeBridge:
                 raise RuntimeError("adb push failed: " + err.decode("utf-8", "replace").strip())
             errs: list[str] = []
             for pkg in self._pkgs_for(serial):
-                xml_path = save_path_for_package(pkg)
-                bak_path = xml_path.replace("/mGameInfo.xml", "/mGameInfo.bak")
+                # Write back to where the pull actually found the file; a
+                # discovered path beats the static default, which may not exist.
+                xml_path = _PATH_CACHE.get((serial, pkg, SAVE_FILE)) or save_path_for_package(pkg)
+                bak_path = xml_path.replace(f"/{SAVE_FILE}", f"/{SAVE_FILE[:-4]}.bak")
                 shell = f"su -c 'cp \"{tmp}\" \"{xml_path}\"; cp \"{tmp}\" \"{bak_path}\"; chmod 600 \"{xml_path}\" \"{bak_path}\"'"
                 code2, out2, err2 = _run_adb(adb, ["-s", serial, "shell", shell], timeout=30)
                 combined = (out2 + err2).decode("utf-8", "replace").strip()

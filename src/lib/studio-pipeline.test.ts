@@ -161,6 +161,11 @@ test("fetch city: validates input before touching python", async () => {
   const { sessionId } = load();
   await assert.rejects(() => studio.fetchFriendCity(token, sessionId, "bad"), /City ID/i);
 
+  // A save without <Version> must NOT hard-block FetchCity: that was the
+  // "Chưa có game version/FVer" dead end, and it also blocked unban (no friend)
+  // and the card copy that needs a friend city. With no version available the
+  // request now proceeds using the reference client's default pair, so any
+  // failure must come from the network/python stage, never a version guard.
   const noVersion = studio.connectLoad(
     token,
     "test-device",
@@ -168,8 +173,11 @@ test("fetch city: validates input before touching python", async () => {
     undefined,
     Buffer.from("<Global><AWS cityId='owncity01'/></Global>").toString("base64"),
   );
-  await assert.rejects(
-    () => studio.fetchFriendCity(token, noVersion.sessionId, "owncity01"),
-    /version|FVer|LocalInfo/i,
-  );
+  const err = await studio
+    .fetchFriendCity(token, noVersion.sessionId, "owncity01")
+    .then(() => null)
+    .catch((e: Error) => e.message);
+  if (err !== null) {
+    assert.doesNotMatch(err, /version|FVer|LocalInfo/i, "version guard must no longer block FetchCity");
+  }
 });
