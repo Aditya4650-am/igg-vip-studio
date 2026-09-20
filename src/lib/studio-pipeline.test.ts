@@ -177,7 +177,11 @@ test("fetch city: validates input before touching python", async () => {
     .fetchFriendCity(token, noVersion.sessionId, "owncity01")
     .then(() => null)
     .catch((e: Error) => e.message);
+  // Match the guard's own wording, not the substring "version": downstream
+  // messages legitimately talk about versions (a 403 is rejected build
+  // metadata), and forbidding the word made this test fail for the wrong
+  // reason once the fallback pair was actually exercised against the API.
   if (err !== null) {
-    assert.doesNotMatch(err, /version|FVer|LocalInfo/i, "version guard must no longer block FetchCity");
+    assert.doesNotMatch(err, /missing game version\/FVer|refresh LocalInfo first/i, "version guard must no longer block FetchCity");
   }
 });

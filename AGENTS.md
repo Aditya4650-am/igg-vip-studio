@@ -69,13 +69,19 @@ which the game's loader rejects).
 `fetchCityXml()` spawns `scripts/township/fetch_city.py`, which prints a single
 JSON object on stdout: `{ok: true, xml_b64}` or `{ok: false, error}`. It prefers
 the real `bver`/`fver` pair from the device's `mLocalInfo.xml` and falls back to
-the reference client's current defaults (`35.1.0`/`3510`) when LocalInfo is
-unreadable. It must not hard-reject a missing version: that guard made FetchCity
-impossible on installs whose mLocalInfo cannot be read, and because unban and the
-card-copy feature both need a friend city, one unreadable file blanked three
-features at once. Dummy or stale versions get HTTP 403 from
-`township.playrix.com` (verified from a clean network: the host itself resolves
-fine, so 403 means rejected metadata, not a blocked host).
+`DEFAULT_BVER`/`DEFAULT_FVER` when LocalInfo is unreadable. It must not
+hard-reject a missing version: that guard made FetchCity impossible on installs
+whose mLocalInfo cannot be read, and because unban and the card-copy feature both
+need a friend city, one unreadable file blanked three features at once.
+
+That fallback has to be a version the API still accepts, and the floor moves as
+Township ships. Measured on 2026-09-20: `35.1.0`/`3510` and `36.0.0`/`3600` are
+rejected with HTTP 403; `37.0.0`/`3700` and above are accepted and answer
+`{"result": null}` for an unknown city. A fallback below the floor produces the
+exact 403 that a missing LocalInfo produced, so the fix looks like it changed
+nothing. When FetchCity 403s, re-probe the floor before touching anything else.
+The host itself is reachable (a bogus request gets 401 `Wrong parameter` and the
+response comes via CloudFront), so 403 is rejected metadata, not a blocked host.
 
 ## Device paths
 

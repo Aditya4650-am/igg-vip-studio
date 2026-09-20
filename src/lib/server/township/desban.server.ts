@@ -10,8 +10,13 @@ import { attrValue, insertInsideRoot } from "./xml-edit.server";
 // Current Township API metadata, matching the reference client's defaults in
 // scripts/township/ts_township_core.py. Used only when mLocalInfo cannot supply
 // the real values, so FetchCity is not impossible on an unreadable install.
-const DEFAULT_BVER = "35.1.0";
-const DEFAULT_FVER = "3510";
+// Acceptance floor measured against township.playrix.com: bver 36.0.0 and below
+// are rejected with HTTP 403, 37.0.0 and above are accepted and answer
+// "no data" for an unknown city. Keep this in step with current Township
+// releases; a fallback below the floor reproduces the same 403 the missing
+// LocalInfo caused, which makes the fix look like it did nothing.
+const DEFAULT_BVER = "39.0.3";
+const DEFAULT_FVER = "3903";
 
 const INICIAL_VARS = [
   "levelup", "money", "moneyCash", "EarnedCoins", "residents", "wheatCounter",

@@ -80,7 +80,14 @@ def main() -> None:
     except Exception as e:
         msg = str(e)
         if "HTTP 403" in msg:
-            msg = "FetchCity HTTP 403: Forbidden"
+            # 403 is metadata rejection, not a blocked host: older build versions
+            # are refused outright. Say so, because "Forbidden" alone reads as a
+            # network or account problem and sends people the wrong way.
+            msg = (
+                "FetchCity HTTP 403: Forbidden — the game build version was rejected. "
+                "Refresh LocalInfo so the real version is used; if it is already current, "
+                "this build is below the version the server still accepts."
+            )
         print(json.dumps({"ok": False, "error": msg[:400]}))
         sys.exit(2)
 

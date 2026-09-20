@@ -11,8 +11,8 @@ Standalone (no Django, no pytz). Drop in your project, then:
     xml_bytes, json_meta = fetch_city(
         own_city_id="bddoYnzMZO",      # taken from <AWS cityId="..."/> in LocalInfo.xml
         target_city_id="pWv8ov7W56",   # the friend's city_id you want to fetch
-        bver="35.1.0",                 # from <Version version="..."/>
-        fver="3510",                   # from <Version FVer="..."/>
+        bver="39.0.3",                 # from <Version version="..."/>
+        fver="3903",                   # from <Version FVer="..."/>
         city_ver=0,                    # 0 on first fetch (server returns latest)
     )
 
@@ -2104,8 +2104,8 @@ def _decrypt_response(body: bytes, ts_id: str) -> bytes:
 def fetch_city(
     own_city_id: str,
     target_city_id: str,
-    bver: str = "35.1.0",
-    fver: str = "3510",
+    bver: str = "39.0.3",
+    fver: str = "3903",
     city_ver: int = 0,
     timeout: float = 20.0,
 ) -> Tuple[bytes, dict]:
@@ -2198,7 +2198,7 @@ def parse_local_info(local_info_xml: Union[str, bytes]) -> dict:
     else:
         s = local_info_xml
 
-    out = {"city_id": "", "token": "", "bver": "35.1.0", "fver": "3510"}
+    out = {"city_id": "", "token": "", "bver": "39.0.3", "fver": "3903"}
 
     aws = _re.search(r"<AWS\b([^>]*)>", s)
     if aws:
