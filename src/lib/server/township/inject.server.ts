@@ -1,15 +1,20 @@
 import { writeVar } from "./vars.server";
 import { SKINS_CATALOG } from "./skins-catalog.server";
+import { insertInsideRoot } from "./xml-edit.server";
 
 function asText(xml: string | Buffer) {
   return typeof xml === "string" ? xml : xml.toString("utf8");
 }
 
 function insertBeforeRoot(xml: string, insert: string) {
-  for (const closer of ["</Global>", "</root>", "</Root>", "</ROOT>"]) {
-    if (xml.includes(closer)) return xml.replace(closer, insert + closer);
-  }
-  return xml + insert;
+  return insertInsideRoot(xml, insert);
+}
+
+/** Set an attribute on an open-tag attribute string, preserving all others. */
+function putAttr(attrs: string, name: string, value: string) {
+  const re = new RegExp(`(\\s${name}\\s*=\\s*)("[^"]*"|'[^']*'|[^\\s/>]+)`, "i");
+  if (re.test(attrs)) return attrs.replace(re, `$1"${value}"`);
+  return `${attrs.replace(/\s+$/, "")} ${name}="${value}"`;
 }
 
 export function injectItems(xml: string, qtyMap: Record<string, number>) {
@@ -43,18 +48,16 @@ export function injectItems(xml: string, qtyMap: Record<string, number>) {
 }
 
 export function injectSeason(xml: string, premium = "1", score = "1002") {
-  let text = asText(xml);
-  const pat = /<SeasonTicket\b([^>]*?)(\/?)>/i;
-  const m = text.match(pat);
+  const text = asText(xml);
+  const m = /<SeasonTicket\b([^>]*?)(\/?)>/i.exec(text);
   if (m && m.index !== undefined) {
-    let attrs = m[1] ?? "";
-    attrs = /\bpremium\s*=/i.test(attrs)
-      ? attrs.replace(/\bpremium\s*=\s*"[^"]*"/i, `premium="${premium}"`)
-      : `${attrs.trimEnd()} premium="${premium}"`;
-    attrs = /\bscore\s*=/i.test(attrs)
-      ? attrs.replace(/\bscore\s*=\s*"[^"]*"/i, `score="${score}"`)
-      : `${attrs.trimEnd()} score="${score}"`;
-    const tag = `<SeasonTicket${attrs} />`.replace(/\s+/g, " ").replace(" />", "/>");
+    // A SeasonTicket may carry per-level child elements. Rewriting only the
+    // open tag keeps those children intact; emitting a self-closing tag in
+    // front of the old `</SeasonTicket>` would corrupt the document.
+    const selfClosing = m[2] === "/";
+    let attrs = putAttr(m[1] ?? "", "premium", premium);
+    attrs = putAttr(attrs, "score", score);
+    const tag = selfClosing ? `<SeasonTicket${attrs}/>` : `<SeasonTicket${attrs}>`;
     return text.slice(0, m.index) + tag + text.slice(m.index + m[0].length);
   }
   return insertBeforeRoot(text, `<SeasonTicket premium="${premium}" score="${score}"/>`);
@@ -269,36 +272,58 @@ export function injectRegata(xml: string, nTasks = 105, score = 135) {
     /(<regata\b[^>]*>[\s\S]*?<\/regata\s*>)/i,
   ];
   let m: RegExpMatchArray | null = null;
-  for (const pat of patterns) { m = text.match(pat); if (m) break; }
+  for (const pat of patterns) {
+    m = text.match(pat);
+    if (m) break;
+  }
 
   if (!m || m.index === undefined) {
     let user = "0";
     for (const name of ["SaveId", "userId", "UserId", "cityId", "PlayerId"]) {
-      const r = text.match(new RegExp(`<Var\\b[^>]*\\bname="${name}"[^>]*\\bv="([^"]*)"`, "i")) ??
-                text.match(new RegExp(`<Var\\b[^>]*\\bv="([^"]*)"[^>]*\\bname="${name}"`, "i"));
-      if (r?.[1]?.trim()) { user = r[1].trim(); break; }
+      const r =
+        text.match(new RegExp(`<Var\\b[^>]*\\bname="${name}"[^>]*\\bv="([^"]*)"`, "i")) ??
+        text.match(new RegExp(`<Var\\b[^>]*\\bv="([^"]*)"[^>]*\\bname="${name}"`, "i"));
+      if (r?.[1]?.trim()) {
+        user = r[1].trim();
+        break;
+      }
     }
-    const block = `<Regata user="${user}"></Regata>`;
-    const close = text.search(/<\/(?:root|Root|ROOT)\s*>/);
-    text = close >= 0 ? text.slice(0, close) + block + text.slice(close) : text + block;
+    // Insert a fresh block inside the root, then operate on it in place. The
+    // previous version appended at EOF when no root closer matched, which left
+    // the new element outside the document (and unreachable by the game).
+    const block = `<Regata user="${user}"><FreeTask id="match3_1"/></Regata>`;
+    text = insertBeforeRoot(text, block);
     m = text.match(patterns[0]);
+    if (!m || m.index === undefined) {
+      // The insert did not produce a matchable open/close pair; fall back to a
+      // self-closing element rather than emitting mismatched tags.
+      return insertBeforeRoot(text, `<Regata user="${user}"/>`);
+    }
   }
-  if (!m || m.index === undefined) throw new Error("Regata block not found and could not be created");
 
   const block = m[1]!;
   const user = block.match(/\buser="([^"]*)"/i)?.[1] ?? "0";
-  let freeIds = [...block.matchAll(/<FreeTask\b[^>]*\bid="([^"]*)"/gi)].map((x) => x[1]!);
-  if (!freeIds.length) freeIds = [...text.matchAll(/<FreeTask\b[^>]*\bid="([^"]*)"/gi)].map((x) => x[1]!);
+  // FreeTask ids come from inside the block; when the block has too few (or
+  // none), top up from the document so every generated MyOldTask gets a
+  // distinct id. Repeating one id across 105 tasks makes them collide.
+  const freeIds = [...block.matchAll(/<FreeTask\b[^>]*\bid="([^"]*)"/gi)].map((x) => x[1]!);
+  for (const x of text.matchAll(/<FreeTask\b[^>]*\bid="([^"]*)"/gi)) {
+    if (!freeIds.includes(x[1]!)) freeIds.push(x[1]!);
+  }
 
   let clean = block.replace(/<MyOldTask\b[^>]*\/>/gi, "").replace(/<MyOldTask\b[^>]*>[\s\S]*?<\/MyOldTask\s*>/gi, "");
   const baseTime = Math.floor(Date.now() / 1000) + 3600;
   const tasks: string[] = [];
   for (let i = 0; i < nTasks; i++) {
-    const tid = freeIds[i] ?? `match3_${i}`;
+    const tid = freeIds[i] ?? `match3_${i + 1}`;
     const endTime = baseTime + i * 90;
-    tasks.push(`<MyOldTask id="${tid}" type="event_order" eventType="Match3" target="${tid}" user="${user}" num="${i + 1}" ver="1" takenCounter="1" score="${score}" realEndTime="${endTime}"/>`);
+    tasks.push(
+      `<MyOldTask id="${tid}" type="event_order" eventType="Match3" target="${tid}" user="${user}" num="${i + 1}" ver="1" takenCounter="1" score="${score}" realEndTime="${endTime}"/>`,
+    );
   }
-  clean = clean.replace(/<\/Regatt?a\s*>/i, `${tasks.join("")}<\/Regata>`);
+  if (tasks.length) {
+    clean = clean.replace(/<\/(Regata|Regatta|regata)\s*>/i, `${tasks.join("")}</$1>`);
+  }
   text = text.slice(0, m.index) + clean + text.slice(m.index + m[0].length);
   return text;
 }

@@ -1,0 +1,133 @@
+import { strict as assert } from "node:assert";
+import { test } from "node:test";
+
+process.env.IGG_VIP_MASTER = "test-master-key-with-enough-length";
+process.env.IGG_VIP_OWNER = "IGG-OWNER-TESTKEY";
+process.env.IGG_VIP_URL = "";
+
+const studio = await import("./server/studio.server.ts");
+const { verifyLicenseKey } = await import("./server/license.server.ts");
+const { findUnbalancedTag } = await import("./server/township/xml-edit.server.ts");
+
+const crdId = studio.catalogs().fields.find((f) => f.key === "crd")!.id;
+const { token } = verifyLicenseKey("VIP-DEMO", "TEST-DEVICE-0001");
+
+const ownSave = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  "<Global>",
+  '<Var name="FullCardCollections" v="2" t="i"/>',
+  '<Var name="StartTutorialFinished" v="0" t="i"/>',
+  '<Var name="levelup" v="1" t="i"/>',
+  '<Version version="35.1.0" FVer="3510"/>',
+  '<AWS cityId="owncity01"/>',
+  "</Global>",
+].join("");
+
+const friendSave = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  "<Global>",
+  '<Var name="FullCardCollections" v="7" t="i"/>',
+  '<Var name="levelup" v="42" t="i"/>',
+  '<Var name="StartTutorialFinished" v="1" t="i"/>',
+  "</Global>",
+].join("");
+
+function load() {
+  return studio.connectLoad(
+    token,
+    "test-device",
+    undefined,
+    undefined,
+    Buffer.from(ownSave).toString("base64"),
+  );
+}
+
+function balanced(xml: string) {
+  assert.equal(findUnbalancedTag(xml), null, `malformed XML:\n${xml}`);
+}
+
+function cardsValue(xml: string) {
+  return xml.match(/<Var name="FullCardCollections"\s+v="([^"]*)"/)?.[1] ?? "";
+}
+
+test("cards: mine is written back and the friend counter is surfaced", () => {
+  const { sessionId } = load();
+  assert.equal(cardsValue(ownSave), "2");
+
+  const withFriend = studio.attachFriendXml(token, sessionId, friendSave);
+  assert.equal(withFriend.friendCards, "7");
+
+  const saved = studio.applySave({ token, sessionId, stats: { [crdId]: "250" } });
+  assert.ok(saved.parts.includes("stats"));
+  balanced(saved.xml);
+  assert.equal(cardsValue(saved.xml), "250");
+  assert.equal(saved.stats[crdId], "250");
+});
+
+test("season pass: applies once and stays balanced on repeat", () => {
+  const { sessionId } = load();
+  const first = studio.applySave({ token, sessionId, season: true });
+  assert.ok(first.parts.includes("season-pass"));
+  balanced(first.xml!);
+  assert.equal(first.xml!.match(/<SeasonTicket\b/g)?.length, 1);
+
+  const second = studio.applySeason(token, sessionId);
+  balanced(second.xml!);
+  assert.equal(second.xml!.match(/<SeasonTicket\b/g)?.length, 1, "must not duplicate");
+  assert.deepEqual(second.season, { premium: true, score: 1002 });
+});
+
+test("decoration: stash is created inside root and is not duplicated", () => {
+  const { sessionId } = load();
+  const first = studio.applySave({ token, sessionId, decorMaxAll: true, decorQty: 12 });
+  assert.ok(first.parts.includes("decor-max-all(12)"));
+  balanced(first.xml!);
+  assert.ok(
+    first.xml!.indexOf("</BuildingsStash>") < first.xml!.indexOf("</Global>"),
+    "stash must close before the root",
+  );
+
+  const second = studio.applySave({ token, sessionId, decorMaxAll: true, decorQty: 12 });
+  balanced(second.xml!);
+  assert.equal(second.xml!.match(/<BuildingsStash>/g)?.length, 1, "must not duplicate the stash");
+});
+
+test("unban: restore applies friend stats and re-encodes a valid save", () => {
+  const { sessionId } = load();
+  studio.attachFriendXml(token, sessionId, friendSave);
+  const out = studio.applyUnban(token, sessionId, "completo");
+  assert.equal(out.unban?.applied, true);
+  const xml = Buffer.from(out.fileB64!, "base64").toString("utf8");
+  assert.match(xml, /<Var name="levelup"\s+v="42"/);
+  balanced(xml);
+
+  // The pushed file must load back into a fresh session without loss.
+  const reloaded = studio.connectLoad(token, "test-device", undefined, undefined, out.fileB64!);
+  assert.ok(reloaded.hasXml);
+});
+
+test("regatta: repeated apply keeps XML balanced", () => {
+  const { sessionId } = load();
+  const first = studio.applyRegatta(token, sessionId);
+  balanced(first.xml!);
+  const second = studio.applyRegatta(token, sessionId);
+  balanced(second.xml!);
+  assert.ok((second.xml!.match(/<Regata\b/g)?.length ?? 0) >= 1);
+});
+
+test("fetch city: validates input before touching python", async () => {
+  const { sessionId } = load();
+  await assert.rejects(() => studio.fetchFriendCity(token, sessionId, "bad"), /City ID/i);
+
+  const noVersion = studio.connectLoad(
+    token,
+    "test-device",
+    undefined,
+    undefined,
+    Buffer.from("<Global><AWS cityId='owncity01'/></Global>").toString("base64"),
+  );
+  await assert.rejects(
+    () => studio.fetchFriendCity(token, noVersion.sessionId, "owncity01"),
+    /version|FVer|LocalInfo/i,
+  );
+});

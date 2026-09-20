@@ -3,7 +3,8 @@ import {
   decryptStream,
   postProcessDecrypt,
 } from "./township/crypto.server";
-import { applyStatChanges, parseStats, readVar } from "./township/vars.server";
+import { applyStatChanges, parseStats, readAnyVar, STAT_ALIASES } from "./township/vars.server";
+import { findUnbalancedTag } from "./township/xml-edit.server";
 import { applyBarnCapacity, applyBarnItems, barnInfo } from "./township/barn.server";
 import { injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, parseProfileUnlocked } from "./township/inject.server";
 import {
@@ -322,6 +323,8 @@ export function applySave(p: SavePayload) {
   s.profileUnlocked = cloakProfileUnlocked(parseProfileUnlocked(s.rawXml));
   s.barn = barnInfo(s.rawXml);
   if (!parts.length) throw new Error("Nothing selected");
+  const malformed = findUnbalancedTag(s.rawXml);
+  if (malformed) throw new Error(`Save XML không hợp lệ (${malformed}) — hủy để tránh hỏng file`);
   s.log.push(`Save applied: ${parts.join(", ")}`);
   return { ...snapshot(s), parts, xml: s.rawXml, fileB64: encodeSave(s) };
 }
@@ -365,7 +368,7 @@ export async function fetchFriendCity(token: string, sessionId: string, cityId: 
   const xml = await fetchCityXml(cityId.trim(), s.ownMeta.bver, s.ownMeta.fver);
   s.friendXml = xml;
   s.friendCity = cityId.trim();
-  s.friendCards = readVar(xml, "FullCardCollections");
+  s.friendCards = readAnyVar(xml, STAT_ALIASES.crd!);
   s.log.push(`Friend city loaded successfully`);
   return snapshot(s);
 }
@@ -375,6 +378,8 @@ export function applyUnban(token: string, sessionId: string, mode: "inicial" | "
   if (!s.friendXml) throw new Error("FetchCity friend trước khi restore");
   if (!s.rawXml) throw new Error("Load mGameInfo trước");
   s.rawXml = applyDesban(s.rawXml, s.friendXml, mode);
+  const malformed = findUnbalancedTag(s.rawXml);
+  if (malformed) throw new Error(`Unban tạo XML không hợp lệ (${malformed}) — hủy để tránh hỏng file`);
   s.stats = parseStats(s.rawXml);
   s.profileUnlocked = cloakProfileUnlocked(parseProfileUnlocked(s.rawXml));
   s.barn = barnInfo(s.rawXml);
@@ -389,7 +394,7 @@ export function attachFriendXml(token: string, sessionId: string, xml: string) {
   if (!text.includes("<")) throw new Error("File bạn không phải XML city");
   s.friendXml = text;
   s.friendCity = parseOwnMeta(text).cityId || "uploaded";
-  s.friendCards = readVar(text, "FullCardCollections");
+  s.friendCards = readAnyVar(text, STAT_ALIASES.crd!);
   s.log.push(`Friend XML uploaded (${text.length} bytes)`);
   return snapshot(s);
 }

@@ -170,7 +170,10 @@ export default defineConfig(({ command, isPreview }) => ({
     ...(command === "build" || isPreview
       ? [
           nitro({
-            preset: process.env.NITRO_PRESET || "vercel",
+            // Render runs a persistent Node server (nixpacks installs Python for
+            // scripts/township/fetch_city.py). A serverless preset would drop that
+            // runtime, so default to node-server rather than a serverless preset.
+            preset: process.env.NITRO_PRESET || "node-server",
             // Auto-registers server/middleware/* (the PWA install page +
             // manifest + head-tag middleware). Nitro v3 defaults serverDir to
             // false, so removing this silently unwires /?install=1 on deploys.
