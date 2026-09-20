@@ -38,7 +38,7 @@ if sys.stderr is None:
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.2"
 
 # Where the app UI comes from. Override with env IGG_VIP_URL or
 # %APPDATA%\IGG-VIP-Studio\server.txt
