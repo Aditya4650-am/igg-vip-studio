@@ -4,10 +4,13 @@ name: Build Windows client
 # from Linux and needs the Windows WebView2 stack. GitHub's windows runner is
 # the only place this can be produced.
 on:
+  # Tags are the release path; manual dispatch covers ad-hoc builds. Deliberately
+  # no paths filter: when both a tag filter and a paths filter are present,
+  # GitHub only runs the workflow if both match, and a tag push carries no file
+  # changes, so tagged builds would silently never fire.
   workflow_dispatch:
   push:
     tags: ["v*"]
-    paths: ["client/**", ".github/workflows/build-client.yml"]
 
 permissions:
   contents: write
