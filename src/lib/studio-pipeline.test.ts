@@ -106,6 +106,25 @@ test("unban: restore applies friend stats and re-encodes a valid save", () => {
   assert.ok(reloaded.hasXml);
 });
 
+test("decoration: a save that already has a self-closing stash is updated in place", () => {
+  // Fresh saves ship `<BuildingsStash/>`. The old matcher only understood the
+  // paired form, so the rows landed in a second stash the game never reads.
+  // Decoration ids are HMAC public ids, so take one from the catalog the UI uses.
+  const decorId = studio.catalogs().decor[0]!.id;
+  const xml = ownSave.replace("<Version", "<BuildingsStash/><Version");
+  const { sessionId } = studio.connectLoad(token, "test-device", undefined, undefined, Buffer.from(xml).toString("base64"));
+  const out = studio.applySave({ token, sessionId, decor: [decorId], decorQty: 3 });
+  assert.ok(out.parts.some((p) => p.startsWith("decor")));
+  balanced(out.xml!);
+  assert.equal(out.xml!.match(/<BuildingsStash/g)?.length, 1, "must not add a second stash");
+  assert.match(out.xml!, /<Building id="[^"]+" count="3"\/>/);
+
+  // The pushed payload is the XML itself, so the decor must survive a reload.
+  const pushed = Buffer.from(out.fileB64!, "base64").toString("utf8");
+  assert.match(pushed, /<Building id="[^"]+" count="3"\/>/);
+  assert.equal((pushed.match(/<BuildingsStash/g) ?? []).length, 1);
+});
+
 test("regatta: repeated apply keeps XML balanced", () => {
   const { sessionId } = load();
   const first = studio.applyRegatta(token, sessionId);

@@ -2697,7 +2697,7 @@ export function StudioApp() {
                     }}
                     onRestore={(mode) => {
                       setPendingUnban(mode);
-                      toast.success(`${tr("unbanOk")}: ${mode} đã chọn — bấm Lưu & đẩy để áp dụng`);
+                      toast.success(`${tr("unbanQueued")} · ${mode}`);
                     }}
                   />
                 )}

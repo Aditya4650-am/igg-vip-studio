@@ -1,25 +1,13 @@
 import { Buffer } from "node:buffer";
 import lz4 from "lz4js";
+import { murmurHash2, u32 } from "./murmur.server";
+import { decodeContainer, extractXml } from "./save-decode.server";
 
-const MURMUR_M = 0x5bd1e995;
-const MURMUR_R = 24;
+export { murmurHash2 };
 
-function u32(n: number) {
-  return n >>> 0;
-}
-
-export function murmurHash2(data: Buffer, seed: number) {
-  let h = u32(seed ^ 4);
-  let k = data.readUInt32LE(0);
-  k = u32(Math.imul(k, MURMUR_M));
-  k ^= k >>> MURMUR_R;
-  k = u32(Math.imul(k, MURMUR_M));
-  h = u32(Math.imul(h, MURMUR_M));
-  h ^= k;
-  h ^= h >>> 13;
-  h = u32(Math.imul(h, MURMUR_M));
-  h ^= h >>> 15;
-  return u32(h);
+function decodeWrapper(buf: Buffer) {
+  const decoded = decodeContainer(buf);
+  return decoded && decoded !== buf ? decoded : null;
 }
 
 function generateTable(inputVal: number, seed: number) {
@@ -112,6 +100,13 @@ function cleanXml(buf: Buffer) {
 
 export function postProcessDecrypt(decrypted: Buffer): { xml: Buffer; kind: "xml" | "lz4" | "raw" } {
   if (!decrypted.length) return { xml: decrypted, kind: "raw" };
+  // The decrypted stream may still sit inside a container wrapper; unwrap it
+  // before looking for XML so a 0x53/0x54/0x79/0x7D payload is not rejected.
+  const unwrapped = decodeWrapper(decrypted);
+  if (unwrapped && unwrapped !== decrypted) {
+    const xml = extractXml(unwrapped);
+    if (xml) return { xml: Buffer.from(xml, "utf8"), kind: "xml" };
+  }
   if (decrypted[0] === 0x3c) {
     const last = decrypted.lastIndexOf(0x3e);
     return { xml: last >= 0 ? decrypted.subarray(0, last + 1) : decrypted, kind: "xml" };

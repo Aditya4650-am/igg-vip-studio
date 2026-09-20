@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CHAT_EMOJI_IDS } from "./chat-emoji.server";
+import { decodeContainer, extractXml } from "./save-decode.server";
 import { writeVar } from "./vars.server";
 import { attrValue, insertInsideRoot } from "./xml-edit.server";
 
@@ -425,72 +426,27 @@ export function parseFriends(xml: string): Friend[] {
   return [...byId.values()];
 }
 
-function u32(n: number) { return n >>> 0; }
-
-function mmh2(data: Buffer, length: number, seed: number) {
-  const m = 0x5bd1e995;
-  const r = 24;
-  let h = u32(seed ^ length);
-  let i = 0;
-  while (length >= 4) {
-    let k = data.readUInt32LE(i);
-    k = u32(Math.imul(k, m));
-    k = u32(k ^ (k >>> r));
-    k = u32(Math.imul(k, m));
-    h = u32(Math.imul(h, m));
-    h = u32(h ^ k);
-    i += 4;
-    length -= 4;
-  }
-  if (length >= 3) h ^= data[i + 2]! << 16;
-  if (length >= 2) h ^= data[i + 1]! << 8;
-  if (length >= 1) {
-    h ^= data[i]!;
-    h = u32(Math.imul(h, m));
-  }
-  h = u32(h ^ (h >>> 13));
-  h = u32(Math.imul(h, m));
-  h = u32(h ^ (h >>> 15));
-  return h;
-}
-
-function localInfoHashTable(length: number, seed: number) {
-  const table = Buffer.alloc(0x2d7);
-  let h = u32(seed);
-  for (let i = 0; i < table.length; i += 4) {
-    const input = Buffer.alloc(4);
-    input.writeUInt32LE(h, 0);
-    h = mmh2(input, 4, length);
-    const out = Buffer.alloc(4);
-    out.writeUInt32LE(h, 0);
-    out.copy(table, i, 0, Math.min(4, table.length - i));
-  }
-  return table;
-}
-
-/** Decode Township's 0x79 LocalInfo wrapper into UTF-8 XML. */
+/**
+ * Decode a Township LocalInfo/mGameInfo payload into UTF-8 XML.
+ *
+ * Device builds wrap the document in one of several containers, so this
+ * dispatches on the leading byte rather than assuming the 0x79 wrapper. The
+ * error message names the byte actually seen, which makes a future unsupported
+ * format diagnosable instead of looking like "wrong file".
+ */
 export function decodeLocalInfoBase64(b64: string) {
   const raw = Buffer.from(String(b64 || ''), 'base64');
   if (!raw.length) throw new Error('LocalInfo rỗng');
+  const decoded = decodeContainer(raw);
+  if (decoded) {
+    const xml = extractXml(decoded);
+    if (xml) return xml;
+  }
   const head = raw.subarray(0, 256).toString('utf8').replace(/^\uFEFF/, '').trimStart();
   if (head.startsWith('<')) return raw.toString('utf8').replace(/^\uFEFF/, '');
-  if (raw[0] !== 0x79 || raw.length < 9) {
-    throw new Error('LocalInfo không đúng định dạng 0x79; không thể lấy Version/FVer');
-  }
-  const hashLength = raw[1]! | (raw[2]! << 8) | (raw[3]! << 16);
-  const hashSeed = raw.readUInt32LE(4);
-  const table = localInfoHashTable(hashLength, u32(hashSeed + 4));
-  const size = u32(u32(hashLength - (raw.length ^ 0xC5EED)) ^ 0x396A8);
-  const out = Buffer.from(raw.subarray(8));
-  let j = 0;
-  for (let i = 0; i < size && i < out.length; i += 1) {
-    if (i > 0) out[i] = (out[i]! - out[i - 1]!) & 0xff;
-    out[i] = out[i]! ^ table[j]!;
-    j = (j + 1) % table.length;
-  }
-  const xml = out.toString('utf8').replace(/^\uFEFF/, '').trimStart();
-  if (!xml.startsWith('<')) throw new Error('LocalInfo giải mã không phải XML');
-  return xml;
+  throw new Error(
+    `LocalInfo không nhận dạng được định dạng (byte đầu 0x${raw[0]!.toString(16)}); không thể lấy Version/FVer`,
+  );
 }
 
 export function parseOwnMeta(xml: string) {
@@ -577,10 +533,18 @@ export function maxBuildingsStash(xml: string, ids: string[] = [], count = 10) {
 
   const patchBlock = (block: string) => {
     const seen = new Set<string>();
+    // A self-closing `<BuildingsStash/>` has nowhere to host the rows we may
+    // need to add, and an empty stash is exactly what a fresh save has. Expand
+    // it to a paired tag first, otherwise the insert below finds no anchor and
+    // we would append a *second* stash that the game ignores.
+    let body = block;
+    if (/^<BuildingsStash\b[^>]*\/>$/i.test(block.trim())) {
+      body = `${block.trim().replace(/\/>\s*$/, "")}></BuildingsStash>`;
+    }
     // Match both `<Building .../>` and `<Building ...>children</Building>`.
     // Rewriting only the open tag of the paired form would leave its closing
     // tag behind and corrupt the document.
-    const patched = block.replace(
+    const patched = body.replace(
       /<Building\b([^>]*?)(\/>|>[\s\S]*?<\/Building\s*>)/gi,
       (full, attrs: string) => {
         const id = attrs.match(/\bid="([^"]+)"/i)?.[1];
@@ -606,7 +570,7 @@ export function maxBuildingsStash(xml: string, ids: string[] = [], count = 10) {
     return patched;
   };
 
-  const blockRe = /<BuildingsStash\b[^>]*>[\s\S]*?<\/BuildingsStash\s*>/i;
+  const blockRe = /<BuildingsStash\b([^>]*?)(\/>|>[\s\S]*?<\/BuildingsStash\s*>)/i;
   const m = text.match(blockRe);
   if (m?.index !== undefined) {
     const block = patchBlock(m[0]);
