@@ -1,6 +1,7 @@
 ' Launches IGG VIP Studio with no console window.
-' PyInstaller 6.x has no windowed bootloader for Python 3.14 yet, so the EXE
-' itself is a console build; this hides that console for a clean desktop app.
+' The EXE is already a windowed build (console=False in igg_client.spec), so
+' this launcher is only a convenience for pinning it to the taskbar. Running
+' IGG-VIP-Studio.exe directly is equivalent.
 Option Explicit
 Dim fso, shell, here, exePath
 Set fso = CreateObject("Scripting.FileSystemObject")

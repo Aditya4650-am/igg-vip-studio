@@ -26,6 +26,15 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+# In a windowed (no-console) build sys.stdout/sys.stderr are None, not a
+# NullWriter. Anything that writes to them - including libraries we do not
+# control, such as bottle's server banner - would raise AttributeError and kill
+# the app on startup, so point them at the null device before importing them.
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w")  # noqa: SIM115
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")  # noqa: SIM115
+
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
@@ -443,6 +452,17 @@ def _quit_app() -> None:
         os._exit(0)  # noqa: SLF001
 
 
+def _fatal(message: str) -> None:
+    """A windowed EXE has no console, so an unhandled exception would leave the
+    user with nothing at all. Show a native dialog instead."""
+    try:
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(None, message, APP_NAME, 0x10)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 # pywebview exposes the api object as window.pywebview.api.*. The web app looks
 # for window.iggNative.*, so we alias it as soon as the bridge is ready.
 _ALIAS_JS = """
@@ -487,6 +507,14 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:  # noqa: BLE001
+        _fatal(
+            f"{APP_NAME} could not start.\n\n{e}\n\n"
+            "If the interface never appears, install the Microsoft Edge WebView2 "
+            "Runtime (it is preinstalled on Windows 11)."
+        )
+        raise
 
 
