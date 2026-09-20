@@ -71,8 +71,8 @@ JSON object on stdout: `{ok: true, xml_b64}` or `{ok: false, error}`. It prefers
 the real `bver`/`fver` pair from the device's `mLocalInfo.xml` and falls back to
 `DEFAULT_BVER`/`DEFAULT_FVER` when LocalInfo is unreadable. It must not
 hard-reject a missing version: that guard made FetchCity impossible on installs
-whose mLocalInfo cannot be read, and because unban and the card-copy feature both
-need a friend city, one unreadable file blanked three features at once.
+whose mLocalInfo cannot be read. (Unban also needed it, which is why one
+unreadable file blanked two features at once.)
 
 That fallback has to be a version the API still accepts, and the floor moves as
 Township ships. Measured on 2026-09-20: `35.1.0`/`3510` and `36.0.0`/`3600` are
@@ -99,6 +99,26 @@ came from. Static candidates remain as a fallback for unrooted devices, where
 `adb exec-out` is a raw pipe: a failed remote command still exits 0 and puts its
 stderr on stdout, so error text must never be accepted as file content (see
 `_is_probably_file`).
+
+## Removed: card collections
+
+The card-collections tab was deleted. It wrote `FullCardCollections` through
+`STAT_ALIASES.crd`, the write round-tripped, and the reported success was real —
+but the game does not read that counter from the save, so nothing changed in
+game. A feature that reports success while doing nothing is worse than a missing
+one, so it was taken out rather than left in place.
+
+Removed with it: the tab and its i18n table in `studio-app.tsx`, the `crd` field
+from the stat catalogue and `FIELD_MAP`, the `crd` alias group, the `Cards` entry
+in `STAT_TAGS`, `Session.friendCards` and its reads in `fetchFriendCity` /
+`attachFriendXml` / `snapshot`, the `cards-*` CSS, and the `cards` GameIcon.
+`INICIAL_VARS` in `desban.server.ts` intentionally still lists
+`FullCardCollections`: that is the unban restore list and must mirror the game's
+own reset exactly, so it is not part of this feature.
+
+Guard rails: `studio-pipeline.test.ts` asserts `crd` is absent from the catalogue
+and that the friend snapshot exposes no card counter, so the feature cannot
+return silently.
 
 ## Windows client
 

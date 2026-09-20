@@ -7,7 +7,6 @@ const STAT_TAGS: Record<string, string[]> = {
   liv: ["liv", "LivesSent"],
   reg: ["reg", "Regatta"],
   hlp: ["hlp", "Help"],
-  crd: ["crd", "Cards"],
   exp: ["exp", "Energy"],
   key: ["key", "Keys"],
   m3l: ["m3l", "Match3Level"],

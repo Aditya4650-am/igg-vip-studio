@@ -99,16 +99,18 @@ test("parseOwnMeta reads FVer regardless of attribute order", () => {
   assert.equal(parseOwnMeta("<Global><Version version='35.1.0' FVer='3510'></Version></Global>").fver, "3510");
 });
 
-test("card counter aliases round-trip", () => {
-  const aliased = '<Global><Var name="CardCollections" v="4"/></Global>';
-  assert.equal(parseStats(aliased).crd, "4");
-  const written = applyStatChanges(aliased, { crd: "9" });
+test("stat aliases round-trip without duplicating", () => {
+  // Uses a surviving alias pair: the card counter this test originally covered
+  // was removed with the card-collections feature.
+  const aliased = '<Global><Var name="RegattaTasksCompleted" v="4"/></Global>';
+  assert.equal(parseStats(aliased).reg, "4");
+  const written = applyStatChanges(aliased, { reg: "9" });
   wellFormed(written);
-  assert.equal(parseStats(written).crd, "9");
-  assert.ok(!written.includes("FullCardCollections"), "must not add a duplicate alias");
+  assert.equal(parseStats(written).reg, "9");
+  assert.ok(!written.includes("RegataTasksCompleted"), "must not add a duplicate alias");
 
-  const canonical = '<Global><Var name="FullCardCollections" v="3"/></Global>';
-  assert.equal(parseStats(applyStatChanges(canonical, { crd: "7" })).crd, "7");
+  const canonical = '<Global><Var name="RegataTasksCompleted" v="3"/></Global>';
+  assert.equal(parseStats(applyStatChanges(canonical, { reg: "7" })).reg, "7");
 });
 
 test("findUnbalancedTag flags corruption the old injectors produced", () => {

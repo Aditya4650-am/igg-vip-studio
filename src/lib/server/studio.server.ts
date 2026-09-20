@@ -59,7 +59,6 @@ export type Session = {
   regatta: { tasks: number; score: number } | null;
   friends: Friend[];
   friendCity: string | null;
-  friendCards: string | null;
   unban: { mode: string | null; applied: boolean };
   log: string[];
 };
@@ -157,7 +156,6 @@ export function connectLoad(token: string, device: string, _saveXml?: string, _p
       regatta: null,
       friends,
       friendCity: null,
-      friendCards: null,
       unban: { mode: null, applied: false },
       log: [
         "Save loaded",
@@ -376,7 +374,6 @@ export async function fetchFriendCity(token: string, sessionId: string, cityId: 
   const xml = await fetchCityXml(cityId.trim(), s.ownMeta.bver, s.ownMeta.fver);
   s.friendXml = xml;
   s.friendCity = cityId.trim();
-  s.friendCards = readAnyVar(xml, STAT_ALIASES.crd!);
   s.log.push(`Friend city loaded successfully`);
   return snapshot(s);
 }
@@ -402,7 +399,6 @@ export function attachFriendXml(token: string, sessionId: string, xml: string) {
   if (!text.includes("<")) throw new Error("File bạn không phải XML city");
   s.friendXml = text;
   s.friendCity = parseOwnMeta(text).cityId || "uploaded";
-  s.friendCards = readAnyVar(text, STAT_ALIASES.crd!);
   s.log.push(`Friend XML uploaded (${text.length} bytes)`);
   return snapshot(s);
 }
@@ -484,7 +480,6 @@ export function snapshot(s: Session) {
     regatta: s.regatta,
     friends: s.friends,
     friendCity: s.friendCity,
-    friendCards: s.friendCards,
     unban: s.unban,
     log: s.log.slice(-12).map(safeLogLine),
   };

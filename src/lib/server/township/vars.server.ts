@@ -9,7 +9,6 @@ export const FIELD_MAP: Record<string, string> = {
   m3l: "FirstAttemptM3Levels",
   liv: "LivesSent",
   hlp: "Achievement_Teamwork",
-  crd: "FullCardCollections",
   reg: "RegataTasksCompleted",
   dat: "gameStartDate",
   exp: "expeditionEnergy",
@@ -44,7 +43,6 @@ export const MATCH3_PROGRESS_VARS = [
  * so the value the UI shows is the value the game reads back.
  */
 export const STAT_ALIASES: Record<string, readonly string[]> = {
-  crd: ["FullCardCollections", "FullCardCollection", "CardCollections", "CardCollection"],
   reg: ["RegataTasksCompleted", "RegattaTasksCompleted"],
   residents: ["residents", "Residents"],
   exp: ["expeditionEnergy", "expeditionEnergy_1"],

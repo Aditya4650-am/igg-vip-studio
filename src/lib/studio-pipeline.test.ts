@@ -9,7 +9,6 @@ const studio = await import("./server/studio.server.ts");
 const { verifyLicenseKey } = await import("./server/license.server.ts");
 const { findUnbalancedTag } = await import("./server/township/xml-edit.server.ts");
 
-const crdId = studio.catalogs().fields.find((f) => f.key === "crd")!.id;
 const { token } = verifyLicenseKey("VIP-DEMO", "TEST-DEVICE-0001");
 
 const ownSave = [
@@ -46,10 +45,6 @@ function balanced(xml: string) {
   assert.equal(findUnbalancedTag(xml), null, `malformed XML:\n${xml}`);
 }
 
-function cardsValue(xml: string) {
-  return xml.match(/<Var name="FullCardCollections"\s+v="([^"]*)"/)?.[1] ?? "";
-}
-
 test("unban works from the save's own version when LocalInfo is unreadable", () => {
   // The reported failure: an unrooted emulator returns the shell's error text
   // from the mLocalInfo read, and the UI aborted FetchCity before it ran, so
@@ -73,18 +68,16 @@ test("unban: a broken save read is named as a device problem, not a format", () 
   );
 });
 
-test("cards: mine is written back and the friend counter is surfaced", () => {
+test("card collections are gone from the catalogue and the session", () => {
+  // The feature was removed: it wrote a counter the game does not honour, so
+  // it reported success while changing nothing. Guard the removal at the
+  // catalogue level (what the UI renders) and the session level (what the
+  // friend flow returns), so it cannot quietly come back.
+  assert.equal(studio.catalogs().fields.find((f) => f.key === "crd"), undefined);
+
   const { sessionId } = load();
-  assert.equal(cardsValue(ownSave), "2");
-
   const withFriend = studio.attachFriendXml(token, sessionId, friendSave);
-  assert.equal(withFriend.friendCards, "7");
-
-  const saved = studio.applySave({ token, sessionId, stats: { [crdId]: "250" } });
-  assert.ok(saved.parts.includes("stats"));
-  balanced(saved.xml);
-  assert.equal(cardsValue(saved.xml), "250");
-  assert.equal(saved.stats[crdId], "250");
+  assert.ok(!("friendCards" in withFriend), "friend snapshot must not expose a card counter");
 });
 
 test("season pass: applies once and stays balanced on repeat", () => {

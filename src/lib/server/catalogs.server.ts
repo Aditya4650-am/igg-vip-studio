@@ -67,7 +67,6 @@ const STAT_INTERNAL: { id: string; emoji: string; labelEn: string; labelVi: stri
   { id: "liv", emoji: "❤️", labelEn: "Lives Sent", labelVi: "Mạng gửi" },
   { id: "reg", emoji: "🏁", labelEn: "Regatta", labelVi: "Regata" },
   { id: "hlp", emoji: "🤝", labelEn: "Help", labelVi: "Giúp đỡ" },
-  { id: "crd", emoji: "🃏", labelEn: "Cards", labelVi: "Thẻ" },
   { id: "exp", emoji: "⚡", labelEn: "Energy", labelVi: "Năng lượng" },
   { id: "key", emoji: "🔑", labelEn: "Keys", labelVi: "Chìa" },
   { id: "m3l", emoji: "🎯", labelEn: "Match-3 Level", labelVi: "Cấp Match-3" },

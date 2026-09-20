@@ -29,7 +29,7 @@ import {
   attachLocal,
 } from "@/lib/studio-api";
 
-type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "cards" | "items" | "barn";
+type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "barn";
 type SessionSnap = Awaited<ReturnType<typeof connectLoad>>;
 type Catalogs = Awaited<ReturnType<typeof getCatalogs>>;
 type UnbanMode = "inicial" | "completo" | "novo";
@@ -78,8 +78,8 @@ function downloadText(name: string, text: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "cards", "items", "barn"];
-const TAB_KEY: Record<Tab, keyof Dict | "cards"> = {
+const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "barn"];
+const TAB_KEY: Record<Tab, keyof Dict> = {
   data: "tabData",
   profile: "tabProfile",
   avatars: "tabAvatars",
@@ -87,7 +87,6 @@ const TAB_KEY: Record<Tab, keyof Dict | "cards"> = {
   unban: "tabUnban",
   decor: "tabDecor",
   sticker: "tabSticker",
-  cards: "cards",
   items: "tabItems",
   barn: "tabBarn",
 };
@@ -99,102 +98,10 @@ const TAB_ICON: Record<Tab, GameIconName> = {
   unban: "unban",
   decor: "decor",
   sticker: "sticker",
-  cards: "cards",
   items: "items",
   barn: "barn",
 };
 
-/** Card-collection labels — kept local so no i18n Dict keys are required. */
-const CARDS_I18N: Partial<Record<Lang, {
-  tab: string; title: string; hint: string; mine: string; ph: string;
-  quick: string; max: string; friend: string; friendNone: string;
-  copy: string; copied: string; saveNote: string; collections: string;
-}>> = {
-  en: {
-    tab: "Cards", title: "Card Collections",
-    hint: "Set how many full card collections are marked complete in the save, then press Save & push. Pure save edit — works offline.",
-    mine: "Full card collections", ph: "e.g. 50",
-    quick: "Quick set", max: "Max",
-    friend: "Friend's collections", friendNone: "Fetch a friend city first (Unban tab) to copy their collections.",
-    copy: "Copy from friend", copied: "Friend's value filled — press Save & push to apply.",
-    saveNote: "Applied through the same Save & push pipeline as every other feature.",
-    collections: "Collection slots",
-  },
-  vi: {
-    tab: "Thẻ", title: "Bộ sưu tập thẻ",
-    hint: "Đặt số bộ sưu tập thẻ hoàn chỉnh, rồi nhấn Lưu & đẩy. Chỉnh save trực tiếp.",
-    mine: "Số bộ thẻ đầy đủ", ph: "vd: 50",
-    quick: "Cài nhanh", max: "Tối đa",
-    friend: "Thẻ của bạn bè", friendNone: "Hãy FetchCity bạn bè (tab Unban) để copy bộ thẻ.",
-    copy: "Copy từ bạn", copied: "Đã điền giá trị bạn bè — nhấn Lưu & đẩy để áp dụng.",
-    saveNote: "Áp dụng qua cùng đường Lưu & đẩy như mọi tính năng khác.",
-    collections: "Ô bộ sưu tập",
-  },
-  pt: {
-    tab: "Cartas", title: "Coleções de Cartas",
-    hint: "Defina quantas coleções completas marcar no save e pressione Salvar & enviar.",
-    mine: "Coleções completas", ph: "ex: 50",
-    quick: "Rápido", max: "Máx",
-    friend: "Cartas do amigo", friendNone: "Busque a cidade de um amigo (aba Unban) para copiar.",
-    copy: "Copiar do amigo", copied: "Valor do amigo preenchido — pressione Salvar & enviar.",
-    saveNote: "Aplicado pelo mesmo pipeline de Salvar & enviar.",
-    collections: "Espaços de coleção",
-  },
-  id: {
-    tab: "Kartu", title: "Koleksi Kartu",
-    hint: "Atur jumlah koleksi kartu penuh, lalu tekan Simpan & kirim.",
-    mine: "Koleksi penuh", ph: "mis. 50",
-    quick: "Cepat", max: "Maks",
-    friend: "Kartu teman", friendNone: "Ambil kota teman (tab Unban) untuk menyalin.",
-    copy: "Salin dari teman", copied: "Nilai teman terisi — tekan Simpan & kirim.",
-    saveNote: "Diterapkan lewat alur Simpan & kirim yang sama.",
-    collections: "Slot koleksi",
-  },
-  zh: {
-    tab: "卡牌", title: "卡牌收藏",
-    hint: "设置完整卡牌收藏数量,然后按保存并推送。",
-    mine: "完整收藏数", ph: "如:50",
-    quick: "快速设置", max: "最大",
-    friend: "好友卡牌", friendNone: "先获取好友城市(Unban 标签)即可复制。",
-    copy: "从好友复制", copied: "已填入好友数值 — 按保存并推送生效。",
-    saveNote: "通过与其他功能相同的保存管线应用。",
-    collections: "收藏槽",
-  },
-  es: {
-    tab: "Cartas", title: "Colecciones de Cartas",
-    hint: "Define cuántas colecciones completas marcar y pulsa Guardar y enviar.",
-    mine: "Colecciones completas", ph: "ej: 50",
-    quick: "Rápido", max: "Máx",
-    friend: "Cartas del amigo", friendNone: "Obtén la ciudad de un amigo (pestaña Unban) para copiar.",
-    copy: "Copiar del amigo", copied: "Valor del amigo listo — pulsa Guardar y enviar.",
-    saveNote: "Se aplica por el mismo flujo de Guardar y enviar.",
-    collections: "Espacios de colección",
-  },
-  th: {
-    tab: "การ์ด", title: "คอลเลกชันการ์ด",
-    hint: "ตั้งจำนวนคอลเลกชันที่สมบูรณ์แล้วกดบันทึกและพุช",
-    mine: "คอลเลกชันสมบูรณ์", ph: "เช่น 50",
-    quick: "ตั้งด่วน", max: "สูงสุด",
-    friend: "การ์ดของเพื่อน", friendNone: "ดึงเมืองเพื่อนก่อน (แท็บ Unban) เพื่อคัดลอก",
-    copy: "คัดลอกจากเพื่อน", copied: "กรอกค่าเพื่อนแล้ว — กดบันทึกและพุช",
-    saveNote: "ใช้กระบวนการบันทึกเดียวกับฟีเจอร์อื่น",
-    collections: "ช่องคอลเลกชัน",
-  },
-  ja: {
-    tab: "カード", title: "カードコレクション",
-    hint: "完了済みコレクション数を設定し、保存してプッシュ。",
-    mine: "完全コレクション数", ph: "例: 50",
-    quick: "クイック", max: "最大",
-    friend: "友達のカード", friendNone: "コピーするには友達の都市を取得(Unbanタブ)。",
-    copy: "友達からコピー", copied: "友達の値を入力しました — 保存してプッシュを押してください。",
-    saveNote: "他の機能と同じ保存パイプラインで適用されます。",
-    collections: "コレクション枠",
-  },
-};
-
-function cardsT(lang: Lang) {
-  return CARDS_I18N[lang] ?? CARDS_I18N.en!;
-}
 
 function groupIcon(id: string): GameIconName {
   const value = id.toLowerCase();
@@ -226,7 +133,6 @@ function statEmoji(id: string): string {
   if (value.includes("life") || value === "liv") return "💗";
   if (value.includes("regatta") || value === "reg") return "⛵";
   if (value.includes("help")) return "🤝";
-  if (value.includes("card")) return "🃏";
   if (value.includes("energy")) return "⚡";
   if (value.includes("match") || value === "m3l") return "🎯";
   if (value.includes("resident")) return "🏡";
@@ -431,7 +337,6 @@ const STAT_LABELS: Record<string, Partial<Record<Lang, string>>> = {
   liv: { vi: "Mạng đã gửi", en: "Lives sent", pt: "Vidas enviadas", id: "Nyawa terkirim" },
   reg: { vi: "Regata", en: "Regatta", pt: "Regata", id: "Regata" },
   hlp: { vi: "Giúp đỡ", en: "Help", pt: "Ajuda", id: "Bantuan" },
-  crd: { vi: "Bộ thẻ", en: "Card collections", pt: "Coleções de cartas", id: "Koleksi kartu" },
   exp: { vi: "Năng lượng", en: "Energy", pt: "Energia", id: "Energi" },
   key: { vi: "Chìa khóa", en: "Keys", pt: "Keys", id: "Kunci" },
   m3l: { vi: "Cấp M3", en: "M3 level", pt: "Nível M3", id: "Level M3" },
@@ -566,18 +471,6 @@ const STAT_I18N_EXTRA: Record<string, Partial<Record<Lang, string>>> = {
     "zh": "帮助",
     "ja": "ヘルプ",
     "ko": "도움말"
-  },
-  "crd": {
-    "fr": "Collections de cartes",
-    "de": "Kartensammlungen",
-    "it": "Collezioni di carte",
-    "ru": "Коллекции карт",
-    "es": "Colecciones de cartas",
-    "pt": "Coleções de cartas",
-    "id": "Koleksi kartu",
-    "zh": "卡牌收藏",
-    "ja": "カードコレクション",
-    "ko": "카드 컬렉션"
   },
   "exp": {
     "fr": "Énergie",
@@ -911,7 +804,6 @@ type GameIconName =
   | "unban"
   | "decor"
   | "sticker"
-  | "cards"
   | "items"
   | "barn"
   | "feedback"
@@ -980,9 +872,6 @@ function GameIcon({ name, className, ...props }: { name: GameIconName; className
       break;
     case "sticker":
       content = <><path d="M5 3.8h9.2l4.8 4.8v7.6a4 4 0 0 1-4 4H5a2 2 0 0 1-2-2V5.8a2 2 0 0 1 2-2z" /><path d="M14.2 3.9v4.8H19M7 12h6M7 15.5h3.5" /><path d="m7.2 8.2.7.7 1.5-1.5" /></>;
-      break;
-    case "cards":
-      content = <><rect x="3" y="7.2" width="14.5" height="11.5" rx="1.8" /><path d="M6.8 4.5h11.7A2.5 2.5 0 0 1 21 7v8.2" /><path d="M3 11h14.5M6.2 15h5.2" /><circle cx="15" cy="15" r="1.4" /></>;
       break;
     case "items":
       content = <><path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5z" /><path d="M3.8 7.7 12 12l8.2-4.3M12 12v8.5M8 5.1l8.3 4.4" /><path d="M8.4 14.3h3.1" /></>;
@@ -1728,7 +1617,6 @@ export function StudioApp() {
     unban: session?.unban.applied ? 1 : 0,
     decor: decorSel.size,
     sticker: stickerSel.size,
-    cards: Number(stats[fields.find((f) => f.key === "crd")?.id ?? ""] ?? 0) > 0 ? 1 : 0,
     items: itemSel.count,
     barn: barnDirty ? 1 : 0,
   };
@@ -2040,12 +1928,12 @@ export function StudioApp() {
 
         <section className="app-main flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg shadow-hairline">
           <nav
-            className="feature-tabs relative grid grid-cols-5 border-b border-border px-3 pt-3 sm:grid-cols-10"
+            className="feature-tabs relative grid grid-cols-5 border-b border-border px-3 pt-3 sm:grid-cols-9"
           >
             <span aria-hidden className={cn("tab-pill", tabReady && "ready")} />
             {TABS.map((id) => {
               const on = tab === id;
-              const tabLabel = id === "cards" ? cardsT(lang).tab : tr(TAB_KEY[id] as keyof Dict);
+              const tabLabel = tr(TAB_KEY[id] as keyof Dict);
               return (
                 <button
                   key={id}
@@ -2297,106 +2185,6 @@ export function StudioApp() {
                     </section>
                   </div>
                 )}
-
-                {tab === "cards" && catalogs && (() => {
-                  const ct = cardsT(lang);
-                  const crdId = fields.find((f) => f.key === "crd")?.id ?? "";
-                  const cardsVal = stats[crdId] ?? "";
-                  const friendCards = session?.friendCards ?? null;
-                  const parsedVal = Number.parseInt(cardsVal, 10) || 0;
-                  const setCards = (v: string) => setStats((p) => ({ ...p, [crdId]: v }));
-                  return (
-                    <div className="space-y-3">
-                      <div className="cards-hero panel">
-                        <div className="cards-hero-left">
-                          <span className="cards-hero-icon" aria-hidden="true">
-                            <img src="/game-icons/ZooCards.png" alt="" draggable={false} />
-                          </span>
-                          <div>
-                            <h3 className="cards-hero-title">
-                              <GameIcon name="cards" className="size-4" />
-                              {ct.title}
-                            </h3>
-                            <p className="cards-hero-hint">{ct.hint}</p>
-                          </div>
-                        </div>
-                        <div className="cards-value-box">
-                          <label className="cards-value-label" htmlFor="cards-count">{ct.mine}</label>
-                          <input
-                            id="cards-count"
-                            className="field cards-value-input"
-                            inputMode="numeric"
-                            placeholder={ct.ph}
-                            value={cardsVal}
-                            onChange={(e) => setCards(e.target.value.replace(/[^0-9]/g, ""))}
-                          />
-                          <div className="cards-quick">
-                            <span className="cards-quick-label">{ct.quick}</span>
-                            {[10, 50, 100, 250].map((n) => (
-                              <button key={n} type="button" className="cards-chip-btn" disabled={busy} onClick={() => setCards(String(n))}>
-                                {n}
-                              </button>
-                            ))}
-                            <button type="button" className="cards-chip-btn cards-chip-btn--max" disabled={busy} onClick={() => setCards("999")}>
-                              {ct.max}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      <section className="panel cards-slots">
-                        <p className="cards-slots-title">{ct.collections}</p>
-                        <div className="cards-grid">
-                          {Array.from({ length: 12 }, (_, i) => {
-                            const on = parsedVal > i;
-                            return (
-                              <button
-                                key={i}
-                                type="button"
-                                aria-pressed={on}
-                                className={cn("cards-tile", on && "cards-tile--on")}
-                                onClick={() => setCards(String(on ? i : i + 1))}
-                              >
-                                <GameIcon name="cards" className="cards-tile-icon" />
-                                <span className="cards-tile-num">{i + 1}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                        <p className="mt-3 text-xs text-muted">{ct.saveNote}</p>
-                      </section>
-
-                      <section className="panel cards-friend">
-                        <div className="cards-friend-head">
-                          <GameIcon name="cards" className="size-4 text-primary" />
-                          <h3 className="cards-friend-title">{ct.friend}</h3>
-                          {friendCards != null && friendCards !== "" ? (
-                            <span className="cards-friend-badge">{friendCards}</span>
-                          ) : null}
-                        </div>
-                        {friendCards != null && friendCards !== "" ? (
-                          <>
-                            <button
-                              type="button"
-                              className="premium-button cards-copy-btn w-full"
-                              disabled={busy}
-                              onClick={() => {
-                                setCards(String(friendCards));
-                                toast.success(ct.copied);
-                              }}
-                            >
-                              <GameIcon name="copy" className="size-4" />
-                              {ct.copy} · {friendCards}
-                            </button>
-                            <p className="mt-2 text-xs text-muted">{ct.copied}</p>
-                          </>
-                        ) : (
-                          <p className="text-xs text-muted">{ct.friendNone}</p>
-                        )}
-                      </section>
-                    </div>
-                  );
-                })()}
 
                 {tab === "items" && catalogs && (
                   <PanelChecks
