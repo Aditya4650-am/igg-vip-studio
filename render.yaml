@@ -4,6 +4,8 @@ services:
     runtime: node
     plan: free
     region: singapore
+    branch: main
+    autoDeploy: true
     buildCommand: NPM_CONFIG_PRODUCTION=false npm install && npm run build
     startCommand: node .output/server/index.mjs
     envVars:
@@ -15,6 +17,11 @@ services:
         value: production
       - key: GROK_PROJECT_ID
         value: igg-vip-studio
+      # FetchCity spawns scripts/township/fetch_city.py. Render's native Node
+      # runtime ships python3, and pinning the binary here skips the
+      # python3 -> python fallback probe on every call.
+      - key: PYTHON_BIN
+        value: python3
       - key: IGG_VIP_MASTER
         sync: false
       - key: IGG_VIP_OWNER

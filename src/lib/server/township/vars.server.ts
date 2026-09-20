@@ -1,3 +1,5 @@
+import { insertInsideRoot } from "./xml-edit.server";
+
 /** All igg-vip-tool Data fields (same Var names as the original Python tool). */
 export const FIELD_MAP: Record<string, string> = {
   tca: "moneyCash",
@@ -36,6 +38,18 @@ export const MATCH3_PROGRESS_VARS = [
   "FirstAttemptM3Levels",
 ] as const;
 
+/**
+ * Save variants across game builds expose these counters under different names.
+ * Reads use the first present alias; writes update every alias already present
+ * so the value the UI shows is the value the game reads back.
+ */
+export const STAT_ALIASES: Record<string, readonly string[]> = {
+  crd: ["FullCardCollections", "FullCardCollection", "CardCollections", "CardCollection"],
+  reg: ["RegataTasksCompleted", "RegattaTasksCompleted"],
+  residents: ["residents", "Residents"],
+  exp: ["expeditionEnergy", "expeditionEnergy_1"],
+};
+
 export const DATA_FIELDS = Object.keys(FIELD_MAP);
 
 export function readVar(xml: string, varName: string): string | null {
@@ -50,6 +64,15 @@ export function readVar(xml: string, varName: string): string | null {
   return d ? d[1]! : null;
 }
 
+/** First non-empty value among several Var/DataElem aliases. */
+export function readAnyVar(xml: string, names: readonly string[]): string | null {
+  for (const name of names) {
+    const v = readVar(xml, name);
+    if (v != null && v !== "") return v;
+  }
+  return null;
+}
+
 export function writeVar(xml: string, varName: string, value: string): string {
   const n = varName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const v = String(value);
@@ -61,11 +84,12 @@ export function writeVar(xml: string, varName: string, value: string): string {
   if (c.test(xml)) return xml.replace(c, `$1${v}$3`);
   const d = new RegExp(`(<DataElem\\b[^>]*?\\bvalue=")([^"]*)("[^>]*?\\bname="${n}")`, "i");
   if (d.test(xml)) return xml.replace(d, `$1${v}$3`);
-  const insert = `<Var name="${varName}" v="${v}" t="i"/>`;
-  for (const closer of ["</Global>", "</root>", "</Root>", "</ROOT>"]) {
-    if (xml.includes(closer)) return xml.replace(closer, insert + closer);
-  }
-  return xml + insert;
+  // A value typed as `i` but holding something non-numeric makes the game's
+  // loader reject the whole save, so only claim a numeric type when the value
+  // really is an integer.
+  const type = /^-?\d+$/.test(v) ? "i" : "s";
+  const insert = `<Var name="${varName}" v="${v}" t="${type}"/>`;
+  return insertInsideRoot(xml, insert);
 }
 
 export function formatDat(raw: string | null): string {
@@ -93,8 +117,8 @@ export function parseStats(xml: string): Record<string, string> {
   const stats: Record<string, string> = {};
   for (const fid of DATA_FIELDS) {
     if (fid === "win" || fid === "m3l") continue;
-    const name = FIELD_MAP[fid]!;
-    const v = readVar(xml, name);
+    const aliases = STAT_ALIASES[fid];
+    const v = aliases ? readAnyVar(xml, aliases) : readVar(xml, FIELD_MAP[fid]!);
     if (v == null) continue;
     stats[fid] = fid === "dat" ? formatDat(v) : v;
   }
@@ -120,8 +144,18 @@ export function applyStatChanges(xml: string, changes: Record<string, string>): 
     if (!(fid in changes)) continue;
     const val = changes[fid]?.trim() ?? "";
     if (!val) continue;
-    const name = FIELD_MAP[fid]!;
-    text = writeVar(text, name, fid === "dat" ? parseDat(val) : val);
+    const value = fid === "dat" ? parseDat(val) : val;
+    const aliases = STAT_ALIASES[fid];
+    if (aliases) {
+      const present = aliases.filter((name) => readVar(text, name) != null);
+      // Update every alias already in the save; only create one when the save
+      // has none, so we never litter the document with duplicate counters.
+      for (const name of present.length ? present : [aliases[0]!]) {
+        text = writeVar(text, name, value);
+      }
+      continue;
+    }
+    text = writeVar(text, FIELD_MAP[fid]!, value);
   }
 
   if (sharedM3) {

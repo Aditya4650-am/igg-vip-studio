@@ -1,7 +1,7 @@
 # IGG VIP Studio — Windows Client
 
 A native desktop app for IGG VIP Studio. It opens the web app (from your
-deployed Vercel server) in a WebView2 window and adds the **ADB bridge** so the
+deployed Render server) in a WebView2 window and adds the **ADB bridge** so the
 desktop can do what a browser tab can't: connect to an emulator, pull/push the
 save, run Unban, and self-update.
 

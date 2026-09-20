@@ -486,6 +486,7 @@ const en: typeof vi = {
  toastDecorAll: "All Decor selected — press Save & push to apply",
  toastRegattaQueued: "Regatta queued — press Save & push to apply",
  toastSeasonQueued: "Season Pass queued — press Save & push to apply",
+ stickerSelectedHint: "{count} stickers selected. Choices apply when you press Save & push.",
  connectFailed: "Connection failed",
  actionFailed: "Action failed",
 };
@@ -1320,7 +1321,7 @@ const DICT_INTERNAL: Record<Lang, typeof vi> = { vi, en, pt, id, zh, es, th, ja,
 for (const [lang, values] of Object.entries(UI_COMMON)) { Object.assign(DICT_INTERNAL[lang as Lang], values); }
 // FULL_LANGUAGE_PACK_START
 // Complete UI translations for the currently exposed interface.
-const FULL_LANGUAGE_PACK: Record<Lang, Partial<typeof vi>> = {
+const FULL_LANGUAGE_PACK: Partial<Record<Lang, Partial<typeof vi>>> = {
  ko: {
   loginTitle: "클라이언트 열기",
   loginDesc: "이 기기에 발급된 라이선스를 입력하세요. 클라이언트에서는 키를 발급할 수 없습니다.",
@@ -2767,7 +2768,7 @@ export function isLang(v: string): v is Lang {
 }
 
 // MISSING_USED_KEYS_PACK_START
-const MISSING_USED_KEYS_PACK: Record<Lang, Partial<typeof vi>> = {
+const MISSING_USED_KEYS_PACK: Partial<Record<Lang, Partial<typeof vi>>> = {
  pt: {
   adbNeed: "ADB não encontrado. Instale o platform-tools e abra o EXE do Windows.",
   archClientD: "Máquina do usuário. Não emite chaves nem altera ficheiros; apenas envia pedidos com token selado.",

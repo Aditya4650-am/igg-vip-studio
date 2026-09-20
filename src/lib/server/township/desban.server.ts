@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CHAT_EMOJI_IDS } from "./chat-emoji.server";
 import { writeVar } from "./vars.server";
+import { attrValue, insertInsideRoot } from "./xml-edit.server";
 
 const INICIAL_VARS = [
   "levelup", "money", "moneyCash", "EarnedCoins", "residents", "wheatCounter",
@@ -494,11 +495,14 @@ export function decodeLocalInfoBase64(b64: string) {
 
 export function parseOwnMeta(xml: string) {
   const aws = xml.match(/<AWS\b([^>]*)>/i)?.[1] ?? "";
-  const ver = xml.match(/<Version\b([^>]*)\/?>/i)?.[1] ?? "";
+  // `<Version>` is self-closing in mGameInfo and paired in some LocalInfo
+  // builds; attribute order also varies. Capture the whole tag and read each
+  // attribute independently instead of assuming a fixed layout.
+  const ver = xml.match(/<Version\b([^>]*?)\/?>/i)?.[1] ?? "";
   return {
-    cityId: aws.match(/cityId="([^"]*)"/)?.[1] ?? readVarLoose(xml, "cityId") ?? "",
-    bver: ver.match(/version="([^"]*)"/)?.[1] ?? "",
-    fver: ver.match(/FVer="([^"]*)"/)?.[1] ?? "",
+    cityId: attrValue(aws, "cityId") ?? readVarLoose(xml, "cityId") ?? "",
+    bver: attrValue(ver, "version") ?? "",
+    fver: attrValue(ver, "FVer") ?? "",
   };
 }
 
@@ -573,18 +577,22 @@ export function maxBuildingsStash(xml: string, ids: string[] = [], count = 10) {
 
   const patchBlock = (block: string) => {
     const seen = new Set<string>();
-    const patched = block.replace(/<Building\b([^>]*?)(?:\/?>)/gi, (full, attrs: string) => {
-      const id = attrs.match(/\bid="([^"]+)"/i)?.[1];
-      if (!id) return full;
-      seen.add(id);
-      if (want && !want.has(id)) return full;
-      touched += 1;
-      changed = true;
-      const nextAttrs = attrs
-        .replace(/\s+count="[^"]*"/i, "")
-        .replace(/\s+\/\s*$/i, "");
-      return `<Building${nextAttrs} count="${countText}"/>`;
-    });
+    // Match both `<Building .../>` and `<Building ...>children</Building>`.
+    // Rewriting only the open tag of the paired form would leave its closing
+    // tag behind and corrupt the document.
+    const patched = block.replace(
+      /<Building\b([^>]*?)(\/>|>[\s\S]*?<\/Building\s*>)/gi,
+      (full, attrs: string) => {
+        const id = attrs.match(/\bid="([^"]+)"/i)?.[1];
+        if (!id) return full;
+        seen.add(id);
+        if (want && !want.has(id)) return full;
+        touched += 1;
+        changed = true;
+        const nextAttrs = attrs.replace(/\s+count="[^"]*"/i, "").replace(/\s+\/\s*$/i, "");
+        return `<Building${nextAttrs} count="${countText}"/>`;
+      },
+    );
 
     if (want) {
       const missing = [...want].filter((id) => !seen.has(id));
@@ -618,15 +626,13 @@ export function maxBuildingsStash(xml: string, ids: string[] = [], count = 10) {
 
   const rows = want ? [...want].map((id) => `  <Building id="${id}" count="${countText}"/>`).join("\n") : "";
   const block = `<BuildingsStash>\n${rows}${rows ? "\n" : ""}</BuildingsStash>\n`;
-  for (const closer of ["</Global>", "</root>", "</Root>"]) {
-    if (text.includes(closer)) return text.replace(closer, block + closer);
-  }
-  return text + block;
+  return insertInsideRoot(text, block);
 }
 
 export function maxFragments(xml: string) {
   return xml.replace(/<FragmentedBeautyManager\b[\s\S]*?<\/FragmentedBeautyManager\s*>/i, (block) =>
-    block.replace(/\bactive="0"/gi, 'active="1"'),
+    // `active` is written as 0/1 by the game; treat anything non-1 as inactive.
+    block.replace(/\bactive="(?:0|false)"/gi, 'active="1"'),
   );
 }
 

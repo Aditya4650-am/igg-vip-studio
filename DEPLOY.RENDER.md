@@ -15,7 +15,11 @@ git remote add origin https://github.com/<you>/igg-vip-studio.git
 git push -u origin main
 ```
 
-`render.yaml` and `nixpacks.toml` (Node 22 + Python 3.11) must be committed.
+`render.yaml` must be committed. `nixpacks.toml` is harmless but Render
+does not consume it: Render's native runtimes use Cloud Native Buildpacks
+(Paketo), not Nixpacks. Python is already part of Render's native runtime
+toolchain (`python3`, `python3-dev`, `python3-pip` are available at both build
+and deploy time), so no extra package declaration is needed.
 
 ## Step 2 — Create the Web Service
 
@@ -49,7 +53,7 @@ git push -u origin main
 
 ## Step 4 — Deploy
 
-Click **Create Web Service**. Nixpacks installs Node 22 + Python 3.11, runs the
+Click **Create Web Service**. Render installs Node 22, runs the
 build, then starts the server. Live URL: `https://<service-name>.onrender.com`.
 
 ## Step 5 — Point the Windows EXE at it
@@ -62,7 +66,8 @@ build, then starts the server. Live URL: `https://<service-name>.onrender.com`.
 The chain is: **LocalInfo (real bver/fver from your emulator) → fetch_city.py
 → clone friend city into your save → push back**.
 
-- On Render, `spawn("python3", …)` works because Nixpacks installs Python.
+- On Render, `spawn("python3", …)` works: `python3` ships with Render's native
+  runtime image on Debian 12 (bookworm), independent of `nixpacks.toml`.
 - `bver` / `fver` come from YOUR device's `mLocalInfo.xml` — the app
   auto-pulls them (Refresh LocalInfo). Dummy versions get HTTP 403.
 - Honest limitation: FetchCity calls `township.playrix.com`. If Playrix
