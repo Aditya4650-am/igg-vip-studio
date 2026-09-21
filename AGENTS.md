@@ -120,6 +120,26 @@ Guard rails: `studio-pipeline.test.ts` asserts `crd` is absent from the catalogu
 and that the friend snapshot exposes no card counter, so the feature cannot
 return silently.
 
+## Avatar icons
+
+`public/avatars/ava1.webp` … `ava349.webp` are the real profile pictures from
+`township_profile_pictures_ava.webp.zip`, one file per avatar, numbered to match
+the game's own avatar index. `AVATAR_ICON_MAX` (349) is the count of shipped
+artwork and `AVATAR_MAX` (398) is the highest avatar the game offers, so avatars
+350-398 have no picture.
+
+`avatarIconPath(n)` returns the artwork URL only for 1..349 and `null` past that;
+`avatarEmoji(n)` returns a distinct face from `AVATAR_EMOJIS` (50 entries, 49
+needed) so the trailing avatars never repeat and never fall back to the star
+placeholder. Both parse the number strictly, so `-3` is rejected instead of
+being read as `3`. `GroupCard` passes `avatar` to `Chip`, which swaps in
+`.chip-asset-avatar` — a circular well with `object-fit: cover` — since the
+source art is square but the well is 40px round.
+
+Guard rails: `studio-pipeline.test.ts` asserts every shipped file maps to its own
+path, that the trailing avatars get unique non-star emoji, and that out-of-range
+numbers resolve to `null`.
+
 ## Windows client
 
 Built by `.github/workflows/build-client.yml` on a `windows-latest` runner,

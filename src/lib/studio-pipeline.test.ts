@@ -8,6 +8,9 @@ process.env.IGG_VIP_URL = "";
 const studio = await import("./server/studio.server.ts");
 const { verifyLicenseKey } = await import("./server/license.server.ts");
 const { findUnbalancedTag } = await import("./server/township/xml-edit.server.ts");
+const { avatarEmoji, avatarIconPath, AVATAR_EMOJIS, AVATAR_ICON_MAX, AVATAR_MAX } =
+  await import("./catalogs.ts");
+const { readdirSync } = await import("node:fs");
 
 const { token } = verifyLicenseKey("VIP-DEMO", "TEST-DEVICE-0001");
 
@@ -176,5 +179,38 @@ test("fetch city: validates input before touching python", async () => {
   // reason once the fallback pair was actually exercised against the API.
   if (err !== null) {
     assert.doesNotMatch(err, /missing game version\/FVer|refresh LocalInfo first/i, "version guard must no longer block FetchCity");
+  }
+});
+
+test("avatars: every shipped artwork resolves to one icon path", () => {
+  const files = readdirSync("public/avatars").filter((f) => f.endsWith(".webp"));
+  assert.equal(files.length, AVATAR_ICON_MAX, "asset count must match AVATAR_ICON_MAX");
+  const seen = new Set<string>();
+  for (let n = 1; n <= AVATAR_ICON_MAX; n++) {
+    const src = avatarIconPath(String(n));
+    assert.equal(src, `/avatars/ava${n}.webp`, `avatar ${n} must map to its own file`);
+    assert.ok(files.includes(`ava${n}.webp`), `ava${n}.webp must be shipped`);
+    assert.ok(!seen.has(src!), `avatar ${n} reuses ${src}`);
+    seen.add(src!);
+  }
+});
+
+test("avatars: past the artwork each one gets a distinct emoji, never a star", () => {
+  const extras = AVATAR_MAX - AVATAR_ICON_MAX;
+  assert.ok(extras > 0, "there must be trailing avatars to cover");
+  const seen = new Set<string>();
+  for (let n = AVATAR_ICON_MAX + 1; n <= AVATAR_MAX; n++) {
+    assert.equal(avatarIconPath(String(n)), null, `avatar ${n} has no artwork`);
+    const emoji = avatarEmoji(String(n));
+    assert.ok(emoji, `avatar ${n} needs an emoji`);
+    assert.notEqual(emoji, "✦", `avatar ${n} must not fall back to the star`);
+    seen.add(emoji!);
+  }
+  assert.equal(seen.size, Math.min(extras, AVATAR_EMOJIS.length), "trailing emojis must not repeat");
+});
+
+test("avatars: out-of-range numbers never produce a broken icon", () => {
+  for (const bad of ["0", "-3", "399", "abc", "", "999999"]) {
+    assert.equal(avatarIconPath(bad), null, `${bad} must not resolve to a path`);
   }
 });

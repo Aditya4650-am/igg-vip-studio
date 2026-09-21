@@ -11,7 +11,7 @@ import { OwnerHub } from "@/components/owner-hub";
 import { cn } from "@/lib/utils";
 import { LANGS, isLang, t, type Lang, type Dict } from "@/lib/i18n";
 import { isDeviceId, mintDeviceId } from "@/lib/device-id";
-import { AVATAR_MAX, avatarGroupId, avatarsInRange, type Group, type Item } from "@/lib/catalogs";
+import { AVATAR_MAX, avatarEmoji, avatarGroupId, avatarIconPath, avatarsInRange, type Group, type Item } from "@/lib/catalogs";
 import { iconForBarn, iconForDecorLabel, iconForGem, iconForGroup, iconForItemLabel, iconForProfileLabel, iconForSkin, iconForStat, iconForSticker } from "@/lib/game-icon-map";
 import {
   connectLoad,
@@ -105,6 +105,7 @@ const TAB_ICON: Record<Tab, GameIconName> = {
 
 function groupIcon(id: string): GameIconName {
   const value = id.toLowerCase();
+  if (value.startsWith("ava_")) return "avatar";
   if (value.includes("frame") || value.includes("badge") || value.includes("theme")) return "sticker";
   if (value.includes("style") || value.includes("skin")) return "skin";
   if (value.includes("rank")) return "season";
@@ -142,6 +143,7 @@ function statEmoji(id: string): string {
 
 function groupEmoji(id: string): string {
   const value = id.toLowerCase();
+  if (value.startsWith("ava_")) return "🧑";
   if (value.includes("badge") || value.includes("rank") || value === "expranks") return "🏅";
   if (value.includes("frame")) return "🖼️";
   if (value.includes("style") || value.includes("theme")) return "🎨";
@@ -925,6 +927,7 @@ const Chip = memo(function Chip({
   iconSrc,
   emoji,
   banner,
+  avatar,
 }: {
   checked: boolean;
   onChange: () => void;
@@ -932,6 +935,7 @@ const Chip = memo(function Chip({
   iconSrc?: string | null;
   emoji?: string | null;
   banner?: boolean;
+  avatar?: boolean;
 }) {
   const fallback = emoji || "✦";
   return (
@@ -955,8 +959,18 @@ const Chip = memo(function Chip({
         <GameIcon name="success" className={cn("size-3", checked ? "is-on" : "is-off")} />
       </span>
       {iconSrc ? (
-        <span className={cn("chip-asset", banner && "chip-asset-banner")} aria-hidden="true">
-          <img src={iconSrc} alt="" className="chip-asset-img" draggable={false} />
+        <span
+          className={cn("chip-asset", avatar && "chip-asset-avatar", banner && "chip-asset-banner")}
+          aria-hidden="true"
+        >
+          <img
+            src={iconSrc}
+            alt=""
+            className="chip-asset-img"
+            loading="lazy"
+            decoding="async"
+            draggable={false}
+          />
         </span>
       ) : (
         <span className="chip-asset chip-emoji" aria-hidden="true">
@@ -1055,6 +1069,9 @@ function GroupCard({
       {open ? (
         <div className="grid grid-cols-2 gap-x-2 sm:grid-cols-3 lg:grid-cols-4">
           {group.items.map((it) => {
+            const isAva = group.id.startsWith("ava_");
+            const avaIcon = isAva ? avatarIconPath(it.id) : null;
+            const avaEmoji = isAva && !avaIcon ? avatarEmoji(it.id) : null;
             const skinIcon = iconForSkin(group.id, it.label);
             const profileIcon = iconForProfileLabel(it.label);
             const itemIcon = iconForItemLabel(it.label);
@@ -1063,8 +1080,9 @@ function GroupCard({
               <Chip
                 key={it.id}
                 label={it.label}
-                iconSrc={skinIcon ?? profileIcon ?? itemIcon ?? gemIcon}
-                emoji={itemEmoji(group.id, it.label)}
+                iconSrc={avaIcon ?? skinIcon ?? profileIcon ?? itemIcon ?? gemIcon}
+                emoji={avaEmoji ?? (avaIcon ? null : itemEmoji(group.id, it.label))}
+                avatar={Boolean(avaIcon)}
                 banner={group.id === "Styles" || group.id === "Themes"}
                 checked={selected.has(it.id)}
                 onChange={() => onToggle(it.id)}
