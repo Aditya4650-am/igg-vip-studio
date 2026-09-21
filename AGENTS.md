@@ -194,6 +194,14 @@ group is good evidence for its neighbours: the same block proves
 `Skin_Airport_SP3`, `Skin_HelicopterPlace_Robot`, `Skin_Helicopter_Robot` and
 `Skin_Train_SP5`, all of which the catalog already shipped.
 
-Station skins stay limited to what the game data proves. The 19 `*Station*.png`
-files under `public/game-icons/` include many event skins whose ids are
-unconfirmed, so they are deliberately left unmapped rather than guessed.
+The station group is complete: 22 confirmed ids plus `Default`. Every one of
+those 22 except `Skin_TrainStation_lunarNY2022` has an exact twin in the Train
+group (`Skin_TrainStation_X` <-> `Skin_Train_X`), which is a cheap way to
+sanity-check a newly supplied id list — if the sibling group has it, the id is
+almost certainly real. `SP2`/`SP5` are also confirmed rendering in-game.
+
+20 of the 22 have artwork in `public/game-icons/`; `france_68`,
+`celebrity_73` and `vacation_78` have none, in the repo or in any archive
+supplied so far, so they render with the group emoji. Icons are keyed by the
+short picker label, not the id, so adding art means adding a label entry to
+`skinsByGroupLabel.TrainStation` in `game-icon-map.ts`.
