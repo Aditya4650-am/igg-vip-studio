@@ -7,7 +7,7 @@ import { applyStatChanges, parseStats, readAnyVar, STAT_ALIASES } from "./townsh
 import { shellErrorMessage } from "./township/save-decode.server";
 import { findUnbalancedTag } from "./township/xml-edit.server";
 import { applyBarnCapacity, applyBarnItems, barnInfo } from "./township/barn.server";
-import { injectAcademyMax, injectAvatars, injectItems, injectMuseum, injectProfile, injectRegata, injectSeason, injectSkins, injectZooUnlocks, parseProfileUnlocked, discoverAcademy, discoverMuseumVars, discoverPaddocks } from "./township/inject.server";
+import { injectAcademyMax, injectAvatars, injectItems, injectMuseum, injectProfile, injectRegata, injectSeason, injectSkins, injectZooUnlocks, parseProfileUnlocked, discoverAcademy, discoverMuseumVars, discoverPaddocks, deriveZooUnlockState } from "./township/inject.server";
 import {
   applyDesban,
   cloneDecorOnly,
@@ -335,12 +335,20 @@ export function applySave(p: SavePayload) {
   // Like the existing avatar/skin steps, a requested operation always reports a
   // part even when the save already held the target value.
   if (p.zooPaddocks?.length) {
+    // The unlock value is learned from this save, never assumed: see
+    // deriveZooUnlockState. If the save has no paddock states there is nothing
+    // to learn from, so the paddock counters are left exactly as they were.
+    const unlockedState = deriveZooUnlockState(s.rawXml);
     s.rawXml = injectZooUnlocks(s.rawXml, {
       paddockIds: p.zooPaddocks,
-      unlockedState: "18",
+      unlockedState: unlockedState ?? undefined,
       zooExpandLevel: p.zooExpandLevel ?? null,
     });
-    parts.push(`zoo(${p.zooPaddocks.length})`);
+    parts.push(
+      unlockedState
+        ? `zoo(${p.zooPaddocks.length}→${unlockedState})`
+        : `zoo-expand(${p.zooExpandLevel ?? "none"})`,
+    );
   }
   if (p.academyBlvl?.length) {
     s.rawXml = injectAcademyMax(s.rawXml, { blvlNames: p.academyBlvl, maxLevel: p.academyMaxLevel });

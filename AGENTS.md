@@ -205,3 +205,30 @@ almost certainly real. `SP2`/`SP5` are also confirmed rendering in-game.
 supplied so far, so they render with the group emoji. Icons are keyed by the
 short picker label, not the id, so adding art means adding a label entry to
 `skinsByGroupLabel.TrainStation` in `game-icon-map.ts`.
+
+## Zoo unlock: no invented sentinel
+
+`paddock_<id>_state` is **not** a documented unlock flag. Cross-referencing the
+real save disproves the obvious reading: 12 counters sit at `18` with no matching
+map `Object` (`paddock_polar_bear`, `paddock_penguin`, ...), 12 map objects have
+no counter at all (`paddock_lion`, `paddock_tiger`, ...), and `paddock_flamingo`
+is on the map while its counter reads `10`. So "18 = unlocked" is a guess:
+writing it reports success while possibly changing nothing in game — the exact
+failure that got the card feature deleted.
+
+The inject therefore takes the value from the caller and never substitutes a
+constant. `deriveZooUnlockState()` supplies it from the save itself: the highest
+state already present, which is the only value the game is known to have written.
+It returns `null` for a save with no paddock counters, or one whose paddocks all
+read `0`, and the pipeline then reports a zoo-expand part or leaves them alone.
+
+`ZooExpandLevel` is a separate, real counter and is only written when the user
+opts in. `sq0` companions (`paddock_<id>sq0_state`) are the same animal's second
+slot, cleared to `0` alongside the primary.
+
+## Academy / Museum values
+
+`999` for `BLvl_*` is backed by the data: 39 of the 51 factories in the real save
+already sit at `999`, so it is the game's own max. Tests assert the written value
+and the reported part for each of the three features on their own, together, and
+alongside an existing operation.

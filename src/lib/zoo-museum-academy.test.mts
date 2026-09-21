@@ -10,6 +10,7 @@ const { verifyLicenseKey } = await import("./server/license.server.ts");
 const { findUnbalancedTag } = await import("./server/township/xml-edit.server.ts");
 const { readVar } = await import("./server/township/vars.server.ts");
 const {
+  deriveZooUnlockState,
   discoverAcademy,
   discoverMuseumVars,
   discoverPaddocks,
@@ -120,10 +121,28 @@ test("zoo unlock writes the state and clears the sq0 companion", () => {
   balanced(out);
 });
 
-test("zoo unlock defaults to 18 and leaves ZooExpandLevel alone", () => {
+test("zoo unlock without an explicit value changes no paddock counter", () => {
+  // No documented "unlocked" sentinel exists, so an absent value must not be
+  // replaced by a guessed constant: that is the silent no-op this repo bans.
   const out = injectZooUnlocks(save, { paddockIds: ["paddock_snow_monkey_state"] });
-  assert.equal(readVar(out, "paddock_snow_monkey_state"), "18");
+  assert.equal(out, save, "no value means no edit, never a hardcoded fallback");
   assert.equal(readVar(out, "ZooExpandLevel"), "127", "expansion must not change unless asked");
+});
+
+test("zoo unlock state is derived from the highest state in the save", () => {
+  assert.equal(deriveZooUnlockState(save), "18");
+  const mixed = save.replace('<Var name="paddock_bear_state" v="10" t="i"/>', '<Var name="paddock_bear_state" v="42" t="i"/>');
+  assert.equal(deriveZooUnlockState(mixed), "42", "must learn the max, not assume 18");
+  const noPaddocks = "<root><Var name=\"ZooExpandLevel\" v=\"5\" t=\"i\"/></root>";
+  assert.equal(deriveZooUnlockState(noPaddocks), null, "nothing to learn from");
+  const allZero = '<root><Var name="paddock_bear_state" v="0" t="i"/><Var name="paddock_koala_state" v="0" t="i"/></root>';
+  assert.equal(deriveZooUnlockState(allZero), null, "all-zero paddocks show no unlocked level to copy");
+});
+
+test("zoo discovery reports the states already in the save", () => {
+  const states = discoverPaddocks(save).map((p) => p.state);
+  assert.ok(states.every((s) => /^\d+$/.test(s)), "discovery must surface numeric states");
+  assert.equal(deriveZooUnlockState(save), String(Math.max(...states.map(Number))));
 });
 
 test("zoo unlock only touches ZooExpandLevel when explicitly given", () => {
@@ -134,20 +153,20 @@ test("zoo unlock only touches ZooExpandLevel when explicitly given", () => {
 });
 
 test("zoo unlock never invents a paddock that is not in the save", () => {
-  const out = injectZooUnlocks(save, { paddockIds: ["paddock_unicorn_state", "paddock_t-rex_state"] });
+  const out = injectZooUnlocks(save, { paddockIds: ["paddock_unicorn_state", "paddock_t-rex_state"], unlockedState: "18" });
   assert.equal(out, save, "no discovered target means no edit");
   assert.ok(!out.includes("unicorn"));
 });
 
 test("zoo unlock leaves TownGround grids untouched", () => {
   const withGround = `<root><TownGround ver="2"><row j="0" v="***()***"/></TownGround>${save.slice("<root>".length)}`;
-  const out = injectZooUnlocks(withGround, { paddockIds: ["paddock_bear_state"] });
+  const out = injectZooUnlocks(withGround, { paddockIds: ["paddock_bear_state"], unlockedState: "18" });
   assert.ok(out.includes('<row j="0" v="***()***"/>'), "map grid changed");
 });
 
 test("zoo unlock is idempotent", () => {
-  const once = injectZooUnlocks(save, { paddockIds: ["paddock_bear_state"] });
-  const twice = injectZooUnlocks(once, { paddockIds: ["paddock_bear_state"] });
+  const once = injectZooUnlocks(save, { paddockIds: ["paddock_bear_state"], unlockedState: "18" });
+  const twice = injectZooUnlocks(once, { paddockIds: ["paddock_bear_state"], unlockedState: "18" });
   assert.equal(once, twice);
 });
 
@@ -195,7 +214,7 @@ test("academy max only accepts BLvl_ names and never creates one", () => {
 test("zoo saves through the normal pipeline and reports a part", () => {
   const { sessionId } = load();
   const r = studio.applySave({ token, sessionId, zooPaddocks: ["paddock_bear_state"] });
-  assert.deepEqual(r.parts, ["zoo(1)"]);
+  assert.deepEqual(r.parts, ["zoo(1→18)"]);
   const xml = decode(r.fileB64!);
   assert.equal(readVar(xml, "paddock_bear_state"), "18");
   balanced(xml);
@@ -221,7 +240,7 @@ test("museum saves through the normal pipeline and reports a part", () => {
 test("the three features work independently, together, and alongside existing ones", () => {
   // Independent: each produces only its own part.
   const a = load();
-  assert.deepEqual(studio.applySave({ token, sessionId: a.sessionId, zooPaddocks: ["paddock_bear_state"] }).parts, ["zoo(1)"]);
+  assert.deepEqual(studio.applySave({ token, sessionId: a.sessionId, zooPaddocks: ["paddock_bear_state"] }).parts, ["zoo(1→18)"]);
   const b = load();
   assert.deepEqual(studio.applySave({ token, sessionId: b.sessionId, academyBlvl: ["BLvl_bakery"] }).parts, ["academy(1)"]);
   const c = load();
@@ -237,7 +256,7 @@ test("the three features work independently, together, and alongside existing on
     museumVars: { Achievement_ArtefactHunterIslands: "7777" },
     barnUpgrades: 100,
   });
-  assert.deepEqual(r.parts, ["barn(100)", "zoo(2)", "academy(1)", "museum(1)"]);
+  assert.deepEqual(r.parts, ["barn(100)", "zoo(2→18)", "academy(1)", "museum(1)"]);
   const xml = decode(r.fileB64!);
   assert.equal(readVar(xml, "paddock_bear_state"), "18");
   assert.equal(readVar(xml, "paddock_snow_monkey_state"), "18");

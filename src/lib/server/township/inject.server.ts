@@ -366,14 +366,18 @@ export function injectZooUnlocks(
   opts: { paddockIds: string[]; unlockedState?: string; zooExpandLevel?: number | null },
 ) {
   let text = asText(xml);
-  const state = /^\d+$/.test(String(opts.unlockedState ?? "").trim()) ? String(opts.unlockedState).trim() : "18";
+  // No verified "unlocked" sentinel exists for paddocks in the save data, so the
+  // caller must pass the value. Falling back to a fixed number here would be a
+  // guess that looks like success while possibly doing nothing in game.
+  const state = String(opts.unlockedState ?? "").trim();
+  const usable = /^\d+$/.test(state);
   for (const raw of opts.paddockIds ?? []) {
     const id = normalizePaddockId(raw);
     if (!id) continue;
     // Only counters already in the save are written: a missing paddock is one
     // this game build does not have, so creating it would be a fake id.
     if (readVar(text, id) == null) continue;
-    text = writeVar(text, id, state);
+    if (usable) text = writeVar(text, id, state);
     const sq0 = `${id.slice(0, -"_state".length)}sq0_state`;
     if (readVar(text, sq0) != null) text = writeVar(text, sq0, "0");
   }
@@ -435,6 +439,26 @@ export function discoverPaddocks(xml: string) {
   return varsInDocumentOrder(xml, /<Var\b[^>]*\bname="(paddock_[^"]*)"[^>]*\bv="([^"]*)"/gi)
     .filter((v) => /^paddock_[A-Za-z_][\w]*_state$/.test(v.name) && !v.name.endsWith("sq0_state"))
     .map((v) => ({ id: v.name, name: paddockLabel(v.name), state: v.value }));
+}
+
+/**
+ * Zoo unlock sentinel, read from the save itself instead of a hardcoded guess.
+ *
+ * Township ships no documented "unlocked" value for `paddock_*_state`, and no
+ * constant is safe to invent: the game may reject or ignore a value it never
+ * wrote itself. The highest state already present in this save is the only
+ * value we can justify, so "unlock" raises every paddock to that level.
+ * Returns null when the save has no numeric paddock states to learn from.
+ */
+export function deriveZooUnlockState(xml: string): string | null {
+  const states = discoverPaddocks(xml)
+    .map((p) => Number(p.state))
+    .filter((n) => Number.isFinite(n) && n >= 0);
+  if (!states.length) return null;
+  const max = Math.max(...states);
+  // A save whose paddocks all sit at 0 shows no unlocked paddock to learn from,
+  // so writing 0 back would report success while changing nothing.
+  return max > 0 ? String(max) : null;
 }
 
 export function discoverMuseumVars(xml: string) {
