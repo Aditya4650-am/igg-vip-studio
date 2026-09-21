@@ -80,11 +80,6 @@ const saveSchema = z.object({
   decorFragments: z.boolean().optional(),
   decorClone: z.boolean().optional(),
   decorMaxAll: z.boolean().optional(),
-  zooPaddocks: z.array(z.string()).optional(),
-  zooExpandLevel: z.number().nullable().optional(),
-  museumVars: z.record(z.string(), z.string()).optional(),
-  academyBlvl: z.array(z.string()).optional(),
-  academyMaxLevel: z.string().optional(),
 });
 
 export const saveAll = createServerFn({ method: "POST" })

@@ -486,7 +486,7 @@
     right: auto;
     bottom: 0;
     left: 0.75rem;
-    width: calc((100% - 1.5rem) / 12);
+    width: calc((100% - 1.5rem) / 9);
     border-top-left-radius: var(--radius-md);
     border-top-right-radius: var(--radius-md);
     background: var(--color-primary);
@@ -3444,8 +3444,8 @@ button.premium-button:active:not(:disabled) {
    R3 Inter for all UI text, emoji stack only for emoji glyphs.
    ══════════════════════════════════════════════════════════════════ */
 
-/* 1) The sliding .tab-pill was sized for an earlier tab count and drifts
-      between the current tabs. Per-tab active styling carries the effect. */
+/* 1) The sliding .tab-pill was sized for 9 tabs and drifts between
+      the 10 current tabs. Per-tab active styling carries the effect. */
 .app-root .feature-tabs .tab-pill {
   display: none !important;
 }

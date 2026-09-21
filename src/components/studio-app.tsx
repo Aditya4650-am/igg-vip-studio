@@ -29,7 +29,7 @@ import {
   attachLocal,
 } from "@/lib/studio-api";
 
-type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "barn" | "zoo" | "museum" | "academy";
+type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "barn";
 type SessionSnap = Awaited<ReturnType<typeof connectLoad>>;
 type Catalogs = Awaited<ReturnType<typeof getCatalogs>>;
 type UnbanMode = "inicial" | "completo" | "novo";
@@ -78,7 +78,7 @@ function downloadText(name: string, text: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "barn", "zoo", "museum", "academy"];
+const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "barn"];
 const TAB_KEY: Record<Tab, keyof Dict> = {
   data: "tabData",
   profile: "tabProfile",
@@ -89,9 +89,6 @@ const TAB_KEY: Record<Tab, keyof Dict> = {
   sticker: "tabSticker",
   items: "tabItems",
   barn: "tabBarn",
-  zoo: "tabZoo",
-  museum: "tabMuseum",
-  academy: "tabAcademy",
 };
 const TAB_ICON: Record<Tab, GameIconName> = {
   data: "data",
@@ -103,9 +100,6 @@ const TAB_ICON: Record<Tab, GameIconName> = {
   sticker: "sticker",
   items: "items",
   barn: "barn",
-  zoo: "zoo",
-  museum: "museum",
-  academy: "academy",
 };
 
 
@@ -811,10 +805,7 @@ type GameIconName =
   | "warning"
   | "success"
   | "control"
-  | "search"
-  | "zoo"
-  | "museum"
-  | "academy";
+  | "search";
 
 /**
  * Small, original game-management glyphs. These are intentionally drawn in
@@ -903,15 +894,6 @@ function GameIcon({ name, className, ...props }: { name: GameIconName; className
       break;
     case "search":
       content = <><circle cx="10.8" cy="10.8" r="6.3" /><path d="m15.5 15.5 5 5" /></>;
-      break;
-    case "zoo":
-      content = <><path d="M4 9.5 12 3.5l8 6v9.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19z" /><path d="M9.3 14.6c0-1.5 1.2-2.6 2.7-2.6s2.7 1.1 2.7 2.6M12 12v6.5M8.4 8.6c.5-.5 1.1-.7 1.8-.7s1.3.2 1.8.7" /></>;
-      break;
-    case "museum":
-      content = <><path d="M3.5 9.8 12 4.2l8.5 5.6M5.4 10.6v8.2M9.2 10.6v8.2M14.8 10.6v8.2M18.6 10.6v8.2M3.2 19.4h17.6" /></>;
-      break;
-    case "academy":
-      content = <><path d="M12 4 2.8 8.6 12 13.2l9.2-4.6z" /><path d="M6.4 11v4.4c0 1.6 2.5 2.9 5.6 2.9s5.6-1.3 5.6-2.9V11M21.2 8.6v6.2" /></>;
       break;
   }
   return (
@@ -1178,18 +1160,6 @@ export function StudioApp() {
   const [pendingDecorFragments, setPendingDecorFragments] = useState(false);
   const [pendingDecorClone, setPendingDecorClone] = useState(false);
   const [pendingDecorMaxAll, setPendingDecorMaxAll] = useState(false);
-  // Zoo / Museum / Academy keep their own selection + pending state so each
-  // works independently and none of them can disturb the existing editors.
-  const [zooSel, setZooSel] = useState<Set<string>>(new Set());
-  const [pendingZoo, setPendingZoo] = useState(false);
-  const [zooSearch, setZooSearch] = useState("");
-  const [zooExpand, setZooExpand] = useState("");
-  const [academySel, setAcademySel] = useState<Set<string>>(new Set());
-  const [pendingAcademy, setPendingAcademy] = useState(false);
-  const [academySearch, setAcademySearch] = useState("");
-  const [academyMax, setAcademyMax] = useState("999");
-  const [museumEdits, setMuseumEdits] = useState<Record<string, string>>({});
-  const [pendingMuseum, setPendingMuseum] = useState(false);
   const initialStatsRef = useRef<Record<string, string>>({});
   const localInfoAtRef = useRef(0);
   const autoLoginStartedRef = useRef(false);
@@ -1454,21 +1424,10 @@ export function StudioApp() {
     return Object.entries(barnItems).some(([k, v]) => v !== (session.barn.items[k] ?? 0));
   }, [session, barnUpgrades, barnItems]);
 
-  // Live discovery from the loaded save. The server derives these from the real
-  // XML, so the UI never has to invent paddock/factory/counter names.
-  const zooNow = session?.zoo ?? [];
-  const museumNow = useMemo(() => {
-    const out: Record<string, string> = {};
-    for (const v of session?.museum ?? []) out[v.name] = v.value;
-    return out;
-  }, [session]);
-  const academyNow = session?.academy ?? [];
-
   const pending =
     profileSel.count + avatarSel.count + skinSel.count + itemSel.count + decorSel.size + stickerSel.size +
     (barnDirty ? 1 : 0) + (pendingRegatta ? 1 : 0) + (pendingSeason ? 1 : 0) + (pendingUnban ? 1 : 0) +
-    (pendingDecorFragments ? 1 : 0) + (pendingDecorClone ? 1 : 0) + (pendingDecorMaxAll ? 1 : 0) +
-    (pendingZoo ? 1 : 0) + (pendingAcademy ? 1 : 0) + (pendingMuseum ? 1 : 0);
+    (pendingDecorFragments ? 1 : 0) + (pendingDecorClone ? 1 : 0) + (pendingDecorMaxAll ? 1 : 0);
 
   const parseQty = useCallback(() => {
     const n = Number.parseInt(bulkQty, 10);
@@ -1527,10 +1486,7 @@ export function StudioApp() {
         pendingSeason ||
         pendingDecorFragments ||
         pendingDecorClone ||
-        pendingDecorMaxAll ||
-        pendingZoo ||
-        pendingAcademy ||
-        pendingMuseum;
+        pendingDecorMaxAll;
 
       if (pendingUnban && !hasOtherChanges) {
         const r = await applyUnban({
@@ -1575,15 +1531,6 @@ export function StudioApp() {
           decorFragments: pendingDecorFragments,
           decorClone: pendingDecorClone,
           decorMaxAll: pendingDecorMaxAll,
-          zooPaddocks: pendingZoo ? [...zooSel] : undefined,
-          zooExpandLevel: pendingZoo && zooExpand.trim() ? Math.floor(Number(zooExpand)) : null,
-          academyBlvl: pendingAcademy ? [...academySel] : undefined,
-          academyMaxLevel: academyMax.trim() || undefined,
-          museumVars: pendingMuseum
-            ? Object.fromEntries(
-                Object.entries(museumEdits).filter(([k, v]) => String(v).trim() !== "" && k in museumNow),
-              )
-            : undefined,
         },
       });
       applySnap(r, catalogs?.profile);
@@ -1614,20 +1561,12 @@ export function StudioApp() {
       setPendingDecorFragments(false);
       setPendingDecorClone(false);
       setPendingDecorMaxAll(false);
-      // Only clear a flag after the save actually succeeded.
-      setZooSel(new Set());
-      setPendingZoo(false);
-      setZooExpand("");
-      setAcademySel(new Set());
-      setPendingAcademy(false);
-      setMuseumEdits({});
-      setPendingMuseum(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tr("nothing"));
     } finally {
       setBusy(false);
     }
-  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, pendingSeason, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingDecorMaxAll, parseDecorQty, tr, device, zooSel, pendingZoo, zooExpand, academySel, pendingAcademy, academyMax, museumEdits, pendingMuseum, museumNow]);
+  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, pendingSeason, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingDecorMaxAll, parseDecorQty, tr, device]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1688,9 +1627,6 @@ export function StudioApp() {
     sticker: stickerSel.size,
     items: itemSel.count,
     barn: barnDirty ? 1 : 0,
-    zoo: pendingZoo ? zooSel.size || 1 : 0,
-    museum: pendingMuseum ? Object.keys(museumEdits).length : 0,
-    academy: pendingAcademy ? academySel.size || 1 : 0,
   };
 
   const barnTotal = Object.values(barnItems).reduce((n, v) => n + (Number(v) || 0), 0);
@@ -2000,7 +1936,7 @@ export function StudioApp() {
 
         <section className="app-main flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg shadow-hairline">
           <nav
-            className="feature-tabs relative grid grid-cols-4 border-b border-border px-3 pt-3 sm:grid-cols-6 lg:grid-cols-12"
+            className="feature-tabs relative grid grid-cols-5 border-b border-border px-3 pt-3 sm:grid-cols-9"
           >
             <span aria-hidden className={cn("tab-pill", tabReady && "ready")} />
             {TABS.map((id) => {
@@ -2512,217 +2448,6 @@ export function StudioApp() {
                         {tr("showMore")}
                       </Button>
                     ) : null}
-                  </div>
-                )}
-
-                {tab === "zoo" && (
-                  <div className="space-y-3">
-                    <p className="text-sm text-muted">{tr("zooHint")}</p>
-                    <Bar
-                      hint={`${zooNow.length} ${zooNow.length === 1 ? "paddock" : "paddocks"}`}
-                      onAll={() => {
-                        setZooSel(new Set(zooNow.map((p) => p.id)));
-                        setPendingZoo(true);
-                      }}
-                      onClear={() => {
-                        setZooSel(new Set());
-                        setPendingZoo(false);
-                      }}
-                      allLabel={tr("zooUnlockAll")}
-                      clearLabel={tr("clear")}
-                      extra={
-                        <label className="flex items-center gap-2 text-xs text-muted">
-                          {tr("zooExpandLevel")}
-                          <input
-                            className="field field-qty"
-                            inputMode="numeric"
-                            placeholder={tr("zooExpandHint")}
-                            aria-label={tr("zooExpandLevel")}
-                            value={zooExpand}
-                            onChange={(e) => setZooExpand(e.target.value.replace(/[^\d]/g, ""))}
-                          />
-                        </label>
-                      }
-                    />
-                    {zooNow.length === 0 ? (
-                      <section className="panel grid min-h-40 place-items-center text-center">
-                        <div>
-                          <GameIcon name="zoo" className="empty-state-icon mx-auto size-7 text-muted" />
-                          <p className="mt-3 text-sm text-muted">{tr("zooEmpty")}</p>
-                        </div>
-                      </section>
-                    ) : (
-                      <section className="panel">
-                        <div className="mb-3 field-shell">
-                          <GameIcon name="search" className="field-leading-icon" />
-                          <input
-                            className="field search-field"
-                            placeholder={tr("zooSearch")}
-                            value={zooSearch}
-                            onChange={(e) => setZooSearch(e.target.value)}
-                            aria-label={tr("zooSearch")}
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-4">
-                          {zooNow
-                            .filter((p) => {
-                              const q = zooSearch.trim().toLowerCase();
-                              return !q || p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q);
-                            })
-                            .map((p) => (
-                              <Chip
-                                key={p.id}
-                                label={`${p.name} · ${p.state}`}
-                                emoji="🦁"
-                                checked={zooSel.has(p.id)}
-                                onChange={() => {
-                                  setPendingZoo(true);
-                                  setZooSel((prev) => {
-                                    const n = new Set(prev);
-                                    if (n.has(p.id)) n.delete(p.id);
-                                    else n.add(p.id);
-                                    return n;
-                                  });
-                                }}
-                              />
-                            ))}
-                        </div>
-                        <p className="mt-3 text-xs text-muted">
-                          {zooSel.size} {tr("zooSelected")} · {tr("decorApplyHint")}
-                        </p>
-                      </section>
-                    )}
-                  </div>
-                )}
-
-                {tab === "museum" && (
-                  <div className="space-y-3">
-                    <p className="text-sm text-muted">{tr("museumHint")}</p>
-                    <Bar
-                      hint={`${Object.keys(museumNow).length} ${Object.keys(museumNow).length === 1 ? "counter" : "counters"}`}
-                      onAll={() => {
-                        const all: Record<string, string> = {};
-                        for (const name of Object.keys(museumNow)) all[name] = "999";
-                        setMuseumEdits(all);
-                        setPendingMuseum(true);
-                      }}
-                      onClear={() => {
-                        setMuseumEdits({});
-                        setPendingMuseum(false);
-                      }}
-                      allLabel={tr("museumMaxAll")}
-                      clearLabel={tr("clear")}
-                    />
-                    {Object.keys(museumNow).length === 0 ? (
-                      <section className="panel grid min-h-40 place-items-center text-center">
-                        <div>
-                          <GameIcon name="museum" className="empty-state-icon mx-auto size-7 text-muted" />
-                          <p className="mt-3 text-sm text-muted">{tr("museumEmpty")}</p>
-                        </div>
-                      </section>
-                    ) : (
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        {Object.entries(museumNow).map(([name, value], i) => (
-                          <label key={name} className="stat-card panel" data-tone={String((i % 7) + 1)}>
-                            <span className="stat-title">
-                              <span className="stat-emoji" aria-hidden="true">🏛️</span>
-                              {name}
-                            </span>
-                            <span className="mt-1 text-xs text-muted">{tr("current")}: {value}</span>
-                            <input
-                              className="field field-stat mt-2"
-                              inputMode="numeric"
-                              aria-label={name}
-                              value={museumEdits[name] ?? ""}
-                              placeholder={value}
-                              onChange={(e) => {
-                                setPendingMuseum(true);
-                                setMuseumEdits((prev) => ({ ...prev, [name]: e.target.value.replace(/[^\d]/g, "") }));
-                              }}
-                            />
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {tab === "academy" && (
-                  <div className="space-y-3">
-                    <p className="text-sm text-muted">{tr("academyHint")}</p>
-                    <Bar
-                      hint={`${academyNow.length} ${academyNow.length === 1 ? "factory" : "factories"}`}
-                      onAll={() => {
-                        setAcademySel(new Set(academyNow.map((f) => f.name)));
-                        setPendingAcademy(true);
-                      }}
-                      onClear={() => {
-                        setAcademySel(new Set());
-                        setPendingAcademy(false);
-                      }}
-                      allLabel={tr("academyMaxAll")}
-                      clearLabel={tr("clear")}
-                      extra={
-                        <label className="flex items-center gap-2 text-xs text-muted">
-                          {tr("academyMaxLevel")}
-                          <input
-                            className="field field-qty"
-                            inputMode="numeric"
-                            aria-label={tr("academyMaxLevel")}
-                            value={academyMax}
-                            onChange={(e) => setAcademyMax(e.target.value.replace(/[^\d]/g, ""))}
-                          />
-                        </label>
-                      }
-                    />
-                    {academyNow.length === 0 ? (
-                      <section className="panel grid min-h-40 place-items-center text-center">
-                        <div>
-                          <GameIcon name="academy" className="empty-state-icon mx-auto size-7 text-muted" />
-                          <p className="mt-3 text-sm text-muted">{tr("academyEmpty")}</p>
-                        </div>
-                      </section>
-                    ) : (
-                      <section className="panel">
-                        <div className="mb-3 field-shell">
-                          <GameIcon name="search" className="field-leading-icon" />
-                          <input
-                            className="field search-field"
-                            placeholder={tr("academySearch")}
-                            value={academySearch}
-                            onChange={(e) => setAcademySearch(e.target.value)}
-                            aria-label={tr("academySearch")}
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-4">
-                          {academyNow
-                            .filter((f) => {
-                              const q = academySearch.trim().toLowerCase();
-                              return !q || f.name.toLowerCase().includes(q);
-                            })
-                            .map((f) => (
-                              <Chip
-                                key={f.name}
-                                label={`${f.name.replace(/^BLvl_/, "")} · ${f.level}`}
-                                emoji="🎓"
-                                checked={academySel.has(f.name)}
-                                onChange={() => {
-                                  setPendingAcademy(true);
-                                  setAcademySel((prev) => {
-                                    const n = new Set(prev);
-                                    if (n.has(f.name)) n.delete(f.name);
-                                    else n.add(f.name);
-                                    return n;
-                                  });
-                                }}
-                              />
-                            ))}
-                        </div>
-                        <p className="mt-3 text-xs text-muted">
-                          {academySel.size} {tr("academySelected")} · {tr("decorApplyHint")}
-                        </p>
-                      </section>
-                    )}
                   </div>
                 )}
 

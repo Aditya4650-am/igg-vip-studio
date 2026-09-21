@@ -7,7 +7,7 @@ import { applyStatChanges, parseStats, readAnyVar, STAT_ALIASES } from "./townsh
 import { shellErrorMessage } from "./township/save-decode.server";
 import { findUnbalancedTag } from "./township/xml-edit.server";
 import { applyBarnCapacity, applyBarnItems, barnInfo } from "./township/barn.server";
-import { injectAcademyMax, injectAvatars, injectItems, injectMuseum, injectProfile, injectRegata, injectSeason, injectSkins, injectZooUnlocks, parseProfileUnlocked, discoverAcademy, discoverMuseumVars, discoverPaddocks, deriveZooUnlockState } from "./township/inject.server";
+import { injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, parseProfileUnlocked } from "./township/inject.server";
 import {
   applyDesban,
   cloneDecorOnly,
@@ -214,11 +214,6 @@ export type SavePayload = {
   decorFragments?: boolean;
   decorClone?: boolean;
   decorMaxAll?: boolean;
-  zooPaddocks?: string[];
-  zooExpandLevel?: number | null;
-  museumVars?: Record<string, string>;
-  academyBlvl?: string[];
-  academyMaxLevel?: string;
 };
 
 function mergeUnique(a: string[], b: string[]) {
@@ -328,35 +323,6 @@ export function applySave(p: SavePayload) {
       s.rawXml = applyBarnItems(s.rawXml, revealed.barnItems);
       parts.push(`barn-items(${n})`);
     }
-  }
-
-  // Zoo / Museum / Academy run after every existing step so their relative
-  // order is unchanged. Zoo writes stats, so it must precede the parse below.
-  // Like the existing avatar/skin steps, a requested operation always reports a
-  // part even when the save already held the target value.
-  if (p.zooPaddocks?.length) {
-    // The unlock value is learned from this save, never assumed: see
-    // deriveZooUnlockState. If the save has no paddock states there is nothing
-    // to learn from, so the paddock counters are left exactly as they were.
-    const unlockedState = deriveZooUnlockState(s.rawXml);
-    s.rawXml = injectZooUnlocks(s.rawXml, {
-      paddockIds: p.zooPaddocks,
-      unlockedState: unlockedState ?? undefined,
-      zooExpandLevel: p.zooExpandLevel ?? null,
-    });
-    parts.push(
-      unlockedState
-        ? `zoo(${p.zooPaddocks.length}→${unlockedState})`
-        : `zoo-expand(${p.zooExpandLevel ?? "none"})`,
-    );
-  }
-  if (p.academyBlvl?.length) {
-    s.rawXml = injectAcademyMax(s.rawXml, { blvlNames: p.academyBlvl, maxLevel: p.academyMaxLevel });
-    parts.push(`academy(${p.academyBlvl.length})`);
-  }
-  if (p.museumVars && Object.keys(p.museumVars).length) {
-    s.rawXml = injectMuseum(s.rawXml, { varEdits: p.museumVars });
-    parts.push(`museum(${Object.keys(p.museumVars).length})`);
   }
 
   s.stats = parseStats(s.rawXml);
@@ -515,9 +481,6 @@ export function snapshot(s: Session) {
     friends: s.friends,
     friendCity: s.friendCity,
     unban: s.unban,
-    zoo: discoverPaddocks(s.rawXml ?? ""),
-    museum: discoverMuseumVars(s.rawXml ?? ""),
-    academy: discoverAcademy(s.rawXml ?? ""),
     log: s.log.slice(-12).map(safeLogLine),
   };
 }
