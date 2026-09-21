@@ -169,3 +169,31 @@ runtimes use Cloud Native Buildpacks (Paketo), not Nixpacks. Python does not
 need declaring: `python3` ships in Render's runtime image (Debian 12 bookworm)
 at both build and deploy time, which is what `spawn("python3", …)` relies on.
 Verify that assumption on a new host before trusting FetchCity there.
+
+## Skins: finding the real game ids
+
+Skin ids cannot be invented — a wrong id makes the tool write a skin the game
+ignores, and the failure is silent in the client. The authoritative source is
+the game's own data files, not the wiki and not the PNG filenames on disk.
+
+`mGameInfo.xml` and `LocalInfo.xml` are wrapped in a Township encoding. Decode
+them with `masridbd/township-xml` (`parsing_encoded_xml`): build it with
+`g++ -O2 -I. -o decode_bin src/*.cpp` (its CMake file pins absolute compiler
+paths, so a direct g++ invocation is easier), drop the game files into `input/`,
+and run it. The decoded `mGameInfo.xml` carries the live `<Skins>` block:
+
+```xml
+<type id="TrainStation" available="Skin_TrainStation_SP2|Skin_TrainStation_SP5|"/>
+<item id="TrainStation" current="Skin_TrainStation_SP5"/>
+```
+
+Two things follow from that block. The group id is the object type
+(`TrainStation`), not the artwork prefix (`Station`) — the PNGs are named
+`*_Station_Skin.png` while the ids are `Skin_TrainStation_*`. And one confirmed
+group is good evidence for its neighbours: the same block proves
+`Skin_Airport_SP3`, `Skin_HelicopterPlace_Robot`, `Skin_Helicopter_Robot` and
+`Skin_Train_SP5`, all of which the catalog already shipped.
+
+Station skins stay limited to what the game data proves. The 19 `*Station*.png`
+files under `public/game-icons/` include many event skins whose ids are
+unconfirmed, so they are deliberately left unmapped rather than guessed.
