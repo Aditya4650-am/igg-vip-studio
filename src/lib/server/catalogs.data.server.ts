@@ -454,6 +454,23 @@ export const RAW_SKINS: RawGroup[] = [
     ]
   },
   {
+    "id": "TrainStation",
+    "items": [
+      {
+        "id": "Skin_TrainStation_Default",
+        "label": "Default"
+      },
+      {
+        "id": "Skin_TrainStation_SP2",
+        "label": "Special SP2"
+      },
+      {
+        "id": "Skin_TrainStation_SP5",
+        "label": "Special SP5"
+      }
+    ]
+  },
+  {
     "id": "Harbor",
     "items": [
       {

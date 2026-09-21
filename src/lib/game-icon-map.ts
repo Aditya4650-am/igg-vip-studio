@@ -109,6 +109,9 @@ export const GAME_ICON_MAP = {
     "fabric": "/game-icons/Silk.png"
   },
   "skinsByGroupLabel": {
+    "TrainStation": {
+      "Default": "/game-icons/Train_Station_Skin.png"
+    },
     "Train": {
       "Christmas": "/game-icons/Christmas_Train_Skin.png",
       "Christmas 2024": "/game-icons/Magical_Christmas_Event_Christmas_Train_Skin.png",
@@ -258,6 +261,7 @@ export const GAME_ICON_MAP = {
   },
   "groups": {
     "Train": "/game-icons/Christmas_Train_Skin.png",
+    "TrainStation": "/game-icons/Train_Station_Skin.png",
     "Airplane": "/game-icons/Plane.png",
     "Airport": "/game-icons/Airport_Skin.png",
     "Helicopter": "/game-icons/Helicopter.png",
