@@ -1,4 +1,7 @@
 import { strict as assert } from "node:assert";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 
 import { publicCatalogs, revealSave } from "../catalogs.server.ts";
@@ -6,6 +9,8 @@ import { iconForGroup, iconForSkin } from "../../game-icon-map.ts";
 import { injectSkins } from "./inject.server.ts";
 import { SKINS_CATALOG } from "./skins-catalog.server.ts";
 import { findUnbalancedTag } from "./xml-edit.server.ts";
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 const catalogGroup = (id: string) => publicCatalogs().skins.find((g) => g.id === id);
 
@@ -70,4 +75,72 @@ test("every station skin in the catalog has a resolvable label", () => {
     assert.ok(it.label && it.label.length > 0, `station skin ${it.id} has no label`);
     assert.ok(!it.label.includes("TrainStation"), `label leaked the raw id: ${it.label}`);
   }
+});
+
+// The 22 ids confirmed by the game data: 21 have an identical twin in the
+// already-shipping Train group (Skin_TrainStation_X <-> Skin_Train_X), and
+// SP2/SP5 are confirmed rendering in-game.
+const EXPECTED_STATION_IDS = [
+  "Skin_TrainStation_SP2",
+  "Skin_TrainStation_SP5",
+  "Skin_TrainStation_SP8",
+  "Skin_TrainStation_western",
+  "Skin_TrainStation_christmas",
+  "Skin_TrainStation_easter",
+  "Skin_TrainStation_prehistoric",
+  "Skin_TrainStation_theatrical",
+  "Skin_TrainStation_lunarNY2022",
+  "Skin_TrainStation_mars",
+  "Skin_TrainStation_robinHood",
+  "Skin_TrainStation_rocknroll",
+  "Skin_TrainStation_knight",
+  "Skin_TrainStation_italy2024",
+  "Skin_TrainStation_halloween2024",
+  "Skin_TrainStation_christmas2024",
+  "Skin_TrainStation_festival",
+  "Skin_TrainStation_hellas2025",
+  "Skin_TrainStation_Gatsby",
+  "Skin_TrainStation_france_68",
+  "Skin_TrainStation_celebrity_73",
+  "Skin_TrainStation_vacation_78",
+];
+
+test("the catalog ships every confirmed station skin id and nothing invented", () => {
+  const skins = SKINS_CATALOG.TrainStation.split("|").filter((p) => p && p !== "Skin_TrainStation_Default");
+  assert.deepEqual([...skins].sort(), [...EXPECTED_STATION_IDS].sort());
+});
+
+test("every confirmed station id is offered by the public catalog", () => {
+  // Public ids are cloaked, so uncloak the whole group the way a save does.
+  const g = catalogGroup("TrainStation")!;
+  const revealed = revealSave({ skins: { TrainStation: g.items.map((i) => i.id) } });
+  const expected = [...EXPECTED_STATION_IDS, "Skin_TrainStation_Default"].sort();
+  assert.deepEqual([...revealed.skins.TrainStation].sort(), expected);
+});
+
+test("station icons resolve to files that exist on disk", () => {
+  let mapped = 0;
+  for (const it of catalogGroup("TrainStation")!.items) {
+    const icon = iconForSkin("TrainStation", it.label);
+    if (!icon) continue;
+    mapped += 1;
+    assert.ok(existsSync(join(repoRoot, "public", icon.replace(/^\//, ""))), `icon file missing: ${icon}`);
+  }
+  // France/Celebrity/Vacation have no artwork yet, so 20 of 23 rows carry an icon.
+  assert.equal(mapped, 20, `expected 20 station icons, got ${mapped}`);
+});
+
+test("station labels stay short and unique for the picker", () => {
+  const seen = new Set<string>();
+  for (const it of catalogGroup("TrainStation")!.items) {
+    assert.ok(it.label.length <= 16, `label too long for the picker: ${it.label}`);
+    assert.ok(!seen.has(it.label), `duplicate station label: ${it.label}`);
+    seen.add(it.label);
+  }
+});
+
+test("every confirmed station skin injects end to end", () => {
+  const out = injectSkins("<Global><Skins/></Global>", { TrainStation: EXPECTED_STATION_IDS });
+  assert.equal(findUnbalancedTag(out), null, `unbalanced XML: ${out}`);
+  for (const id of EXPECTED_STATION_IDS) assert.ok(out.includes(id), `injection dropped ${id}`);
 });

@@ -110,7 +110,26 @@ export const GAME_ICON_MAP = {
   },
   "skinsByGroupLabel": {
     "TrainStation": {
-      "Default": "/game-icons/Train_Station_Skin.png"
+      "Default": "/game-icons/Train_Station_Skin.png",
+      "Express": "/game-icons/Express_Portal.png",
+      "Ghost": "/game-icons/Ghost_Station.png",
+      "Disco": "/game-icons/Disco_Station.png",
+      "Cowboy": "/game-icons/Cowboy_Station.png",
+      "Christmas": "/game-icons/Christmas_Station_Skin.png",
+      "Easter": "/game-icons/Easter_Station_Skin.png",
+      "Ancient": "/game-icons/Ancient_Settlement.png",
+      "Theater": "/game-icons/Theater_Premiere_Event_Theater_Set_Station.png",
+      "Chinese": "/game-icons/Lantern_Festival_Event_2023_Chinese_Station_Skin.png",
+      "Space": "/game-icons/Martian_Odyssey_Event_2023_Space_Station_Skin.png",
+      "Camp": "/game-icons/Forest_Adventure_Event_Training_Camp_Skin.png",
+      "Record": "/game-icons/Rock_n_Roll_Festival_Event_Record_Station_Skin.png",
+      "Castle": "/game-icons/Brotherhood_of_the_Knights_Event_Castle_Station_Skin.png",
+      "Roman": "/game-icons/Italian_Holiday_Event_Roman_Station_Skin.png",
+      "Halloween": "/game-icons/Haunted_Halloween_Event_Halloween_Station_Skin.png",
+      "Magical": "/game-icons/Magical_Christmas_Event_Christmas_Station_Skin.png",
+      "Festival": "/game-icons/Flower_Pass_Event_Flower_Station_Skin.png",
+      "Hellas": "/game-icons/Mythic_Pass_Event_Mythic_Station_Skin.png",
+      "Gatsby": "/game-icons/Gatsby_Pass_Event_Gatsby_Train_Station_Skin.png"
     },
     "Train": {
       "Christmas": "/game-icons/Christmas_Train_Skin.png",

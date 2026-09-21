@@ -462,11 +462,91 @@ export const RAW_SKINS: RawGroup[] = [
       },
       {
         "id": "Skin_TrainStation_SP2",
-        "label": "Special SP2"
+        "label": "Express"
       },
       {
         "id": "Skin_TrainStation_SP5",
-        "label": "Special SP5"
+        "label": "Ghost"
+      },
+      {
+        "id": "Skin_TrainStation_SP8",
+        "label": "Disco"
+      },
+      {
+        "id": "Skin_TrainStation_western",
+        "label": "Cowboy"
+      },
+      {
+        "id": "Skin_TrainStation_christmas",
+        "label": "Christmas"
+      },
+      {
+        "id": "Skin_TrainStation_easter",
+        "label": "Easter"
+      },
+      {
+        "id": "Skin_TrainStation_prehistoric",
+        "label": "Ancient"
+      },
+      {
+        "id": "Skin_TrainStation_theatrical",
+        "label": "Theater"
+      },
+      {
+        "id": "Skin_TrainStation_lunarNY2022",
+        "label": "Chinese"
+      },
+      {
+        "id": "Skin_TrainStation_mars",
+        "label": "Space"
+      },
+      {
+        "id": "Skin_TrainStation_robinHood",
+        "label": "Camp"
+      },
+      {
+        "id": "Skin_TrainStation_rocknroll",
+        "label": "Record"
+      },
+      {
+        "id": "Skin_TrainStation_knight",
+        "label": "Castle"
+      },
+      {
+        "id": "Skin_TrainStation_italy2024",
+        "label": "Roman"
+      },
+      {
+        "id": "Skin_TrainStation_halloween2024",
+        "label": "Halloween"
+      },
+      {
+        "id": "Skin_TrainStation_christmas2024",
+        "label": "Magical"
+      },
+      {
+        "id": "Skin_TrainStation_festival",
+        "label": "Festival"
+      },
+      {
+        "id": "Skin_TrainStation_hellas2025",
+        "label": "Hellas"
+      },
+      {
+        "id": "Skin_TrainStation_Gatsby",
+        "label": "Gatsby"
+      },
+      {
+        "id": "Skin_TrainStation_france_68",
+        "label": "France"
+      },
+      {
+        "id": "Skin_TrainStation_celebrity_73",
+        "label": "Celebrity"
+      },
+      {
+        "id": "Skin_TrainStation_vacation_78",
+        "label": "Vacation"
       }
     ]
   },
