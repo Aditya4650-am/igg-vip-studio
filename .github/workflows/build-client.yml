@@ -32,6 +32,10 @@ jobs:
         working-directory: client
         run: python -m pip install --upgrade pip pyinstaller pywebview
 
+      - name: Test the client's URL handling
+        working-directory: client
+        run: python -m unittest discover -p "test_*.py" -v
+
       - name: Build EXE
         working-directory: client
         run: python -m PyInstaller --clean --noconfirm igg_client.spec

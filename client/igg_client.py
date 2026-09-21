@@ -14,6 +14,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import json
+import socket
+import ssl
 import os
 import re
 import shutil
@@ -24,7 +27,10 @@ import threading
 import time
 import urllib.request
 import zipfile
+from http.client import HTTPConnection, HTTPSConnection
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 # In a windowed (no-console) build sys.stdout/sys.stderr are None, not a
 # NullWriter. Anything that writes to them - including libraries we do not
@@ -38,11 +44,21 @@ if sys.stderr is None:
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.1.3"
 
 # Where the app UI comes from. Override with env IGG_VIP_URL or
 # %APPDATA%\IGG-VIP-Studio\server.txt
 DEFAULT_SERVER_URL = "https://igg-vip-studio-07u9.onrender.com"
+
+# Render serves every service through a wildcard record, so a name that the
+# local resolver rejects is a resolver fault, not a missing service. When the
+# OS resolver cannot answer we ask a public DNS-over-HTTPS endpoint for the
+# address and connect to it directly, which is what lets the EXE work on a
+# machine whose DNS is broken.
+DOH_ENDPOINTS = (
+    ("https://1.1.1.1/dns-query", "cloudflare-dns.com"),
+    ("https://8.8.8.8/resolve", "dns.google"),
+)
 
 # Both Township package variants are supported, exactly like the v1.15 client.
 # Global is preferred; the Vietnam build remains a supported fallback.
@@ -114,6 +130,33 @@ def resolve_server_url() -> str:
     except Exception:
         pass
     return DEFAULT_SERVER_URL
+
+
+def normalize_base_url(url: str) -> str:
+    """Reduce whatever the user configured to a single https origin.
+
+    A stale `server.txt` pointing at the retired Vercel host was a silent
+    hang, so an unusable value falls back to the baked Render origin rather
+    than leaving the window blank.
+    """
+    raw = (url or "").strip()
+    if not raw:
+        return DEFAULT_SERVER_URL
+    if "://" not in raw:
+        raw = "https://" + raw
+    try:
+        u = urlsplit(raw)
+    except ValueError:
+        return DEFAULT_SERVER_URL
+    # urlsplit accepts spaces and other junk inside the netloc, so the
+    # hostname is checked against the DNS alphabet before it is trusted.
+    host = u.hostname or ""
+    if u.scheme not in ("http", "https") or not re.fullmatch(
+        r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*",
+        host,
+    ):
+        return DEFAULT_SERVER_URL
+    return urlunsplit((u.scheme, u.netloc, "", "", ""))
 
 
 _ALPH = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -650,8 +693,203 @@ _ALIAS_JS = """
 """
 
 
+def _doh_lookup(host: str) -> str | None:
+    """Ask a public DNS-over-HTTPS resolver for `host`'s address.
+
+    Only used when the OS resolver fails. The endpoints are addressed by IP so
+    this path never depends on the very resolution that is broken.
+    """
+    for endpoint, _sni in DOH_ENDPOINTS:
+        try:
+            url = f"{endpoint}?{urlencode({'name': host, 'type': 'A'})}"
+            req = urllib.request.Request(url, headers={"accept": "application/dns-json"})
+            with urllib.request.urlopen(req, timeout=6) as resp:  # noqa: S310
+                payload = json.loads(resp.read().decode("utf-8", "replace"))
+            for ans in payload.get("Answer", []):
+                if ans.get("type") == 1 and re.fullmatch(
+                    r"\d{1,3}(?:\.\d{1,3}){3}", str(ans.get("data", ""))
+                ):
+                    return str(ans["data"])
+        except Exception:  # noqa: BLE001
+            continue
+    return None
+
+
+def resolve_origin_ip(host: str) -> str | None:
+    """Address of `host`, preferring the OS resolver and falling back to DoH."""
+    try:
+        infos = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+        if infos:
+            return infos[0][4][0]
+    except Exception:  # noqa: BLE001
+        pass
+    return _doh_lookup(host)
+
+
+class _PinnedHTTPSConnection(HTTPSConnection):
+    """TLS to a known IP while still validating the certificate of the hostname.
+
+    Connecting by IP alone would fail verification (and lose SNI), so the socket
+    goes to the pinned address but the handshake is verified against `host`.
+    """
+
+    def __init__(self, host: str, ip: str, port: int, timeout: float) -> None:
+        super().__init__(host, port, timeout=timeout)
+        self._pinned_ip = ip
+
+    def connect(self) -> None:
+        self.sock = socket.create_connection((self._pinned_ip, self.port), self.timeout)
+        if self._tunnel_host:
+            self._tunnel()
+        ctx = self._context or ssl.create_default_context()
+        self.sock = ctx.wrap_socket(self.sock, server_hostname=self.host)
+
+
+_HOP_HEADERS = {
+    "host", "connection", "proxy-connection", "keep-alive",
+    "transfer-encoding", "upgrade", "te", "trailer",
+}
+
+
+class _LocalProxy:
+    """Serve 127.0.0.1 and forward to the Render origin over a pinned socket.
+
+    WebView2 then only ever talks to localhost, so the client keeps working even
+    when the machine cannot resolve the origin name itself. The app uses plain
+    HTTP only (no SSE or WebSockets), so proxy framing is not a concern.
+    """
+
+    def __init__(self, base_url: str) -> None:
+        self.base = normalize_base_url(base_url)
+        u = urlsplit(self.base)
+        self.scheme = u.scheme
+        self.host = u.hostname or ""
+        self.port = u.port or (443 if u.scheme == "https" else 80)
+        ip = resolve_origin_ip(self.host)
+        if not ip:
+            raise RuntimeError(f"cannot resolve {self.host}")
+        self.ip = ip
+        self._server: ThreadingHTTPServer | None = None
+        self.url = ""
+
+    def start(self) -> str:
+        proxy = self
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *args: object) -> None:  # noqa: ARG002
+                pass
+
+            def _forward(self) -> None:
+                proxy._handle(self)
+
+            do_GET = _forward
+            do_POST = _forward
+            do_PUT = _forward
+            do_DELETE = _forward
+            do_HEAD = _forward
+            do_OPTIONS = _forward
+
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self._server.server_port}"
+        return self.url
+
+    def _handle(self, handler: BaseHTTPRequestHandler) -> None:
+        length = int(handler.headers.get("Content-Length") or 0)
+        body = handler.rfile.read(length) if length else None
+
+        headers = {
+            k: v
+            for k, v in handler.headers.items()
+            if k.lower() not in _HOP_HEADERS
+        }
+        default_port = 443 if self.scheme == "https" else 80
+        headers["Host"] = self.host if self.port == default_port else f"{self.host}:{self.port}"
+        headers["Connection"] = "close"
+
+        try:
+            if self.scheme == "https":
+                conn: HTTPConnection | _PinnedHTTPSConnection = _PinnedHTTPSConnection(
+                    self.host, self.ip, self.port, 30
+                )
+            else:
+                conn = HTTPConnection(self.ip, self.port, timeout=30)
+            conn.putrequest(handler.command, handler.path, skip_host=True, skip_accept_encoding=True)
+            for k, v in headers.items():
+                conn.putheader(k, v)
+            if body is not None:
+                conn.putheader("Content-Length", str(len(body)))
+            conn.endheaders()
+            if body is not None:
+                conn.send(body)
+            resp = conn.getresponse()
+            data = resp.read()
+            status, reason = resp.status, resp.reason
+            resp_headers = resp.getheaders()
+            conn.close()
+        except Exception as e:  # noqa: BLE001
+            self._reply_error(handler, f"IGG VIP Studio could not reach {self.host}: {e}")
+            return
+
+        handler.send_response(status, reason)
+        for k, v in resp_headers:
+            if k.lower() in _HOP_HEADERS:
+                continue
+            handler.send_header(k, v)
+        handler.send_header("Content-Length", str(len(data)))
+        handler.send_header("Connection", "close")
+        handler.end_headers()
+        if handler.command != "HEAD":
+            handler.wfile.write(data)
+
+    @staticmethod
+    def _reply_error(handler: BaseHTTPRequestHandler, message: str) -> None:
+        try:
+            payload = message.encode("utf-8", "replace")
+            handler.send_response(502)
+            handler.send_header("Content-Type", "text/plain; charset=utf-8")
+            handler.send_header("Content-Length", str(len(payload)))
+            handler.send_header("Connection", "close")
+            handler.end_headers()
+            handler.wfile.write(payload)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _os_resolves(host: str) -> bool:
+    try:
+        return bool(socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def choose_window_url(base: str) -> str:
+    """Load the origin directly, unless this machine cannot resolve it.
+
+    WebView2 resolves the origin name itself, so a machine whose DNS rejects the
+    name shows ERR_NAME_NOT_RESOLVED no matter how good the EXE is. When the OS
+    resolver fails we serve the app through a loopback proxy backed by DoH, which
+    sidesteps that resolver entirely. DNS that works keeps the direct HTTPS load,
+    so nothing about the normal case changes.
+
+    `IGG_VIP_PROXY=1` forces the proxy, for the rare case where the resolver
+    answers Python but WebView2 still cannot reach the origin.
+    """
+    host = urlsplit(base).hostname or ""
+    forced = (os.environ.get("IGG_VIP_PROXY") or "").strip().lower() in ("1", "true", "yes")
+    if not host or (_os_resolves(host) and not forced):
+        return base
+    try:
+        return _LocalProxy(base).start()
+    except Exception:  # noqa: BLE001
+        return base
+
+
 def main() -> None:
-    url = resolve_server_url()
+    url = choose_window_url(normalize_base_url(resolve_server_url()))
+
     bridge = NativeBridge()
     get_device_id()  # ensure a stable device id exists for the app to match
     window = webview.create_window(
