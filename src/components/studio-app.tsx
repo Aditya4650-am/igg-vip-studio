@@ -114,16 +114,6 @@ function groupIcon(id: string): GameIconName {
   return "data";
 }
 
-function statIcon(id: string): GameIconName {
-  const value = id.toLowerCase();
-  if (value.includes("resident") || value.includes("level") || value.includes("rank")) return "profile";
-  if (value.includes("wheat") || value.includes("plow") || value.includes("mine") || value.includes("warehouse")) return "barn";
-  if (value.includes("reg") || value.includes("season") || value.includes("match") || value.includes("win")) return "season";
-  if (value.includes("key") || value.includes("cash") || value.includes("coin")) return "license";
-  if (value.includes("time") || value.includes("date")) return "log";
-  return "data";
-}
-
 function statEmoji(id: string): string {
   const value = id.toLowerCase();
   if (value.includes("cash") || value === "tca") return "💎";
@@ -2023,7 +2013,6 @@ export function StudioApp() {
                             ) : (
                               <span className="stat-emoji" aria-hidden="true">{statEmoji(f.key ?? f.id)}</span>
                             )}
-                            <GameIcon name={statIcon(f.key ?? f.id)} className="stat-icon" />
                             {statLabel(lang, f.key ?? f.id, lang === "vi" ? f.labelVi : f.labelEn)}
                           </span>
                           <input
