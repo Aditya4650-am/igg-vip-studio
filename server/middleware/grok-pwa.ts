@@ -4,8 +4,8 @@
  * without that option Nitro v3 never scans this directory.
  *
  * - `?install=1&platform=ios` on a document path → the Home Screen tutorial,
- *   bundled into the server build via `?raw` (the public/ directory is CDN
- *   static output on Vercel and not readable from the function).
+ *   bundled into the server build via `?raw` (public/ is static output and
+ *   not readable from the running server).
  * - `/__grok/manifest.webmanifest` → per-app-named manifest (kept out of
  *   public/ so this dynamic response is the only one).
  * - Other HTML documents → stream-inject PWA + OG head tags at `</head>`.
