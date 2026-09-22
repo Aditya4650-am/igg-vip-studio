@@ -1065,7 +1065,7 @@ function GroupCard({
             const skinIcon = iconForSkin(group.id, it.label);
             const profileIcon = iconForProfileLabel(it.label);
             const itemIcon = iconForItemLabel(it.label);
-            const gemIcon = group.id === "Gems" ? iconForGem(it.id) : null;
+            const gemIcon = group.id === "Gems" ? iconForGem(it.label) : null;
             return (
               <Chip
                 key={it.id}

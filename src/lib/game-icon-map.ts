@@ -422,9 +422,9 @@ export const GAME_ICON_MAP = {
     "Festival": "/game-icons/Style_Festival.png"
   },
   "gemById": {
-    "gem1": "/game-icons/Gem1.webp",
-    "gem2": "/game-icons/Gem2.webp",
-    "gem3": "/game-icons/Gem3.webp"
+    "Gem 1": "/game-icons/Gem1.webp",
+    "Gem 2": "/game-icons/Gem2.webp",
+    "Gem 3": "/game-icons/Gem3.webp"
   },
   "stickerById": {
     "sp1": "/game-icons/Sticker_001.png",
@@ -518,5 +518,7 @@ export function iconForSticker(id: string): string | null {
 }
 
 export function iconForGem(id: string): string | null {
-  return (GAME_ICON_MAP.gemById as Record<string, string>)[id] ?? null;
+  return (GAME_ICON_MAP.gemById as Record<string, string>)[id]
+    ?? (GAME_ICON_MAP.gemById as Record<string, string>)[id.toLowerCase().replace(/\s+/g, "")]
+    ?? null;
 }
