@@ -100,6 +100,16 @@ export function exportOriginal(token: string, sessionId: string) {
   return { fileB64: buf.toString("base64") };
 }
 
+/**
+ * The session XML exactly as it stands now (edits included), as a plain-XML
+ * download. Diagnostics/export only — never written back automatically.
+ */
+export function exportCurrent(token: string, sessionId: string) {
+  const s = requireSession(sessionId, token);
+  if (!s.rawXml) throw new Error("Chưa có save để xuất");
+  return { fileB64: Buffer.from(s.rawXml.replace(/^\uFEFF/, ""), "utf8").toString("base64") };
+}
+
 export function listDevices() {
   return [] as { id: string; label: string }[];
 }

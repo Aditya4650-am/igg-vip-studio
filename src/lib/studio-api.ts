@@ -100,6 +100,14 @@ export const downloadOriginal = createServerFn({ method: "POST" })
     return exportOriginal(data.token, data.sessionId);
   });
 
+// Current session XML (edits included) as a download — diagnostics/export.
+export const exportCurrent = createServerFn({ method: "POST" })
+  .validator(z.object({ token: z.string(), sessionId: z.string() }))
+  .handler(async ({ data }) => {
+    const { exportCurrent: run } = await import("./server/studio.server");
+    return run(data.token, data.sessionId);
+  });
+
 export const runRegatta = createServerFn({ method: "POST" })
   .validator(z.object({ token: z.string(), sessionId: z.string() }))
   .handler(async ({ data }) => {

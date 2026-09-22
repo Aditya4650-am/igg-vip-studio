@@ -24,6 +24,7 @@ import {
   refreshOwn,
   refreshBarn,
   saveAll,
+  exportCurrent,
   applyUnban,
   sendFeedback,
   verifyLicense,
@@ -1945,6 +1946,27 @@ export function StudioApp() {
                 <GameIcon name="save" className="size-4" />
                 {tr("save")}
                 {pending > 0 ? <span className="badge-pop tabular-nums">{pending}</span> : null}
+              </Button>
+              <Button
+                className="w-full"
+                variant="ghost"
+                disabled={busy || !session}
+                onClick={async () => {
+                  if (!token || !session) return;
+                  setBusy(true);
+                  try {
+                    const r = await exportCurrent({ data: { token, sessionId: session.sessionId } });
+                    downloadB64("mGameInfo.current.xml", r.fileB64);
+                    toast.success(tr("savedXml"));
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : tr("nothing"));
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                <GameIcon name="log" className="size-4" />
+                {tr("exportXml")}
               </Button>
             </div>
             <p className="mt-2 hidden text-xs text-muted lg:block">{tr("shortcut")}</p>

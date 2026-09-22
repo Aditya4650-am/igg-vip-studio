@@ -379,3 +379,10 @@ test("cards: a save without the event refuses instead of guessing structure", ()
     "missing CardCollections block must refuse with guidance",
   );
 });
+
+test("exportCurrent returns the live session XML for diagnostics", () => {
+  const snap = loadMuseum();
+  const out = studio.applySave({ token, sessionId: snap.sessionId, museum: ["a1"] });
+  const exp = studio.exportCurrent(token, snap.sessionId);
+  assert.equal(Buffer.from(exp.fileB64, "base64").toString("utf8"), out.xml);
+});
