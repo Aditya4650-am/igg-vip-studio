@@ -422,9 +422,9 @@ export const GAME_ICON_MAP = {
     "Festival": "/game-icons/Style_Festival.png"
   },
   "gemById": {
-    "gem1": "/game-icons/Gem1.PNG",
-    "gem2": "/game-icons/Gemstone_Ring.png",
-    "gem3": "/game-icons/Investigation_Gems.png"
+    "gem1": "/game-icons/Gem1.webp",
+    "gem2": "/game-icons/Gem2.webp",
+    "gem3": "/game-icons/Gem3.webp"
   },
   "stickerById": {
     "sp1": "/game-icons/Sticker_001.png",
