@@ -26,7 +26,7 @@ import {
   cloakStats,
   publicCatalogs,
   cloakProfileUnlocked,
-  cloakFactories,
+  cloakUpgrades,
   revealSave,
 } from "./catalogs.server";
 
@@ -59,6 +59,10 @@ export type Session = {
   decor: string[];
   factories: { id: string; label: string; level: number }[];
   factoryMax: number;
+  trains: { id: string; label: string; level: number }[];
+  trainMax: number;
+  islands: { id: string; label: string; level: number }[];
+  islandMax: number;
   barn: BarnState;
   season: { premium: boolean; score: number };
   regatta: { tasks: number; score: number } | null;
@@ -85,9 +89,32 @@ export function catalogs() {
   return publicCatalogs();
 }
 
-/** Factory rows for the client: real ids cloaked, levels as stored. */
-function factoryRows(xml: string) {
-  return cloakFactories(discoverUpgrades(xml, "Factory"));
+/** Train and Island rows share the Factory shape, so they share the code path. */
+const UPGRADE_KINDS = [
+  { key: "factory", save: "Factory", vi: "xưởng", plural: "factories" },
+  { key: "train", save: "Train", vi: "tàu", plural: "trains" },
+  { key: "island", save: "Island", vi: "đảo", plural: "islands" },
+] as const;
+
+type UpgradeKey = (typeof UPGRADE_KINDS)[number]["key"];
+
+/** Refresh every upgrade list and its ceiling from the current XML. */
+function readUpgrades(s: Session) {
+  const xml = s.rawXml ?? "";
+  for (const { key, save } of UPGRADE_KINDS) {
+    const rows = cloakUpgrades(key, discoverUpgrades(xml, save));
+    const cap = upgradeMaxLevel(xml, save);
+    if (key === "factory") {
+      s.factories = rows;
+      s.factoryMax = cap;
+    } else if (key === "train") {
+      s.trains = rows;
+      s.trainMax = cap;
+    } else {
+      s.islands = rows;
+      s.islandMax = cap;
+    }
+  }
 }
 
 /**
@@ -177,8 +204,12 @@ export function connectLoad(token: string, device: string, _saveXml?: string, _p
       skins: {},
       items: {},
       decor: [],
-      factories: factoryRows(opened.xml),
-      factoryMax: upgradeMaxLevel(opened.xml, "Factory"),
+      factories: [],
+      factoryMax: 0,
+      trains: [],
+      trainMax: 0,
+      islands: [],
+      islandMax: 0,
       loadedXml: opened.xml.replace(/^\uFEFF/, ""),
       barn,
       season: { premium: /premium="1"/i.test(opened.xml), score: Number(opened.xml.match(/SeasonTicket[^>]*score="(\d+)"/i)?.[1] ?? 0) },
@@ -192,6 +223,7 @@ export function connectLoad(token: string, device: string, _saveXml?: string, _p
         `Friends ready: ${friends.length}`,
       ],
     };
+    readUpgrades(s);
     sessions.set(sessionId, s);
     return snapshot(s);
   }
@@ -221,8 +253,7 @@ export function refreshOwnSave(token: string, sessionId: string, saveB64: string
   s.stats = parseStats(opened.xml);
   s.profileUnlocked = cloakProfileUnlocked(parseProfileUnlocked(opened.xml));
   s.barn = barnInfo(opened.xml);
-  s.factories = factoryRows(opened.xml);
-  s.factoryMax = upgradeMaxLevel(opened.xml, "Factory");
+  readUpgrades(s);
   s.log.push(`Reloaded mGameInfo from emulator`);
   return snapshot(s);
 }
@@ -248,6 +279,10 @@ export type SavePayload = {
   decorMaxAll?: boolean;
   factories?: string[];
   factoryLevel?: number;
+  trains?: string[];
+  trainLevel?: number;
+  islands?: string[];
+  islandLevel?: number;
 };
 
 function mergeUnique(a: string[], b: string[]) {
@@ -359,25 +394,44 @@ export function applySave(p: SavePayload) {
     }
   }
 
-  if (s.factoryMax > 0 && p.factoryLevel !== undefined && revealed.factories.length) {
-    const r = injectUpgradeLevels(s.rawXml, "Factory", revealed.factories, p.factoryLevel);
+  // Factory / Train / Island all write the same `<Upgrade version="4">` rows, so
+  // one loop covers them. `injectUpgradeLevels` is pure, so the edits are
+  // accumulated in `working` and committed together: if one kind is a no-op the
+  // other kinds must not stay half-applied on the session.
+  const upgradeEdits: { key: UpgradeKey; ids: string[]; level: number | undefined }[] = [
+    { key: "factory", ids: revealed.factories, level: p.factoryLevel },
+    { key: "train", ids: revealed.trains, level: p.trainLevel },
+    { key: "island", ids: revealed.islands, level: p.islandLevel },
+  ];
+  let working = s.rawXml;
+  const upgradeParts: string[] = [];
+  const upgradeLog: string[] = [];
+  for (const { key, ids, level } of upgradeEdits) {
+    const meta = UPGRADE_KINDS.find((k) => k.key === key)!;
+    const cap = upgradeMaxLevel(working, meta.save);
+    if (cap <= 0 || level === undefined || !ids.length) continue;
+    const r = injectUpgradeLevels(working, meta.save, ids, level);
     if (!r.changed) {
-      // Report the no-op instead of claiming success: every selected factory is
+      // Report the no-op instead of claiming success: every selected row is
       // already at or above the target the save allows.
       throw new Error(
-        `Không có xưởng nào thay đổi — tất cả đã đạt cấp ${r.target} (tối đa trong save: ${s.factoryMax})`,
+        `Không có ${meta.vi} nào thay đổi — tất cả đã đạt cấp ${r.target} (tối đa trong save: ${cap})`,
       );
     }
-    s.rawXml = r.xml;
-    parts.push(`factories(${r.changed}→${r.target})`);
-    s.log.push(r.capped ? `Factory level capped to save max ${s.factoryMax}` : `Factory level set to ${r.target}`);
+    working = r.xml;
+    upgradeParts.push(`${meta.plural}(${r.changed}→${r.target})`);
+    upgradeLog.push(r.capped ? `${meta.save} level capped to save max ${cap}` : `${meta.save} level set to ${r.target}`);
+  }
+  if (upgradeParts.length) {
+    s.rawXml = working;
+    parts.push(...upgradeParts);
+    s.log.push(...upgradeLog);
   }
 
   s.stats = parseStats(s.rawXml);
   s.profileUnlocked = cloakProfileUnlocked(parseProfileUnlocked(s.rawXml));
   s.barn = barnInfo(s.rawXml);
-  s.factories = factoryRows(s.rawXml);
-  s.factoryMax = upgradeMaxLevel(s.rawXml, "Factory");
+  readUpgrades(s);
   if (!parts.length) throw new Error("Nothing selected");
   const malformed = findUnbalancedTag(s.rawXml);
   if (malformed) throw new Error(`Save XML không hợp lệ (${malformed}) — hủy để tránh hỏng file`);
@@ -530,6 +584,10 @@ export function snapshot(s: Session) {
     regatta: s.regatta,
     factories: s.factories,
     factoryMax: s.factoryMax,
+    trains: s.trains,
+    trainMax: s.trainMax,
+    islands: s.islands,
+    islandMax: s.islandMax,
     friends: s.friends,
     friendCity: s.friendCity,
     unban: s.unban,

@@ -5,7 +5,7 @@ import { DECOR_STASH } from "./township/decor-stash.server";
 import { SKINS_CATALOG } from "./township/skins-catalog.server";
 import { CHAT_EMOJI_IDS } from "./township/chat-emoji.server";
 
-type Kind = "profile" | "skin" | "item" | "decor" | "stat" | "barn" | "factory";
+type Kind = "profile" | "skin" | "item" | "decor" | "stat" | "barn" | "factory" | "train" | "island";
 
 const PEPPER = Buffer.from("igg-vip-pub-id-v1");
 const lookup = new Map<string, string>();
@@ -208,23 +208,55 @@ function remapRecord<T>(kind: Kind, rec: Record<string, T> | undefined): Record<
   return out;
 }
 
-// Factory ids are cloaked like every other real game id: the client only ever
-// sees HMAC public ids, and `revealSave` maps the selection back. The label is
-// derived from the id because the save carries no display name for a factory.
-export function cloakFactories(rows: { id: string; level: number }[]) {
+// Upgrade rows (Factory / Train / Island) are cloaked like every other real
+// game id: the client only ever sees HMAC public ids, and `revealSave` maps the
+// selection back. The label is derived from the id because the save carries no
+// display name for these rows.
+//
+// The three kinds share one shape, so they share one code path. `factory` is
+// kept as the public id namespace for Factory rows so existing saves and any
+// cached client state keep resolving.
+export type UpgradeKindPublic = "factory" | "train" | "island";
+
+export function cloakUpgrades(kind: UpgradeKindPublic, rows: { id: string; level: number }[]) {
   return rows.map((r) => ({
-    id: pubId("factory", r.id),
-    label: factoryLabel(r.id),
+    id: pubId(kind, r.id),
+    label: upgradeLabel(kind, r.id),
     level: r.level,
   }));
 }
 
-export function revealFactoryIds(ids: string[] | undefined) {
-  return (ids ?? []).map((id) => remapOne("factory", id)).filter((x): x is string => Boolean(x));
+export function cloakFactories(rows: { id: string; level: number }[]) {
+  return cloakUpgrades("factory", rows);
 }
 
-/** `bagfactory` -> `Bagfactory`, `factory_music_instruments` -> `Music Instruments`. */
-export function factoryLabel(id: string) {
+function revealUpgradeIds(kind: UpgradeKindPublic, ids: string[] | undefined) {
+  return (ids ?? []).map((id) => remapOne(kind, id)).filter((x): x is string => Boolean(x));
+}
+
+export function revealFactoryIds(ids: string[] | undefined) {
+  return revealUpgradeIds("factory", ids);
+}
+
+export function revealTrainIds(ids: string[] | undefined) {
+  return revealUpgradeIds("train", ids);
+}
+
+export function revealIslandIds(ids: string[] | undefined) {
+  return revealUpgradeIds("island", ids);
+}
+
+/**
+ * `bagfactory` -> `Bagfactory`, `factory_music_instruments` -> `Music Instruments`.
+ *
+ * Train and Island rows carry a bare index (`1`, `i2`), which is not a name —
+ * labelling them "1" and "I2" would read as a bug. They get "Train 1" and
+ * "Island 2" instead. The prefix is per-kind because the ids overlap: Train
+ * "1" and Island "i1" both strip to "1".
+ */
+export function upgradeLabel(kind: UpgradeKindPublic, id: string) {
+  if (kind === "train") return `Train ${id}`;
+  if (kind === "island") return `Island ${id.replace(/^i/i, "")}`;
   const bare = id.replace(/^factory_/i, "").replace(/factory$/i, "");
   const words = bare.replace(/[_-]+/g, " ").trim();
   if (!words) return id;
@@ -232,6 +264,10 @@ export function factoryLabel(id: string) {
     .split(/\s+/)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
+}
+
+export function factoryLabel(id: string) {
+  return upgradeLabel("factory", id);
 }
 
 function remapGroups(kind: Kind, rec: Record<string, string[]> | undefined): Record<string, string[]> {
@@ -253,6 +289,8 @@ export function revealSave(p: {
   decor?: string[];
   barnItems?: Record<string, number>;
   factories?: string[];
+  trains?: string[];
+  islands?: string[];
 }) {
   return {
     stats: remapRecord("stat", p.stats),
@@ -263,6 +301,8 @@ export function revealSave(p: {
     decor: (p.decor ?? []).map((id) => remapOne("decor", id)).filter((x): x is string => Boolean(x)),
     barnItems: p.barnItems ?? {},
     factories: revealFactoryIds(p.factories),
+    trains: revealTrainIds(p.trains),
+    islands: revealIslandIds(p.islands),
   };
 }
 
