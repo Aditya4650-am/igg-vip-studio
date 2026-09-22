@@ -7,23 +7,31 @@
  * The flat `FullCardCollections` counter is display-only — the game does not
  * read it, so writing it reports success while changing nothing in game.
  *
- * The id set is `card_1..card_150`, the full range ever observed across real
- * cities (user save max `card_131`, whale max `card_150`). Format and bounds
- * come from game data itself; nothing outside `card_1..card_150` is accepted.
- * Ownership means `inStockCount >= 1`; counts are capped at each card's own
- * save maximum and `date`-like fields do not exist here, so every other
- * attribute survives byte-identical. `generatedCount` is never touched — the
- * reference cities carry `0` next to live stock, so its semantics are unknown.
- * `CompletedSets` is left for the game to derive (observed empty on saves
- * with cards and filled on completed ones); gift totals and tokens are the
- * game's own economy and are never written.
+ * Canonical ids are `card_01..card_09` then `card_10..card_150`: every real
+ * city writes single digits zero-padded (no real city ever held unpadded
+ * `card_1..card_9` — those rows are tool-created lookalikes the game keeps
+ * but never counts toward a set). Inputs in either form are normalized to
+ * canonical, and stale unpadded lookalikes are removed when their canonical
+ * twin is granted.
  */
 
 export const CARD_IDS: readonly string[] = Object.freeze(
-  Array.from({ length: 150 }, (_, i) => `card_${i + 1}`),
+  Array.from({ length: 150 }, (_, i) => {
+    const n = i + 1;
+    return n < 10 ? `card_0${n}` : `card_${n}`;
+  }),
 );
 
 const KNOWN: ReadonlySet<string> = new Set(CARD_IDS);
+
+/** Normalize `card_6`/`card_06` (any padding) to the canonical id, or null. */
+function canonical(id: string): string | null {
+  const m = /^card_0*(\d+)$/.exec(id.trim());
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (n < 1 || n > 150) return null;
+  return n < 10 ? `card_0${n}` : `card_${n}`;
+}
 
 function ownedCardsSpan(doc: string): [number, number] | null {
   const open =
@@ -82,13 +90,15 @@ function docInt(doc: string, name: string): number | null {
 
 /**
  * Ensure every selected card is owned (`inStockCount >= 1`, `isNew` set),
- * inserting absent entries from the known set only. Counters beyond that —
- * and every other attribute — are preserved. Returns `changed: 0` when
- * nothing would move so the caller reports a real no-op.
+ * inserting absent entries from the known set only. Inputs in either padding
+ * form normalize to canonical. Stale unpadded lookalikes (`card_6` next to
+ * `card_06`) are removed when their canonical twin is granted. Counters
+ * beyond that — and every other attribute — are preserved. Returns
+ * `changed: 0` when nothing would move so the caller reports a real no-op.
  */
 export function grantCards(xml: string, ids: string[]) {
   let text = xml;
-  const wanted = [...new Set(ids.map((id) => id.trim()))].filter((id) => KNOWN.has(id));
+  const wanted = [...new Set(ids.map((id) => canonical(id)).filter((x): x is string => Boolean(x)))];
   if (!wanted.length) return { xml: text, changed: 0 };
   // No CardCollections block means the event never opened on this save —
   // inventing the whole structure risks a corrupt session, so refuse with a
@@ -117,34 +127,64 @@ export function grantCards(xml: string, ids: string[]) {
       text = text.slice(0, span[1]) + insert + text.slice(span[1]);
       span[1] += insert.length;
       changed += 1;
-      continue;
+    } else {
+      // Entry bounds: up to the next card entry (or the array end), so field
+      // edits cannot bleed into a neighbouring card.
+      const rest = region.slice(m.index);
+      const nextCard = rest.slice(m[0].length).search(/<DataElem\b[^>]*\bname="cardId"/i);
+      const end = nextCard < 0 ? region.length : m.index + m[0].length + nextCard;
+      let entry = region.slice(m.index, end);
+      const stock = Number(fieldValue(entry, "inStockCount") ?? "0");
+      const maxStock = Number(fieldValue(entry, "maxInStockCount") ?? "0");
+      const isNew = fieldValue(entry, "isNew");
+      let moved = false;
+      if (stock < 1) {
+        entry = setField(entry, "inStockCount", "1");
+        moved = true;
+      }
+      if (maxStock < 1) {
+        entry = setField(entry, "maxInStockCount", "1");
+        moved = true;
+      }
+      if (isNew !== "true") {
+        entry = setField(entry, "isNew", "true");
+        moved = true;
+      }
+      if (moved) {
+        text = text.slice(0, span[0] + m.index) + entry + text.slice(span[0] + end);
+        span[1] += entry.length - (end - m.index);
+        changed += 1;
+      }
     }
-    // Entry bounds: up to the next card entry (or the array end), so field
-    // edits cannot bleed into a neighbouring card.
-    const rest = region.slice(m.index);
-    const nextCard = rest.slice(m[0].length).search(/<DataElem\b[^>]*\bname="cardId"/i);
-    const end = nextCard < 0 ? region.length : m.index + m[0].length + nextCard;
-    let entry = region.slice(m.index, end);
-    const stock = Number(fieldValue(entry, "inStockCount") ?? "0");
-    const maxStock = Number(fieldValue(entry, "maxInStockCount") ?? "0");
-    const isNew = fieldValue(entry, "isNew");
-    let moved = false;
-    if (stock < 1) {
-      entry = setField(entry, "inStockCount", "1");
-      moved = true;
+    // Drop the unpadded lookalike the old build wrote (`card_6` next to the
+    // canonical `card_06`). The close quote keeps `card_06` itself safe. The
+    // splice covers exactly one entry (one non-self-closing opener, one
+    // closer); anything else aborts the cleanup rather than risking the doc.
+    const num = Number(id.split("_")[1]);
+    if (num < 10) {
+      const twin = `card_${num}`;
+      const tesc = twin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const region2 = text.slice(span[0], span[1]);
+      const tm = region2.match(new RegExp(`<DataElem\\b[^>]*\\bname="cardId"[^>]*\\bvalue="${tesc}"[^>]*>`, "i"));
+      if (tm && tm.index !== undefined) {
+        const cardAbs = span[0] + tm.index;
+        const entryStart = text.lastIndexOf("<DataElem", cardAbs - 1);
+        const afterTag = cardAbs + tm[0].length;
+        const closer = /<\/DataElem\s*>/.exec(text.slice(afterTag, span[1]));
+        if (entryStart >= span[0] && closer && !/<\/DataElem/i.test(text.slice(entryStart, cardAbs))) {
+          const entryEnd = afterTag + closer.index + closer[0].length;
+          const cut = text.slice(entryStart, entryEnd);
+          const opens = (cut.match(/<DataElem\b/g) ?? []).length;
+          const selfClose = (cut.match(/<DataElem\b[^>]*\/>/g) ?? []).length;
+          const closes = (cut.match(/<\/DataElem/g) ?? []).length;
+          if (opens - selfClose === 1 && closes === 1) {
+            text = text.slice(0, entryStart) + text.slice(entryEnd);
+            span[1] -= entryEnd - entryStart;
+            changed += 1;
+          }
+        }
+      }
     }
-    if (maxStock < 1) {
-      entry = setField(entry, "maxInStockCount", "1");
-      moved = true;
-    }
-    if (isNew !== "true") {
-      entry = setField(entry, "isNew", "true");
-      moved = true;
-    }
-    if (!moved) continue;
-    text = text.slice(0, span[0] + m.index) + entry + text.slice(span[0] + end);
-    span[1] += entry.length - (end - m.index);
-    changed += 1;
   }
   if (changed) {
     // Keep the analytics counters consistent with what the save now holds —
