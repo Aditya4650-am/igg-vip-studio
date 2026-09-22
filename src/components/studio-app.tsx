@@ -1485,24 +1485,6 @@ export function StudioApp() {
       for (const [k, v] of Object.entries(barnItems)) {
         if (v !== (session.barn.items[k] ?? 0)) changedBarn[k] = v;
       }
-      // Auto-fit the barn tier to the edited total before saving: the game
-      // trims anything above capacity on load (325 products at 500 each need
-      // far more than a small tier holds), which reads as "only some items
-      // collected". The picked tier stays visible in the UI like a manual pick.
-      let barnTier = barnUpgrades;
-      if (catalogs) {
-        const total = Object.values(barnItems).reduce((n, v) => n + (Number(v) || 0), 0);
-        const cur = catalogs.barnCapacity.find((c) => c.upgrades === (barnTier ?? activeSession.barn.upgrades))?.capacity
-          ?? activeSession.barn.capacity ?? 0;
-        if (total > cur) {
-          const fit = catalogs.barnCapacity.find((c) => c.capacity >= total)
-            ?? catalogs.barnCapacity[catalogs.barnCapacity.length - 1];
-          if (fit && fit.upgrades !== (barnTier ?? activeSession.barn.upgrades)) {
-            barnTier = fit.upgrades;
-            setBarnUpgrades(fit.upgrades);
-          }
-        }
-      }
       const changedStats: Record<string, string> = {};
       for (const [k, v] of Object.entries(stats)) {
         if (String(v) !== String(initialStatsRef.current[k] ?? "")) changedStats[k] = v;
@@ -1541,6 +1523,24 @@ export function StudioApp() {
       // Do not route it through the compound save pipeline: that pipeline also
       // processes every other pending editor state and can make Unban behave
       // differently from v1.15.
+      // Auto-fit the barn tier to the edited total before saving: the game
+      // trims anything above capacity on load (325 products at 500 each need
+      // far more than a small tier holds), which reads as "only some items
+      // collected". The picked tier stays visible in the UI like a manual pick.
+      let barnTier = barnUpgrades;
+      if (catalogs) {
+        const total = Object.values(barnItems).reduce((n, v) => n + (Number(v) || 0), 0);
+        const cur = catalogs.barnCapacity.find((c) => c.upgrades === (barnTier ?? activeSession.barn.upgrades))?.capacity
+          ?? activeSession.barn.capacity ?? 0;
+        if (total > cur) {
+          const fit = catalogs.barnCapacity.find((c) => c.capacity >= total)
+            ?? catalogs.barnCapacity[catalogs.barnCapacity.length - 1];
+          if (fit && fit.upgrades !== (barnTier ?? activeSession.barn.upgrades)) {
+            barnTier = fit.upgrades;
+            setBarnUpgrades(fit.upgrades);
+          }
+        }
+      }
       const profileDelta = profileAdditions();
       const hasProfileChanges = Object.keys(profileDelta).length > 0;
       const hasOtherChanges =
