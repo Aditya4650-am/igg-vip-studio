@@ -250,3 +250,62 @@ test("items: a device refresh between grants keeps the second push delta-only", 
   assert.ok(!entries[0]!.startsWith(firstCsv.split(":")[0]!), "gem1 must not be resurrected");
   balanced(second.xml!);
 });
+
+const museumSave = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  "<Global>",
+  "<ArtInfo>",
+  `<aInfo i='{"id":"a1","count":1,"met":0,"date":1786705284.0,"ind":1}'/>`,
+  `<aInfo i='{"id":"a2","count":3,"met":1,"date":1786705284.0,"ind":1}'/>`,
+  "</ArtInfo>",
+  "</Global>",
+].join("");
+
+function loadMuseum() {
+  return studio.connectLoad(
+    token,
+    "test-device",
+    undefined,
+    undefined,
+    Buffer.from(museumSave).toString("base64"),
+  );
+}
+
+function aInfo(xml: string, id: string) {
+  const m = xml.match(new RegExp(`<aInfo\\b[^>]*"id":"${id}"[^>]*>`, "i"));
+  assert.ok(m, `${id} must be present`);
+  return m![0];
+}
+
+test("museum: completing artifacts sets met and count, preserving date and ind", () => {
+  const snap = loadMuseum();
+  const out = studio.applySave({ token, sessionId: snap.sessionId, museum: ["a1", "a2", "zzz"] });
+  assert.ok(out.parts.some((p) => p.startsWith("museum(")), "the run must be reported in parts");
+  const a1 = aInfo(out.xml!, "a1");
+  assert.match(a1, /"count":3/, "a1 count must reach the save's own max");
+  assert.match(a1, /"met":1/, "a1 must be unlocked");
+  assert.match(a1, /"date":1786705284\.0/, "a1 date must survive");
+  assert.match(a1, /"ind":1/, "a1 ind must survive");
+  assert.match(aInfo(out.xml!, "a2"), /"count":3/, "already-maxed a2 stays");
+  assert.doesNotMatch(out.xml!, /zzz/, "unknown ids must be dropped, never written");
+  balanced(out.xml!);
+});
+
+test("museum: missing known ids are inserted inside ArtInfo", () => {
+  const snap = loadMuseum();
+  const out = studio.applySave({ token, sessionId: snap.sessionId, museum: ["a3"] });
+  const a3 = aInfo(out.xml!, "a3");
+  assert.match(a3, /"count":3.*"met":1/, "inserted a3 must be complete");
+  assert.ok(out.xml!.indexOf(a3) < out.xml!.indexOf("</ArtInfo>"), "insert must land inside the block");
+  balanced(out.xml!);
+});
+
+test("museum: a repeat run is a real no-op, not a false success", () => {
+  const snap = loadMuseum();
+  studio.applySave({ token, sessionId: snap.sessionId, museum: ["a1"] });
+  assert.throws(
+    () => studio.applySave({ token, sessionId: snap.sessionId, museum: ["a1"] }),
+    /Không có hiện vật nào thay đổi/,
+    "a second identical run must say nothing changed instead of claiming success",
+  );
+});

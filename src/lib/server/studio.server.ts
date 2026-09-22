@@ -8,6 +8,7 @@ import { shellErrorMessage } from "./township/save-decode.server";
 import { findUnbalancedTag } from "./township/xml-edit.server";
 import { applyBarnCapacity, applyBarnItems, barnInfo } from "./township/barn.server";
 import { injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, parseProfileUnlocked } from "./township/inject.server";
+import { grantArtifacts } from "./township/museum.server";
 import {
   applyDesban,
   cloneDecorOnly,
@@ -226,6 +227,7 @@ export type SavePayload = {
   decor?: string[];
   decorQty?: number;
   sticker?: string[];
+  museum?: string[];
   barnUpgrades?: number;
   barnItems?: Record<string, number>;
   regatta?: boolean;
@@ -322,6 +324,16 @@ export function applySave(p: SavePayload) {
   if (p.sticker?.length) {
     s.rawXml = unlockEmoji(s.rawXml, p.sticker);
     parts.push(`stickers(${p.sticker.length})`);
+  }
+  if (revealed.museum.length) {
+    const r = grantArtifacts(s.rawXml, revealed.museum);
+    if (!r.changed) {
+      throw new Error(
+        `Không có hiện vật nào thay đổi — tất cả đã đạt ${r.target} bản sao và đã mở khóa`,
+      );
+    }
+    s.rawXml = r.xml;
+    parts.push(`museum(${r.changed})`);
   }
   if (p.barnUpgrades && p.barnUpgrades > 0) {
     const preset = BARN_CAPACITY.find((c) => c.upgrades === p.barnUpgrades);

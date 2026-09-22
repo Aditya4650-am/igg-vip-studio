@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { LANGS, isLang, t, type Lang, type Dict } from "@/lib/i18n";
 import { isDeviceId, mintDeviceId } from "@/lib/device-id";
 import { AVATAR_MAX, avatarEmoji, avatarGroupId, avatarIconPath, avatarsInRange, type Group, type Item } from "@/lib/catalogs";
+import { MUSEUM_IDS, artifactEmoji, artifactIconPath, museumLabel } from "@/lib/museum";
 import { iconForBarn, iconForDecorLabel, iconForGem, iconForGroup, iconForItemLabel, iconForProfileLabel, iconForSkin, iconForStat, iconForSticker } from "@/lib/game-icon-map";
 import {
   connectLoad,
@@ -29,7 +30,7 @@ import {
   attachLocal,
 } from "@/lib/studio-api";
 
-type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "barn";
+type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "barn" | "museum";
 type SessionSnap = Awaited<ReturnType<typeof connectLoad>>;
 type Catalogs = Awaited<ReturnType<typeof getCatalogs>>;
 type UnbanMode = "inicial" | "completo" | "novo";
@@ -78,7 +79,7 @@ function downloadText(name: string, text: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "barn"];
+const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "barn", "museum"];
 const TAB_KEY: Record<Tab, keyof Dict> = {
   data: "tabData",
   profile: "tabProfile",
@@ -89,6 +90,7 @@ const TAB_KEY: Record<Tab, keyof Dict> = {
   sticker: "tabSticker",
   items: "tabItems",
   barn: "tabBarn",
+  museum: "tabMuseum",
 };
 const TAB_ICON: Record<Tab, GameIconName> = {
   data: "data",
@@ -100,6 +102,7 @@ const TAB_ICON: Record<Tab, GameIconName> = {
   sticker: "sticker",
   items: "items",
   barn: "barn",
+  museum: "museum",
 };
 
 
@@ -798,6 +801,7 @@ type GameIconName =
   | "sticker"
   | "items"
   | "barn"
+  | "museum"
   | "feedback"
   | "language"
   | "refresh"
@@ -870,6 +874,9 @@ function GameIcon({ name, className, ...props }: { name: GameIconName; className
       break;
     case "barn":
       content = <><path d="m3.5 10.2 8.5-6.4 8.5 6.4v10.3h-17z" /><path d="M8.2 20.5v-6.1h7.6v6.1M6.5 10.2h11M12 4v2.5" /><path d="M17.8 7.4h2.4v13.1" /></>;
+      break;
+    case "museum":
+      content = <><path d="m12 3.5 8.5 4v2H3.5v-2z" /><path d="M5.5 9.5v9M9.5 9.5v9M14.5 9.5v9M18.5 9.5v9" /><path d="M3.5 18.5h17M4.5 21h15" /></>;
       break;
     case "feedback":
       content = <><path d="M4.5 4.2h15a2 2 0 0 1 2 2v9.1a2 2 0 0 1-2 2h-8.1l-4.2 3v-3H4.5a2 2 0 0 1-2-2V6.2a2 2 0 0 1 2-2z" /><path d="M7 9h10M7 12.5h6" /></>;
@@ -1154,6 +1161,7 @@ export function StudioApp() {
   const itemSel = useSetMap();
   const [decorSel, setDecorSel] = useState<Set<string>>(new Set());
   const [stickerSel, setStickerSel] = useState<Set<string>>(new Set());
+  const [museumSel, setMuseumSel] = useState<Set<string>>(new Set());
   const [pendingRegatta, setPendingRegatta] = useState(false);
   const [pendingSeason, setPendingSeason] = useState(false);
   const [pendingUnban, setPendingUnban] = useState<UnbanMode | null>(null);
@@ -1396,6 +1404,7 @@ export function StudioApp() {
       itemSel.clear();
       setDecorSel(new Set());
       setStickerSel(new Set());
+      setMuseumSel(new Set());
       setPendingRegatta(false);
       setPendingSeason(false);
       setPendingUnban(null);
@@ -1425,7 +1434,7 @@ export function StudioApp() {
   }, [session, barnUpgrades, barnItems]);
 
   const pending =
-    profileSel.count + avatarSel.count + skinSel.count + itemSel.count + decorSel.size + stickerSel.size +
+    profileSel.count + avatarSel.count + skinSel.count + itemSel.count + decorSel.size + stickerSel.size + museumSel.size +
     (barnDirty ? 1 : 0) + (pendingRegatta ? 1 : 0) + (pendingSeason ? 1 : 0) + (pendingUnban ? 1 : 0) +
     (pendingDecorFragments ? 1 : 0) + (pendingDecorClone ? 1 : 0) + (pendingDecorMaxAll ? 1 : 0);
 
@@ -1497,6 +1506,7 @@ export function StudioApp() {
         itemSel.count > 0 ||
         decorSel.size > 0 ||
         stickerSel.size > 0 ||
+        museumSel.size > 0 ||
         Object.keys(changedBarn).length > 0 ||
         pendingRegatta ||
         pendingSeason ||
@@ -1539,6 +1549,7 @@ export function StudioApp() {
           decor: [...decorSel],
           decorQty: parseDecorQty(),
           sticker: [...stickerSel],
+          museum: museumSel.size ? [...museumSel] : undefined,
           barnUpgrades: barnUpgrades && barnUpgrades !== activeSession.barn.upgrades ? barnUpgrades : undefined,
           barnItems: Object.keys(changedBarn).length ? changedBarn : undefined,
           regatta: pendingRegatta,
@@ -1571,6 +1582,7 @@ export function StudioApp() {
       profileSel.clear();
       setDecorSel(new Set());
       setStickerSel(new Set());
+      setMuseumSel(new Set());
       setPendingRegatta(false);
       setPendingSeason(false);
       setPendingUnban(null);
@@ -1643,6 +1655,7 @@ export function StudioApp() {
     sticker: stickerSel.size,
     items: itemSel.count,
     barn: barnDirty ? 1 : 0,
+    museum: museumSel.size,
   };
 
   const barnTotal = Object.values(barnItems).reduce((n, v) => n + (Number(v) || 0), 0);
@@ -1952,7 +1965,7 @@ export function StudioApp() {
 
         <section className="app-main flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg shadow-hairline">
           <nav
-            className="feature-tabs relative grid grid-cols-5 border-b border-border px-3 pt-3 sm:grid-cols-9"
+            className="feature-tabs relative grid grid-cols-5 border-b border-border px-3 pt-3 sm:grid-cols-10"
           >
             <span aria-hidden className={cn("tab-pill", tabReady && "ready")} />
             {TABS.map((id) => {
@@ -2205,6 +2218,39 @@ export function StudioApp() {
                         ))}
                       </div>
                       <p className="mt-3 text-xs text-muted">{tr("stickerSelectedHint").replace("{count}", String(stickerSel.size))}</p>
+                    </section>
+                  </div>
+                )}
+
+                {tab === "museum" && (
+                  <div className="space-y-3">
+                    <Bar
+                      hint={tr("museumHint")}
+                      onAll={() => setMuseumSel(new Set(MUSEUM_IDS))}
+                      onClear={() => setMuseumSel(new Set())}
+                      allLabel={tr("selectAll")}
+                      clearLabel={tr("clear")}
+                    />
+                    <section className="panel">
+                      <p className="mb-3 text-xs text-muted">
+                        {tr("museumSelected")}: {museumSel.size} / {MUSEUM_IDS.length}
+                      </p>
+                      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-5">
+                        {MUSEUM_IDS.map((id) => (
+                          <Chip
+                            key={id}
+                            label={museumLabel(id)}
+                            iconSrc={artifactIconPath(id)}
+                            emoji={artifactEmoji(id)}
+                            checked={museumSel.has(id)}
+                            onChange={() => setMuseumSel((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(id)) next.delete(id); else next.add(id);
+                              return next;
+                            })}
+                          />
+                        ))}
+                      </div>
                     </section>
                   </div>
                 )}
