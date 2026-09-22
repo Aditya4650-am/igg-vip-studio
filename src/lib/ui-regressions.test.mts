@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { LANGS, DICT, type Dict } from "./i18n";
+import { LANGS, DICT } from "./i18n";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p: string) => readFileSync(join(here, p), "utf8");
@@ -41,70 +41,19 @@ test("data center cards show the real PNG and drop the decorative glyph", () => 
   assert.ok(!/statIcon\(/.test(card), "no decorative stat icon resolver in the data center");
 });
 
-test("factory tab strings exist in every shipped language", () => {
-  // The tab was added with only vi/en populated, which left it half-English in
-  // the other 18 languages. Guard the whole set so adding a language (or a new
-  // factory string) cannot silently reintroduce that.
-  const keys = [
-    "tabFactory", "factoryHint", "factoryMax", "factoryMaxAll", "factoryAt",
-    "factorySelected", "factoryNone", "factoryCapped", "factoryBackup",
-    "factoryBackupHint", "factoryBackupDone",
-  ] as const satisfies readonly (keyof Dict)[];
+test("factory and train/island tabs are gone", () => {
+  const tsx = read("../components/studio-app.tsx");
+  for (const tab of ['"factory"', '"upgrades"', "tabFactory", "tabUpgrades", "factoryHint", "trainMax", "islandMax"]) {
+    assert.ok(!tsx.includes(tab), `studio-app must not reference ${tab}`);
+  }
+  const keys = ["tabFactory", "factoryHint", "tabUpgrades", "trainMax", "islandMax", "trainNone", "islandNone"] as const;
   for (const lang of LANGS) {
     for (const key of keys) {
-      const value = DICT[lang.id][key];
-      assert.ok(value, `${lang.id}.${key} is missing`);
-      assert.equal(typeof value, "string", `${lang.id}.${key} must be a string`);
+      assert.equal((DICT[lang.id] as Record<string, unknown>)[key], undefined, `${lang.id}.${key} must be removed`);
     }
   }
-});
-
-test("factory strings are actually translated, not English fallbacks", () => {
-  // A copy-pasted English string would still satisfy the presence check above,
-  // so compare the tab label against English for the non-English dictionaries.
-  // id is allowed to match: "Pabrik"/"Factories" — assert the ones that differ.
-  const untranslated = LANGS.filter((l) => l.id !== "en" && l.id !== "vi")
-    .filter((l) => DICT[l.id].tabFactory === DICT.en.tabFactory);
-  assert.deepEqual(untranslated.map((l) => l.id), [], "these still read as English");
-});
-
-test("the capped hint keeps its {max} placeholder in every language", () => {
-  // The UI fills it with .replace("{max}", …); a translation that drops the
-  // token would render the sentence with no number in it.
-  for (const lang of LANGS) {
-    assert.match(
-      DICT[lang.id].factoryCapped,
-      /\{max\}/,
-      `${lang.id}.factoryCapped lost its {max} placeholder`,
-    );
-  }
-});
-
-test("train & island tab strings exist in every shipped language", () => {
-  const keys = ["tabUpgrades", "trainMax", "islandMax", "trainNone", "islandNone"] as const satisfies readonly (keyof Dict)[];
-  for (const lang of LANGS) {
-    for (const key of keys) {
-      const value = DICT[lang.id][key];
-      assert.ok(value, `${lang.id}.${key} is missing`);
-      assert.equal(typeof value, "string", `${lang.id}.${key} must be a string`);
-    }
-  }
-});
-
-test("train & island strings are actually translated, not English fallbacks", () => {
-  for (const key of ["tabUpgrades", "trainMax", "islandMax", "trainNone", "islandNone"] as const) {
-    const untranslated = LANGS.filter((l) => l.id !== "en" && l.id !== "vi")
-      .filter((l) => DICT[l.id][key] === DICT.en[key]);
-    assert.deepEqual(untranslated.map((l) => l.id), [], `${key} still reads as English in these`);
-  }
-});
-
-test("train and island lists stay separate on the client snapshot", () => {
-  // A save carries both kinds in the same <Upgrade> block, so a bug that maps
-  // one list into the other would silently write train levels onto islands.
   const src = read("server/studio.server.ts");
-  assert.match(src, /s\.trains = rows;/, "trains must be assigned from the train rows");
-  assert.match(src, /s\.islands = rows;/, "islands must be assigned from the island rows");
-  assert.match(src, /trains: s\.trains,\s*\n\s*trainMax: s\.trainMax,/, "the snapshot must expose trains");
-  assert.match(src, /islands: s\.islands,\s*\n\s*islandMax: s\.islandMax,/, "the snapshot must expose islands");
+  assert.ok(!src.includes("factories"), "studio.server must not expose factories");
+  assert.ok(!src.includes("trainMax"), "studio.server must not expose trainMax");
+  assert.ok(!src.includes("islandMax"), "studio.server must not expose islandMax");
 });

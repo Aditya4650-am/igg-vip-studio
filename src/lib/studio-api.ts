@@ -80,12 +80,6 @@ const saveSchema = z.object({
   decorFragments: z.boolean().optional(),
   decorClone: z.boolean().optional(),
   decorMaxAll: z.boolean().optional(),
-  factories: z.array(z.string()).optional(),
-  factoryLevel: z.number().int().min(1).max(1000).optional(),
-  trains: z.array(z.string()).optional(),
-  trainLevel: z.number().int().min(1).max(1000).optional(),
-  islands: z.array(z.string()).optional(),
-  islandLevel: z.number().int().min(1).max(1000).optional(),
 });
 
 export const saveAll = createServerFn({ method: "POST" })
