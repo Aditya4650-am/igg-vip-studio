@@ -405,3 +405,20 @@ test("exportCurrent returns the live session XML for diagnostics", () => {
   const exp = studio.exportCurrent(token, snap.sessionId);
   assert.equal(Buffer.from(exp.fileB64, "base64").toString("utf8"), out.xml);
 });
+
+test("barn: extended products roundtrip through the same counter mechanism", () => {
+  const products = studio.catalogs().barnProducts;
+  assert.equal(products.length, 325, "18 classic + 307 inventoried products");
+  assert.ok(products.some((p) => p.id === "BronzeBullion"), "smelter ingots must be listed");
+  assert.ok(products.some((p) => p.id === "apple"), "finished goods must be listed");
+  const snap = load();
+  const out = studio.applySave({
+    token,
+    sessionId: snap.sessionId,
+    barnItems: { BronzeBullion: 44, apple: 5 },
+  });
+  assert.ok(out.parts.some((p) => p.startsWith("barn-items(")), "the run must be reported in parts");
+  assert.match(out.xml!, /<Var\b[^>]*\bname="BronzeBullionCounter"[^>]*\bv="44"/i, "ingot counter must be written");
+  assert.match(out.xml!, /<Var\b[^>]*\bname="appleCounter"[^>]*\bv="5"/i, "goods counter must be written");
+  balanced(out.xml!);
+});

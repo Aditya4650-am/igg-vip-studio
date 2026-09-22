@@ -106,7 +106,11 @@ export const GAME_ICON_MAP = {
     "bread": "/game-icons/Bread.PNG",
     "cookie": "/game-icons/Easter_Cookie.png",
     "clover": "/game-icons/Clover.png",
-    "fabric": "/game-icons/Silk.png"
+    "fabric": "/game-icons/Silk.png",
+    "BronzeBullion": "/game-icons/Bronze_Ingot.png",
+    "SilverBullion": "/game-icons/Silver_Ingot.png",
+    "GoldBullion": "/game-icons/Gold_Ingot.png",
+    "PlatinumBullion": "/game-icons/Platinum_Ingot.png"
   },
   "skinsByGroupLabel": {
     "TrainStation": {
