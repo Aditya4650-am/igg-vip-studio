@@ -1,27 +1,56 @@
 # IGG VIP Studio
 
-Server (GitHub → Render) + Client EXE. Tool gốc chỉ có **VI / EN**. Client này thêm **PT · ID · 中文 · ES · TH · JP** (góc trên).
+Server (GitHub → Render) + Windows client EXE. A Township save editor: the server owns all game logic and the save algorithms; the desktop client only drives ADB and hosts the UI. The UI ships in 20 languages.
 
-## Bảo mật
+## Features (tabs)
 
-| Lớp | Cách |
+| Tab | What it does |
 |---|---|
-| License | AES-256-GCM + HMAC, gắn Device ID dài `VIP-XXXX-…`, token 12 giờ |
-| Owner | `IGG_VIP_OWNER` ≥ 12 ký tự trên Render — không hard-code `1234` |
-| Master | `IGG_VIP_MASTER` ≥ 16 ký tự — khóa niêm phong |
-| Catalog | ID trên Client là HMAC, ID XML thật chỉ Server |
-| Save | Decrypt / encrypt / Unban / FetchCity **chỉ Server** |
-| EXE | Chỉ ADB + mở web. Không chứa thuật toán |
+| Data Center | Edit core values (T-Cash, coins, level, energy, residents…). One Save writes the session on the server. |
+| Profile Studio | Unlock badges, titles, frames, styles. |
+| Avatar Studio | Unlock avatars 1–398, single picks or ranges. |
+| Skin Gallery | Unlock building/vehicle/animal skins per group. |
+| Unban Center | Fetch a friend's clean city and restore it into a banned account (`inicial` / `completo` / `novo`). |
+| Decor Studio | Grant decorations from the stash catalog, searchable by theme. |
+| Sticker Hub | Unlock chat stickers/emoji. |
+| Item Manager | Grant materials, tools, boosts and coupons with a bulk quantity. |
+| Barn Inventory | Set barn capacity tier and per-product quantities (325 products). |
+| Museum | Complete all 354 museum artifacts (requires the Museum built in-game). |
+| Cards | Grant card-collection cards with per-card duplicate counts (150 ids, 15 groups of 10). |
 
-Env Render bắt buộc: `IGG_VIP_MASTER`, `IGG_VIP_OWNER`, `NITRO_PRESET=node-server`, `NODE_VERSION=22`.
+Quick actions (sidebar): Regatta 105×135, Season Pass, Export current XML. Every change is staged in the UI and committed together on Save & push; unban on a clean selection uses its dedicated path.
 
-Owner khi chưa set env: `IGG-OWNER-PREVIEW` (đổi ngay trên Render).
+## Commands
 
-Chi tiết deploy: [DEPLOY.md](./DEPLOY.md).
+```bash
+npm run dev        # Vite dev server on 0.0.0.0:8080 (strict port)
+npm run build      # Vite build + DB migrate; emits .output/server/index.mjs
+npm test           # scripts + src tests (node:test, no vitest/jest)
+npm run typecheck  # tsc --noEmit
+npm start          # node .output/server/index.mjs
+```
 
-### v1.15 save format behavior
-The editor follows the original v1.15 workflow: the server decodes a loaded save for editing, then returns **plain XML**. The desktop Client writes that plain XML directly to `mGameInfo.xml` and `mGameInfo.bak` in the Township save directory. It does not re-encrypt the edited XML before push.
+## Security model
 
+| Layer | How |
+|---|---|
+| License | AES-256-GCM + HMAC, bound Device ID `VIP-XXXX-…`, 12-hour token |
+| Owner | `IGG_VIP_OWNER` (12+ chars) on Render — never hard-code a preview key |
+| Master | `IGG_VIP_MASTER` (16+ chars) — sealing key |
+| Catalog | Client sees HMAC public ids; real game ids stay on the server |
+| Save | Decrypt / edit / Unban / FetchCity run server-side only |
+| EXE | ADB bridge + WebView2 window. Holds no algorithms, no secrets |
 
-## Unified save workflow
-All editable features are now staged in the UI and committed together only when "Lưu & đẩy" is pressed. Item, Sticker, Decor, Regatta, Season and Unban no longer push immediately from their feature controls.
+Required Render env: `IGG_VIP_MASTER`, `IGG_VIP_OWNER`, `NITRO_PRESET=node-server`, `NODE_VERSION=22`. Deploy details: [DEPLOY.md](./DEPLOY.md).
+
+### Save format behavior (v1.15)
+
+The server decodes a loaded save for editing, then returns **plain XML**. The desktop client writes that plain XML directly to `mGameInfo.xml` and `mGameInfo.bak` in the Township save directory. It never re-encrypts the edited XML before push.
+
+Saves are edited by **string replacement only** — never parsed and re-serialized (the game's loader rejects reordered attributes/entities). Every write path guards with a tag-balance check.
+
+## Windows client
+
+Built by `.github/workflows/build-client.yml` on `windows-latest` (PyInstaller cannot cross-compile). Push a `v*` tag to build and attach the EXE to a GitHub release, or run the workflow manually from Actions. The client loads its UI from the deployed Render server, so UI/icon changes need only a Render deploy + EXE restart — rebuild the EXE only when `client/` changes.
+
+Point the client at another server without rebuilding via `%APPDATA%\IGG-VIP-Studio\server.txt` or the `IGG_VIP_URL` environment variable.
