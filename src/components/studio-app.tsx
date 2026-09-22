@@ -2224,6 +2224,7 @@ export function StudioApp() {
 
                 {tab === "museum" && (
                   <div className="space-y-3">
+                    <p className="rounded-md bg-input px-3 py-2 text-sm text-amber">{tr("museumNote")}</p>
                     <Bar
                       hint={tr("museumHint")}
                       onAll={() => setMuseumSel(new Set(MUSEUM_IDS))}
