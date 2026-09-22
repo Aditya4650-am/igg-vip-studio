@@ -327,3 +327,86 @@ export function injectRegata(xml: string, nTasks = 105, score = 135) {
   text = text.slice(0, m.index) + clean + text.slice(m.index + m[0].length);
   return text;
 }
+
+// ---------------------------------------------------------------------------
+// Factory / Train / Island upgrade levels (`<Upgrade version="4">`).
+//
+// Two facts measured against a real 870 KB save drive this code:
+//
+//  1. `slx` is not a checksum — it is the level XOR a fixed constant.
+//     32162029 ^ 13 = 32162016, 32162029 ^ 53 = 32162008, and that holds for
+//     all 42 Factory, 3 Train and 5 Island rows. Writing `level` without
+//     recomputing `slx` is what makes an edit read as inconsistent data.
+//  2. The highest level the document already contains (53 for factories in
+//     that save) is the only value its own data proves is accepted, so it is
+//     the ceiling. Nothing here invents a level the save never had.
+//
+// No map `<Object>` carries an upgrade level, so this block is the only
+// source of truth for it.
+const SLX_XOR = 32162029;
+
+type UpgradeKind = "Factory" | "Train" | "Island";
+
+function slxFor(level: number) {
+  return SLX_XOR ^ level;
+}
+
+function upgradeRowRe(kind: UpgradeKind) {
+  return new RegExp(`<${kind}\\b[^>]*\\bid="([^"]*)"[^>]*\\blevel="(\\d+)"[^>]*\\bslx="(\\d+)"[^>]*/>`, "gi");
+}
+
+/** Every upgrade row in the document, in file order. */
+export function discoverUpgrades(xml: string, kind: UpgradeKind) {
+  const text = asText(xml);
+  const rows: { id: string; level: number }[] = [];
+  for (const m of text.matchAll(upgradeRowRe(kind))) {
+    const level = Number(m[2]);
+    if (!Number.isFinite(level)) continue;
+    rows.push({ id: m[1]!, level });
+  }
+  return rows;
+}
+
+/**
+ * Highest level already present in the document — the ceiling, because a level
+ * the save never reached cannot be shown to be valid. 0 means "no rows", which
+ * callers treat as nothing to raise.
+ */
+export function upgradeMaxLevel(xml: string, kind: UpgradeKind) {
+  return discoverUpgrades(xml, kind).reduce((max, r) => (r.level > max ? r.level : max), 0);
+}
+
+/**
+ * Raise upgrade rows to a target level, rewriting `level` and `slx` together.
+ *
+ * `target` is clamped to the document's own maximum, so a typo or a stale UI
+ * cannot write a level beyond what the save proves is accepted. Rows already at
+ * or above the target stay byte-identical; only rows in `ids` are touched (an
+ * empty list means every row). Returns the XML unchanged when nothing would
+ * move, so the caller can report a real no-op instead of a silent success.
+ */
+export function injectUpgradeLevels(xml: string, kind: UpgradeKind, ids: string[], target: number) {
+  const text = asText(xml);
+  if (!Number.isFinite(target)) return { xml: text, changed: 0, target: 0, capped: false };
+  const cap = upgradeMaxLevel(text, kind);
+  if (cap <= 0) return { xml: text, changed: 0, target: 0, capped: false };
+  const want = Math.min(Math.floor(target), cap);
+  const wanted = new Set(ids.filter((id) => id.trim()).map((id) => id.trim()));
+  let changed = 0;
+
+  const out = text.replace(upgradeRowRe(kind), (whole, id: string, levelRaw: string) => {
+    if (wanted.size && !wanted.has(id)) return whole;
+    const level = Number(levelRaw);
+    if (!Number.isFinite(level) || level >= want) return whole;
+    changed += 1;
+    // Rewrite only the two values in place: rows differ in which bonus
+    // attributes they carry (xpBonus, moneyBonus, timeBonus, shelfBonus,
+    // probability2/3), and the game reads those independently.
+    return whole
+      .replace(/(\blevel\s*=\s*)("[^"]*"|'[^']*')/i, `$1"${want}"`)
+      .replace(/(\bslx\s*=\s*)("[^"]*"|'[^']*')/i, `$1"${slxFor(want)}"`);
+  });
+
+  return { xml: out, changed, target: want, capped: Math.floor(target) > cap };
+}
+

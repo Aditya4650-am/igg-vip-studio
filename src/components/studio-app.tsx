@@ -22,6 +22,7 @@ import {
   refreshOwn,
   refreshBarn,
   saveAll,
+  downloadOriginal,
   applyUnban,
   sendFeedback,
   verifyLicense,
@@ -29,7 +30,7 @@ import {
   attachLocal,
 } from "@/lib/studio-api";
 
-type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "barn";
+type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "barn" | "factory";
 type SessionSnap = Awaited<ReturnType<typeof connectLoad>>;
 type Catalogs = Awaited<ReturnType<typeof getCatalogs>>;
 type UnbanMode = "inicial" | "completo" | "novo";
@@ -78,7 +79,7 @@ function downloadText(name: string, text: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "barn"];
+const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "barn", "factory"];
 const TAB_KEY: Record<Tab, keyof Dict> = {
   data: "tabData",
   profile: "tabProfile",
@@ -89,6 +90,7 @@ const TAB_KEY: Record<Tab, keyof Dict> = {
   sticker: "tabSticker",
   items: "tabItems",
   barn: "tabBarn",
+  factory: "tabFactory",
 };
 const TAB_ICON: Record<Tab, GameIconName> = {
   data: "data",
@@ -100,6 +102,7 @@ const TAB_ICON: Record<Tab, GameIconName> = {
   sticker: "sticker",
   items: "items",
   barn: "barn",
+  factory: "factory",
 };
 
 
@@ -798,6 +801,7 @@ type GameIconName =
   | "sticker"
   | "items"
   | "barn"
+  | "factory"
   | "feedback"
   | "language"
   | "refresh"
@@ -870,6 +874,9 @@ function GameIcon({ name, className, ...props }: { name: GameIconName; className
       break;
     case "barn":
       content = <><path d="m3.5 10.2 8.5-6.4 8.5 6.4v10.3h-17z" /><path d="M8.2 20.5v-6.1h7.6v6.1M6.5 10.2h11M12 4v2.5" /><path d="M17.8 7.4h2.4v13.1" /></>;
+      break;
+    case "factory":
+      content = <><path d="M3.5 20.5V9.8l5 3V9.8l5 3V6.5l6.5 3.2v10.8z" /><path d="M7 20.5v-3.2M11.5 20.5v-3.2M16 20.5v-3.2" /><path d="M3.5 20.5h17" /></>;
       break;
     case "feedback":
       content = <><path d="M4.5 4.2h15a2 2 0 0 1 2 2v9.1a2 2 0 0 1-2 2h-8.1l-4.2 3v-3H4.5a2 2 0 0 1-2-2V6.2a2 2 0 0 1 2-2z" /><path d="M7 9h10M7 12.5h6" /></>;
@@ -1160,6 +1167,8 @@ export function StudioApp() {
   const [pendingDecorFragments, setPendingDecorFragments] = useState(false);
   const [pendingDecorClone, setPendingDecorClone] = useState(false);
   const [pendingDecorMaxAll, setPendingDecorMaxAll] = useState(false);
+  const [factorySel, setFactorySel] = useState<Set<string>>(new Set());
+  const [factoryLevel, setFactoryLevel] = useState("");
   const initialStatsRef = useRef<Record<string, string>>({});
   const localInfoAtRef = useRef(0);
   const autoLoginStartedRef = useRef(false);
@@ -1245,6 +1254,8 @@ export function StudioApp() {
     initialStatsRef.current = { ...s.stats };
     setBarnUpgrades(s.barn.upgrades);
     setBarnItems({ ...s.barn.items });
+    // Keep the level field showing the ceiling of the save actually loaded.
+    if (s.factoryMax > 0) setFactoryLevel(String(s.factoryMax));
 
     // Only keep profile IDs that actually exist in the current catalog.
     // The save can contain legacy/unknown profile IDs; keeping those in the
@@ -1427,7 +1438,7 @@ export function StudioApp() {
   const pending =
     profileSel.count + avatarSel.count + skinSel.count + itemSel.count + decorSel.size + stickerSel.size +
     (barnDirty ? 1 : 0) + (pendingRegatta ? 1 : 0) + (pendingSeason ? 1 : 0) + (pendingUnban ? 1 : 0) +
-    (pendingDecorFragments ? 1 : 0) + (pendingDecorClone ? 1 : 0) + (pendingDecorMaxAll ? 1 : 0);
+    (pendingDecorFragments ? 1 : 0) + (pendingDecorClone ? 1 : 0) + (pendingDecorMaxAll ? 1 : 0) + factorySel.size;
 
   const parseQty = useCallback(() => {
     const n = Number.parseInt(bulkQty, 10);
@@ -1438,6 +1449,15 @@ export function StudioApp() {
     const n = Number.parseInt(decorQty, 10);
     return Number.isFinite(n) && n > 0 ? n : 10;
   }, [decorQty]);
+
+  // The target level defaults to the highest level the save already contains.
+  // That value is the only one the save's own data proves the game accepts, and
+  // the server clamps to it regardless of what is typed here.
+  const parseFactoryLevel = useCallback(() => {
+    const n = Number.parseInt(factoryLevel, 10);
+    if (Number.isFinite(n) && n > 0) return n;
+    return session?.factoryMax && session.factoryMax > 0 ? session.factoryMax : 1;
+  }, [factoryLevel, session?.factoryMax]);
 
   const save = useCallback(async () => {
     if (!token || !session) return;
@@ -1486,7 +1506,8 @@ export function StudioApp() {
         pendingSeason ||
         pendingDecorFragments ||
         pendingDecorClone ||
-        pendingDecorMaxAll;
+        pendingDecorMaxAll ||
+        factorySel.size > 0;
 
       if (pendingUnban && !hasOtherChanges) {
         const r = await applyUnban({
@@ -1531,6 +1552,8 @@ export function StudioApp() {
           decorFragments: pendingDecorFragments,
           decorClone: pendingDecorClone,
           decorMaxAll: pendingDecorMaxAll,
+          factories: factorySel.size ? [...factorySel] : undefined,
+          factoryLevel: factorySel.size ? parseFactoryLevel() : undefined,
         },
       });
       applySnap(r, catalogs?.profile);
@@ -1561,12 +1584,14 @@ export function StudioApp() {
       setPendingDecorFragments(false);
       setPendingDecorClone(false);
       setPendingDecorMaxAll(false);
+      setFactorySel(new Set());
+      setFactoryLevel("");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tr("nothing"));
     } finally {
       setBusy(false);
     }
-  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, pendingSeason, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingDecorMaxAll, parseDecorQty, tr, device]);
+  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, pendingSeason, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingDecorMaxAll, factorySel, factoryLevel, parseDecorQty, parseFactoryLevel, tr, device]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1627,6 +1652,7 @@ export function StudioApp() {
     sticker: stickerSel.size,
     items: itemSel.count,
     barn: barnDirty ? 1 : 0,
+    factory: factorySel.size,
   };
 
   const barnTotal = Object.values(barnItems).reduce((n, v) => n + (Number(v) || 0), 0);
@@ -2347,6 +2373,120 @@ export function StudioApp() {
                             />
                           </label>
                         ))}
+                      </div>
+                    </section>
+                  </div>
+                )}
+
+                {tab === "factory" && (
+                  <div className="space-y-3">
+                    <p className="text-sm text-muted">{tr("factoryHint")}</p>
+                    <section className="panel">
+                      <div className="mb-3 flex flex-wrap items-center gap-2">
+                        <h3 className="flex items-center gap-2 text-xs font-bold tracking-wider text-amber uppercase">
+                          <GameIcon name="factory" className="size-4" />
+                          {tr("factoryMax")}
+                        </h3>
+                        <span className="text-xs text-muted">
+                          {tr("factoryCapped").replace("{max}", String(session.factoryMax || "—"))}
+                        </span>
+                        <label className="flex items-center gap-2 text-xs text-muted">
+                          {tr("factoryAt")}
+                          <input
+                            className="field field-qty"
+                            inputMode="numeric"
+                            value={factoryLevel}
+                            onChange={(e) => setFactoryLevel(e.target.value.replace(/[^\d]/g, ""))}
+                          />
+                        </label>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={busy || !session.factories.length}
+                          onClick={() => {
+                            setFactoryLevel(String(session.factoryMax || 1));
+                            setFactorySel(new Set(session.factories.map((f) => f.id)));
+                          }}
+                        >
+                          <GameIcon name="save" className="size-3.5" />
+                          {tr("factoryMaxAll")}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={!factorySel.size}
+                          onClick={() => setFactorySel(new Set())}
+                        >
+                          {tr("clear")}
+                        </Button>
+                      </div>
+                      {!session.factories.length ? (
+                        <p className="text-xs text-amber">{tr("factoryNone")}</p>
+                      ) : (
+                        <>
+                          <p className="mb-2 text-xs text-muted">
+                            {tr("factorySelected")}: {factorySel.size} / {session.factories.length}
+                          </p>
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                            {session.factories.map((f) => {
+                              const on = factorySel.has(f.id);
+                              return (
+                                <button
+                                  key={f.id}
+                                  type="button"
+                                  className="barn-cap flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-md bg-input px-2 text-sm font-semibold"
+                                  data-on={on ? "true" : "false"}
+                                  onClick={() =>
+                                    setFactorySel((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(f.id)) next.delete(f.id);
+                                      else next.add(f.id);
+                                      return next;
+                                    })
+                                  }
+                                >
+                                  <span className="truncate max-w-full">{f.label}</span>
+                                  <span className="text-xs font-medium opacity-80">
+                                    {tr("factoryAt")} {f.level}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </section>
+                    <section className="panel">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="flex items-center gap-2 text-xs font-bold tracking-wider text-amber uppercase">
+                          <GameIcon name="save" className="size-4" />
+                          {tr("factoryBackup")}
+                        </h3>
+                        <span className="text-xs text-muted">{tr("factoryBackupHint")}</span>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="ml-auto"
+                          disabled={busy}
+                          onClick={async () => {
+                            if (!token || !session) return;
+                            setBusy(true);
+                            try {
+                              const r = await downloadOriginal({
+                                data: { token, sessionId: session.sessionId },
+                              });
+                              downloadB64("mGameInfo.original.xml", r.fileB64);
+                              toast.success(tr("factoryBackupDone"));
+                            } catch (e) {
+                              toast.error(e instanceof Error ? e.message : tr("nothing"));
+                            } finally {
+                              setBusy(false);
+                            }
+                          }}
+                        >
+                          <GameIcon name="refresh" className="size-3.5" />
+                          {tr("factoryBackup")}
+                        </Button>
                       </div>
                     </section>
                   </div>

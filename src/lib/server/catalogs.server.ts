@@ -5,7 +5,7 @@ import { DECOR_STASH } from "./township/decor-stash.server";
 import { SKINS_CATALOG } from "./township/skins-catalog.server";
 import { CHAT_EMOJI_IDS } from "./township/chat-emoji.server";
 
-type Kind = "profile" | "skin" | "item" | "decor" | "stat" | "barn";
+type Kind = "profile" | "skin" | "item" | "decor" | "stat" | "barn" | "factory";
 
 const PEPPER = Buffer.from("igg-vip-pub-id-v1");
 const lookup = new Map<string, string>();
@@ -208,6 +208,32 @@ function remapRecord<T>(kind: Kind, rec: Record<string, T> | undefined): Record<
   return out;
 }
 
+// Factory ids are cloaked like every other real game id: the client only ever
+// sees HMAC public ids, and `revealSave` maps the selection back. The label is
+// derived from the id because the save carries no display name for a factory.
+export function cloakFactories(rows: { id: string; level: number }[]) {
+  return rows.map((r) => ({
+    id: pubId("factory", r.id),
+    label: factoryLabel(r.id),
+    level: r.level,
+  }));
+}
+
+export function revealFactoryIds(ids: string[] | undefined) {
+  return (ids ?? []).map((id) => remapOne("factory", id)).filter((x): x is string => Boolean(x));
+}
+
+/** `bagfactory` -> `Bagfactory`, `factory_music_instruments` -> `Music Instruments`. */
+export function factoryLabel(id: string) {
+  const bare = id.replace(/^factory_/i, "").replace(/factory$/i, "");
+  const words = bare.replace(/[_-]+/g, " ").trim();
+  if (!words) return id;
+  return words
+    .split(/\s+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
 function remapGroups(kind: Kind, rec: Record<string, string[]> | undefined): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   if (!rec) return out;
@@ -226,6 +252,7 @@ export function revealSave(p: {
   items?: Record<string, number>;
   decor?: string[];
   barnItems?: Record<string, number>;
+  factories?: string[];
 }) {
   return {
     stats: remapRecord("stat", p.stats),
@@ -235,6 +262,7 @@ export function revealSave(p: {
     items: remapRecord("item", p.items),
     decor: (p.decor ?? []).map((id) => remapOne("decor", id)).filter((x): x is string => Boolean(x)),
     barnItems: p.barnItems ?? {},
+    factories: revealFactoryIds(p.factories),
   };
 }
 
