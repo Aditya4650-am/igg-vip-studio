@@ -309,3 +309,73 @@ test("museum: a repeat run is a real no-op, not a false success", () => {
     "a second identical run must say nothing changed instead of claiming success",
   );
 });
+
+const cardEntry = (id: string, gen: number, stock: number, fresh: boolean, max: number) =>
+  `<DataElem type="dataStore"><DataElem name="cardId" type="string" value="${id}"/>` +
+  `<DataElem name="generatedCount" type="int" value="${gen}"/>` +
+  `<DataElem name="inStockCount" type="int" value="${stock}"/>` +
+  `<DataElem name="isNew" type="bool" value="${fresh}"/>` +
+  `<DataElem name="maxInStockCount" type="int" value="${max}"/></DataElem>`;
+
+const cardsSave = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  "<Global>",
+  '<DataElem name="CardCollections" type="dataStore"><DataElem name="DataLogic" type="dataStore">',
+  '<DataElem name="CompletedSets" type="dataStore"/>',
+  '<DataElem name="OwnedCards" type="array">',
+  cardEntry("card_1", 1, 0, false, 0),
+  cardEntry("card_2", 1, 1, true, 1),
+  "</DataElem>",
+  '<DataElem name="trackedUniqueCollectedCards" type="int" value="1"/>',
+  '<DataElem name="trackedMaxCollectedCards" type="int" value="1"/>',
+  "</DataElem></DataElem>",
+  "</Global>",
+].join("");
+
+function loadCards() {
+  return studio.connectLoad(
+    token,
+    "test-device",
+    undefined,
+    undefined,
+    Buffer.from(cardsSave).toString("base64"),
+  );
+}
+
+function cardBlock(xml: string, id: string) {
+  const m = xml.match(new RegExp(`<DataElem\\b[^>]*\\bname="cardId"[^>]*\\bvalue="${id}"[^>]*>`, "i"));
+  assert.ok(m, `${id} must be present`);
+  return xml.slice(Math.max(0, (m.index ?? 0) - 60), (m.index ?? 0) + 600);
+}
+
+test("cards: missing stock is granted and absent cards are inserted, unknowns dropped", () => {
+  const snap = loadCards();
+  const out = studio.applySave({ token, sessionId: snap.sessionId, cards: ["card_1", "card_2", "card_3", "card_999"] });
+  assert.ok(out.parts.some((p) => p.startsWith("cards(")), "the run must be reported in parts");
+  assert.match(cardBlock(out.xml!, "card_1"), /name="inStockCount"[^>]*value="1"/, "card_1 stock must reach 1");
+  assert.match(cardBlock(out.xml!, "card_1"), /name="isNew"[^>]*value="true"/, "card_1 must be marked new");
+  assert.match(cardBlock(out.xml!, "card_1"), /name="generatedCount"[^>]*value="1"/, "generatedCount must survive untouched");
+  assert.match(cardBlock(out.xml!, "card_3"), /name="inStockCount"[^>]*value="1"/, "absent card_3 must be inserted owned");
+  assert.doesNotMatch(out.xml!, /card_999/, "unknown ids must be dropped, never written");
+  assert.match(out.xml!, /name="trackedUniqueCollectedCards"[^>]*value="3"/, "unique counter must follow the array");
+  balanced(out.xml!);
+});
+
+test("cards: a repeat run is a real no-op, not a false success", () => {
+  const snap = loadCards();
+  studio.applySave({ token, sessionId: snap.sessionId, cards: ["card_1", "card_3"] });
+  assert.throws(
+    () => studio.applySave({ token, sessionId: snap.sessionId, cards: ["card_1", "card_3"] }),
+    /Không có thẻ nào thay đổi/,
+    "a second identical run must say nothing changed instead of claiming success",
+  );
+});
+
+test("cards: a save without the event refuses instead of guessing structure", () => {
+  const snap = load();
+  assert.throws(
+    () => studio.applySave({ token, sessionId: snap.sessionId, cards: ["card_1"] }),
+    /sự kiện Card Collections/,
+    "missing CardCollections block must refuse with guidance",
+  );
+});

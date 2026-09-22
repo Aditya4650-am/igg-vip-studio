@@ -13,6 +13,7 @@ import { LANGS, isLang, t, type Lang, type Dict } from "@/lib/i18n";
 import { isDeviceId, mintDeviceId } from "@/lib/device-id";
 import { AVATAR_MAX, avatarEmoji, avatarGroupId, avatarIconPath, avatarsInRange, type Group, type Item } from "@/lib/catalogs";
 import { MUSEUM_IDS, artifactEmoji, artifactIconPath, museumLabel } from "@/lib/museum";
+import { CARD_GROUPS } from "@/lib/cards";
 import { iconForBarn, iconForDecorLabel, iconForGem, iconForGroup, iconForItemLabel, iconForProfileLabel, iconForSkin, iconForStat, iconForSticker } from "@/lib/game-icon-map";
 import {
   connectLoad,
@@ -30,7 +31,7 @@ import {
   attachLocal,
 } from "@/lib/studio-api";
 
-type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "barn" | "museum";
+type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "barn" | "museum" | "cards";
 type SessionSnap = Awaited<ReturnType<typeof connectLoad>>;
 type Catalogs = Awaited<ReturnType<typeof getCatalogs>>;
 type UnbanMode = "inicial" | "completo" | "novo";
@@ -79,7 +80,7 @@ function downloadText(name: string, text: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "barn", "museum"];
+const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "barn", "museum", "cards"];
 const TAB_KEY: Record<Tab, keyof Dict> = {
   data: "tabData",
   profile: "tabProfile",
@@ -91,6 +92,7 @@ const TAB_KEY: Record<Tab, keyof Dict> = {
   items: "tabItems",
   barn: "tabBarn",
   museum: "tabMuseum",
+  cards: "tabCards",
 };
 const TAB_ICON: Record<Tab, GameIconName> = {
   data: "data",
@@ -103,12 +105,14 @@ const TAB_ICON: Record<Tab, GameIconName> = {
   items: "items",
   barn: "barn",
   museum: "museum",
+  cards: "cards",
 };
 
 
 function groupIcon(id: string): GameIconName {
   const value = id.toLowerCase();
   if (value.startsWith("ava_")) return "avatar";
+  if (value.startsWith("cards-")) return "cards";
   if (value.includes("frame") || value.includes("badge") || value.includes("theme")) return "sticker";
   if (value.includes("style") || value.includes("skin")) return "skin";
   if (value.includes("rank")) return "season";
@@ -137,6 +141,7 @@ function statEmoji(id: string): string {
 function groupEmoji(id: string): string {
   const value = id.toLowerCase();
   if (value.startsWith("ava_")) return "🧑";
+  if (value.startsWith("cards-")) return "🃏";
   if (value.includes("badge") || value.includes("rank") || value === "expranks") return "🏅";
   if (value.includes("frame")) return "🖼️";
   if (value.includes("style") || value.includes("theme")) return "🎨";
@@ -224,6 +229,7 @@ function itemEmoji(groupId: string | undefined, label: string, kind?: string): s
   if (g.includes("boost")) return "⚡";
   if (g.includes("coupon")) return "🎟️";
   if (g.includes("gem")) return "💎";
+  if (g.startsWith("cards-")) return "🃏";
   if (g.includes("order")) return "📦";
   if (g.includes("badge")) return "🏅";
   if (g.includes("rank") || g === "expranks") return "👑";
@@ -802,6 +808,7 @@ type GameIconName =
   | "items"
   | "barn"
   | "museum"
+  | "cards"
   | "feedback"
   | "language"
   | "refresh"
@@ -877,6 +884,9 @@ function GameIcon({ name, className, ...props }: { name: GameIconName; className
       break;
     case "museum":
       content = <><path d="m12 3.5 8.5 4v2H3.5v-2z" /><path d="M5.5 9.5v9M9.5 9.5v9M14.5 9.5v9M18.5 9.5v9" /><path d="M3.5 18.5h17M4.5 21h15" /></>;
+      break;
+    case "cards":
+      content = <><rect x="6" y="3.5" width="12" height="17" rx="2" /><path d="M12 7.2c-1.5 1.8-3.2 3-3.2 4.7a1.9 1.9 0 0 0 3.2 1.4 1.9 1.9 0 0 0 3.2-1.4c0-1.7-1.7-2.9-3.2-4.7z" /><path d="M12 13.6v2.9" /></>;
       break;
     case "feedback":
       content = <><path d="M4.5 4.2h15a2 2 0 0 1 2 2v9.1a2 2 0 0 1-2 2h-8.1l-4.2 3v-3H4.5a2 2 0 0 1-2-2V6.2a2 2 0 0 1 2-2z" /><path d="M7 9h10M7 12.5h6" /></>;
@@ -1142,6 +1152,7 @@ export function StudioApp() {
   const initialProfileRef = useRef<Record<string, string[]>>({});
   const [avatarOpen, setAvatarOpen] = useState<string | null>(null);
   const [itemsOpen, setItemsOpen] = useState<string | null>(null);
+  const [cardsOpen, setCardsOpen] = useState<string | null>(null);
   const [bulkQty, setBulkQty] = useState("500");
   const [decorLimit, setDecorLimit] = useState(36);
   const [decorTheme, setDecorTheme] = useState<DecorTheme>("All");
@@ -1159,6 +1170,7 @@ export function StudioApp() {
   const avatarSel = useSetMap();
   const skinSel = useSetMap();
   const itemSel = useSetMap();
+  const cardsSel = useSetMap();
   const [decorSel, setDecorSel] = useState<Set<string>>(new Set());
   const [stickerSel, setStickerSel] = useState<Set<string>>(new Set());
   const [museumSel, setMuseumSel] = useState<Set<string>>(new Set());
@@ -1402,6 +1414,7 @@ export function StudioApp() {
       avatarSel.clear();
       skinSel.clear();
       itemSel.clear();
+      cardsSel.clear();
       setDecorSel(new Set());
       setStickerSel(new Set());
       setMuseumSel(new Set());
@@ -1434,7 +1447,7 @@ export function StudioApp() {
   }, [session, barnUpgrades, barnItems]);
 
   const pending =
-    profileSel.count + avatarSel.count + skinSel.count + itemSel.count + decorSel.size + stickerSel.size + museumSel.size +
+    profileSel.count + avatarSel.count + skinSel.count + itemSel.count + cardsSel.count + decorSel.size + stickerSel.size + museumSel.size +
     (barnDirty ? 1 : 0) + (pendingRegatta ? 1 : 0) + (pendingSeason ? 1 : 0) + (pendingUnban ? 1 : 0) +
     (pendingDecorFragments ? 1 : 0) + (pendingDecorClone ? 1 : 0) + (pendingDecorMaxAll ? 1 : 0);
 
@@ -1504,6 +1517,7 @@ export function StudioApp() {
         avatarSel.count > 0 ||
         skinSel.count > 0 ||
         itemSel.count > 0 ||
+        cardsSel.count > 0 ||
         decorSel.size > 0 ||
         stickerSel.size > 0 ||
         museumSel.size > 0 ||
@@ -1546,6 +1560,7 @@ export function StudioApp() {
           avatars: Object.values(avatarSel.asRecord()).flat(),
           skins: skinSel.asRecord(),
           items: Object.fromEntries(itemIds.map((id) => [id, qty])),
+          cards: Object.values(cardsSel.asRecord()).flat(),
           decor: [...decorSel],
           decorQty: parseDecorQty(),
           sticker: [...stickerSel],
@@ -1579,6 +1594,7 @@ export function StudioApp() {
       avatarSel.clear();
       skinSel.clear();
       itemSel.clear();
+      cardsSel.clear();
       profileSel.clear();
       setDecorSel(new Set());
       setStickerSel(new Set());
@@ -1594,7 +1610,7 @@ export function StudioApp() {
     } finally {
       setBusy(false);
     }
-  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, pendingSeason, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingDecorMaxAll, parseDecorQty, tr, device]);
+  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, cardsSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, pendingSeason, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingDecorMaxAll, parseDecorQty, tr, device]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1656,6 +1672,7 @@ export function StudioApp() {
     items: itemSel.count,
     barn: barnDirty ? 1 : 0,
     museum: museumSel.size,
+    cards: cardsSel.count,
   };
 
   const barnTotal = Object.values(barnItems).reduce((n, v) => n + (Number(v) || 0), 0);
@@ -1965,7 +1982,7 @@ export function StudioApp() {
 
         <section className="app-main flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg shadow-hairline">
           <nav
-            className="feature-tabs relative grid grid-cols-5 border-b border-border px-3 pt-3 sm:grid-cols-10"
+            className="feature-tabs relative grid grid-cols-5 border-b border-border px-3 pt-3 sm:grid-cols-11"
           >
             <span aria-hidden className={cn("tab-pill", tabReady && "ready")} />
             {TABS.map((id) => {
@@ -2253,6 +2270,34 @@ export function StudioApp() {
                         ))}
                       </div>
                     </section>
+                  </div>
+                )}
+
+                {tab === "cards" && (
+                  <div className="space-y-3">
+                    <p className="rounded-md bg-input px-3 py-2 text-sm text-amber">{tr("cardsNote")}</p>
+                    <Bar
+                      hint={tr("cardsHint")}
+                      onAll={() => cardsSel.allOn([...CARD_GROUPS])}
+                      onClear={cardsSel.clear}
+                      allLabel={tr("selectAll")}
+                      clearLabel={tr("clear")}
+                    />
+                    {CARD_GROUPS.map((g, i) => (
+                      <GroupCard
+                        lang={lang}
+                        key={g.id}
+                        group={g}
+                        selected={cardsSel.map[g.id] ?? new Set()}
+                        onToggle={(id) => cardsSel.toggle(g.id, id)}
+                        onGroup={(on) => cardsSel.setGroup(g.id, g.items.map((it) => it.id), on)}
+                        collapsed={false}
+                        onCollapse={() => setCardsOpen(cardsOpen === g.id ? null : g.id)}
+                        allLabel={tr("allShort")}
+                        noneLabel={tr("noneShort")}
+                        toneClass={groupTone(g.id, i)}
+                      />
+                    ))}
                   </div>
                 )}
 
