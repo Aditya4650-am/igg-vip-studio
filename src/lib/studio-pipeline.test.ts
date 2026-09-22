@@ -224,3 +224,29 @@ test("factories and train/island are gone from the session", () => {
   assert.equal(snap["islands"], undefined, "snapshot must not expose islands");
   assert.equal(snap["islandMax"], undefined, "snapshot must not expose islandMax");
 });
+
+test("items: a device refresh between grants keeps the second push delta-only", () => {
+  // Grants accumulate in GivingOffersDeferred, so pushing gem2 on a stale
+  // session re-sends gem1 with it and resurrects an already-collected gem.
+  // Re-pulling (refreshOwnSave) before the second grant fixes it.
+  const gems = studio.catalogs().items.find((g) => g.id === "Gems")!;
+  assert.equal(gems.items.length, 3, "gems group must expose gem1-3");
+  const [g1, g2] = gems.items.map((i) => i.id);
+  const blank = ['<?xml version="1.0" encoding="utf-8"?>', "<Global>", "</Global>"].join("");
+  const snap = studio.connectLoad(token, "test-device", undefined, undefined, Buffer.from(blank).toString("base64"));
+  const csvOf = (xml: string) =>
+    xml.match(/<Var\b[^>]*\bname="GivingOffersDeferred"[^>]*\bv="([^"]*)"/i)?.[1] ?? "";
+  const first = studio.applySave({ token, sessionId: snap.sessionId, items: { [g1!]: 5 } });
+  const firstCsv = csvOf(first.xml!);
+  assert.equal(firstCsv.split(",").filter(Boolean).length, 1, "first push grants only gem1");
+  const stale = studio.applySave({ token, sessionId: snap.sessionId, items: { [g2!]: 5 } });
+  assert.equal(csvOf(stale.xml!).split(",").filter(Boolean).length, 2, "stale session re-sends gem1 with gem2");
+  // The device collected gem1 after the first push; refresh to device truth.
+  const deviceAfterCollect = Buffer.from(first.fileB64!, "base64").toString("utf8").replace(firstCsv, "");
+  studio.refreshOwnSave(token, snap.sessionId, Buffer.from(deviceAfterCollect).toString("base64"));
+  const second = studio.applySave({ token, sessionId: snap.sessionId, items: { [g2!]: 5 } });
+  const entries = csvOf(second.xml!).split(",").filter(Boolean);
+  assert.equal(entries.length, 1, "refreshed push grants only gem2");
+  assert.ok(!entries[0]!.startsWith(firstCsv.split(":")[0]!), "gem1 must not be resurrected");
+  balanced(second.xml!);
+});

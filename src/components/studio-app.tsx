@@ -1465,6 +1465,22 @@ export function StudioApp() {
         const fresh = await native.pull(device);
         activeSession = await refreshOwn({ data: { token, sessionId: session.sessionId, saveB64: fresh.b64 } });
         applySnap(activeSession, catalogs?.profile);
+      } else {
+        // Re-pull the device save before granting, so consumable grants
+        // (gems, items) apply as a delta on current device state. Without
+        // this a second push re-sends the stale session and resurrects
+        // items the game already consumed. Best-effort: a failed pull
+        // keeps the previous behavior instead of blocking the save.
+        const native = nativeBridge();
+        if (native && device) {
+          try {
+            const fresh = await native.pull(device);
+            activeSession = await refreshOwn({ data: { token, sessionId: session.sessionId, saveB64: fresh.b64 } });
+            applySnap(activeSession, catalogs?.profile);
+          } catch {
+            /* keep the loaded session */
+          }
+        }
       }
 
       // Legacy Unban is intentionally kept on its dedicated server operation.
