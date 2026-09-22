@@ -2525,10 +2525,7 @@ export function StudioApp() {
                           onClick={() => {
                             const n = Math.max(0, Number.parseInt(barnFill, 10) || 0);
                             const next: Record<string, number> = {};
-                            const ids = Object.keys(barnItems).length
-                              ? Object.keys(barnItems)
-                              : catalogs.barnProducts.map((p) => p.id);
-                            for (const id of ids) next[id] = n;
+                            for (const id of catalogs.barnProducts.map((p) => p.id)) next[id] = n;
                             setBarnItems(next);
                           }}
                         >
@@ -2536,13 +2533,7 @@ export function StudioApp() {
                         </Button>
                       </div>
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                        {(Object.keys(barnItems).length
-                          ? Object.keys(barnItems).map((id) => ({
-                              id,
-                              label: catalogs.barnProducts.find((p) => p.id === id)?.label ?? id,
-                            }))
-                          : catalogs.barnProducts
-                        ).map((p) => (
+                        {catalogs.barnProducts.map((p) => (
                           <label key={p.id} className="premium-chip flex min-h-11 items-center justify-between gap-3 rounded-lg border border-transparent bg-input px-3 hover:border-primary/25">
                             <span className="flex min-w-0 items-center gap-2.5">
                               {iconForBarn(p.id) ? (
