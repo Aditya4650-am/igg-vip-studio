@@ -89,17 +89,25 @@ function docInt(doc: string, name: string): number | null {
 }
 
 /**
- * Ensure every selected card is owned (`inStockCount >= 1`, `isNew` set),
- * inserting absent entries from the known set only. Inputs in either padding
- * form normalize to canonical. Stale unpadded lookalikes (`card_6` next to
- * `card_06`) are removed when their canonical twin is granted. Counters
- * beyond that — and every other attribute — are preserved. Returns
- * `changed: 0` when nothing would move so the caller reports a real no-op.
+ * Ensure every selected card is owned with the requested stock.
+ * `qtyMap` maps loose-or-canonical ids to wanted `inStockCount` copies;
+ * stock and `maxInStockCount` are raised (never lowered) to the request and
+ * `isNew` is set. Inputs in either padding form normalize to canonical, and
+ * stale unpadded lookalikes (`card_6` next to `card_06`) are removed when
+ * their canonical twin is granted. Unknown ids and non-positive quantities
+ * are dropped. Returns `changed: 0` when nothing would move so the caller
+ * reports a real no-op.
  */
-export function grantCards(xml: string, ids: string[]) {
+export function grantCards(xml: string, qtyMap: Record<string, number>) {
   let text = xml;
-  const wanted = [...new Set(ids.map((id) => canonical(id)).filter((x): x is string => Boolean(x)))];
-  if (!wanted.length) return { xml: text, changed: 0 };
+  const wanted = new Map<string, number>();
+  for (const [raw, qty] of Object.entries(qtyMap)) {
+    const id = canonical(raw);
+    const n = Math.floor(Number(qty));
+    if (!id || !Number.isFinite(n) || n <= 0) continue;
+    wanted.set(id, Math.max(wanted.get(id) ?? 0, n));
+  }
+  if (!wanted.size) return { xml: text, changed: 0 };
   // No CardCollections block means the event never opened on this save —
   // inventing the whole structure risks a corrupt session, so refuse with a
   // useful error instead of guessing.
@@ -111,7 +119,7 @@ export function grantCards(xml: string, ids: string[]) {
     throw new Error("Không đọc được OwnedCards trong save — Load lại rồi thử lại");
   }
   let changed = 0;
-  for (const id of wanted) {
+  for (const [id, want] of wanted) {
     const esc = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const region = text.slice(span[0], span[1]);
     const m = region.match(new RegExp(`<DataElem\\b[^>]*\\bname="cardId"[^>]*\\bvalue="${esc}"[^>]*>`, "i"));
@@ -120,9 +128,9 @@ export function grantCards(xml: string, ids: string[]) {
         `<DataElem type="dataStore">` +
         `<DataElem name="cardId" type="string" value="${id}"/>` +
         `<DataElem name="generatedCount" type="int" value="1"/>` +
-        `<DataElem name="inStockCount" type="int" value="1"/>` +
+        `<DataElem name="inStockCount" type="int" value="${want}"/>` +
         `<DataElem name="isNew" type="bool" value="true"/>` +
-        `<DataElem name="maxInStockCount" type="int" value="1"/>` +
+        `<DataElem name="maxInStockCount" type="int" value="${want}"/>` +
         `</DataElem>`;
       text = text.slice(0, span[1]) + insert + text.slice(span[1]);
       span[1] += insert.length;
@@ -138,12 +146,12 @@ export function grantCards(xml: string, ids: string[]) {
       const maxStock = Number(fieldValue(entry, "maxInStockCount") ?? "0");
       const isNew = fieldValue(entry, "isNew");
       let moved = false;
-      if (stock < 1) {
-        entry = setField(entry, "inStockCount", "1");
+      if (stock < want) {
+        entry = setField(entry, "inStockCount", String(want));
         moved = true;
       }
-      if (maxStock < 1) {
-        entry = setField(entry, "maxInStockCount", "1");
+      if (maxStock < want) {
+        entry = setField(entry, "maxInStockCount", String(want));
         moved = true;
       }
       if (isNew !== "true") {

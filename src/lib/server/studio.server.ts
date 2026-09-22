@@ -239,7 +239,7 @@ export type SavePayload = {
   decorQty?: number;
   sticker?: string[];
   museum?: string[];
-  cards?: string[];
+  cards?: Record<string, number>;
   barnUpgrades?: number;
   barnItems?: Record<string, number>;
   regatta?: boolean;
@@ -347,11 +347,11 @@ export function applySave(p: SavePayload) {
     s.rawXml = r.xml;
     parts.push(`museum(${r.changed})`);
   }
-  if (revealed.cards.length) {
+  if (Object.keys(revealed.cards).length) {
     const r = grantCards(s.rawXml, revealed.cards);
     if (!r.changed) {
       throw new Error(
-        `Không có thẻ nào thay đổi — tất cả đã có trong bộ sưu tập`,
+        `Không có thẻ nào thay đổi — tất cả đã có đủ số lượng`,
       );
     }
     s.rawXml = r.xml;

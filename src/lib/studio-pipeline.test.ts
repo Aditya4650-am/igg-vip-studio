@@ -351,21 +351,30 @@ function cardBlock(xml: string, id: string) {
 test("cards: missing stock is granted and absent cards are inserted, unknowns dropped", () => {
   const snap = loadCards();
   // Unpadded singles normalize to canonical (`card_1` -> `card_01`).
-  const out = studio.applySave({ token, sessionId: snap.sessionId, cards: ["card_1", "card_02", "card_3", "card_999"] });
+  const out = studio.applySave({ token, sessionId: snap.sessionId, cards: { card_1: 1, card_02: 1, card_3: 2, card_999: 1 } });
   assert.ok(out.parts.some((p) => p.startsWith("cards(")), "the run must be reported in parts");
   assert.match(cardBlock(out.xml!, "card_01"), /name="inStockCount"[^>]*value="1"/, "card_01 stock must reach 1");
   assert.match(cardBlock(out.xml!, "card_01"), /name="isNew"[^>]*value="true"/, "card_01 must be marked new");
   assert.match(cardBlock(out.xml!, "card_01"), /name="generatedCount"[^>]*value="1"/, "generatedCount must survive untouched");
-  assert.match(cardBlock(out.xml!, "card_03"), /name="inStockCount"[^>]*value="1"/, "absent card_03 must be inserted canonical");
+  assert.match(cardBlock(out.xml!, "card_03"), /name="inStockCount"[^>]*value="2"/, "absent card_03 must be inserted with asked copies");
   assert.doesNotMatch(out.xml!, /card_999/, "unknown ids must be dropped, never written");
   assert.match(out.xml!, /name="trackedUniqueCollectedCards"[^>]*value="3"/, "unique counter must follow the array");
+  balanced(out.xml!);
+});
+
+test("cards: duplicate copies raise stock without touching anything else", () => {
+  const snap = loadCards();
+  const out = studio.applySave({ token, sessionId: snap.sessionId, cards: { card_02: 3 } });
+  assert.match(cardBlock(out.xml!, "card_02"), /name="inStockCount"[^>]*value="3"/, "stock must rise to asked copies");
+  assert.match(cardBlock(out.xml!, "card_02"), /name="maxInStockCount"[^>]*value="3"/, "max must follow stock");
+  assert.match(cardBlock(out.xml!, "card_02"), /name="generatedCount"[^>]*value="1"/, "generatedCount must survive untouched");
   balanced(out.xml!);
 });
 
 test("cards: stale unpadded lookalikes are replaced by their canonical twin", () => {
   const dupSave = cardsSave.replace('value="card_01"', 'value="card_1"');
   const snap = studio.connectLoad(token, "test-device", undefined, undefined, Buffer.from(dupSave).toString("base64"));
-  const out = studio.applySave({ token, sessionId: snap.sessionId, cards: ["card_1"] });
+  const out = studio.applySave({ token, sessionId: snap.sessionId, cards: { card_1: 1 } });
   assert.match(cardBlock(out.xml!, "card_01"), /name="inStockCount"[^>]*value="1"/, "canonical card_01 must be granted");
   assert.doesNotMatch(out.xml!, /value="card_1"/, "unpadded lookalike must be removed");
   balanced(out.xml!);
@@ -373,9 +382,9 @@ test("cards: stale unpadded lookalikes are replaced by their canonical twin", ()
 
 test("cards: a repeat run is a real no-op, not a false success", () => {
   const snap = loadCards();
-  studio.applySave({ token, sessionId: snap.sessionId, cards: ["card_01", "card_03"] });
+  studio.applySave({ token, sessionId: snap.sessionId, cards: { card_01: 1, card_03: 1 } });
   assert.throws(
-    () => studio.applySave({ token, sessionId: snap.sessionId, cards: ["card_01", "card_03"] }),
+    () => studio.applySave({ token, sessionId: snap.sessionId, cards: { card_01: 1, card_03: 1 } }),
     /Không có thẻ nào thay đổi/,
     "a second identical run must say nothing changed instead of claiming success",
   );
@@ -384,7 +393,7 @@ test("cards: a repeat run is a real no-op, not a false success", () => {
 test("cards: a save without the event refuses instead of guessing structure", () => {
   const snap = load();
   assert.throws(
-    () => studio.applySave({ token, sessionId: snap.sessionId, cards: ["card_01"] }),
+    () => studio.applySave({ token, sessionId: snap.sessionId, cards: { card_01: 1 } }),
     /sự kiện Card Collections/,
     "missing CardCollections block must refuse with guidance",
   );

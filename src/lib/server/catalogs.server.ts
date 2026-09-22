@@ -227,14 +227,16 @@ export function revealSave(p: {
   decor?: string[];
   barnItems?: Record<string, number>;
   museum?: string[];
-  cards?: string[];
+  cards?: Record<string, number>;
 }) {
   return {
     stats: remapRecord("stat", p.stats),
     profile: remapGroups("profile", p.profile),
     avatars: (p.avatars ?? []).filter((id) => /^\d+$/.test(id)),
     museum: (p.museum ?? []).filter((id) => /^a\d+$/.test(id)),
-    cards: (p.cards ?? []).filter((id) => /^card_\d+$/.test(id)),
+    cards: Object.fromEntries(
+      Object.entries(p.cards ?? {}).filter(([id]) => /^card_0*\d+$/.test(id)),
+    ),
     skins: remapGroups("skin", p.skins),
     items: remapRecord("item", p.items),
     decor: (p.decor ?? []).map((id) => remapOne("decor", id)).filter((x): x is string => Boolean(x)),

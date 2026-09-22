@@ -1160,7 +1160,6 @@ export function StudioApp() {
   const initialProfileRef = useRef<Record<string, string[]>>({});
   const [avatarOpen, setAvatarOpen] = useState<string | null>(null);
   const [itemsOpen, setItemsOpen] = useState<string | null>(null);
-  const [cardsOpen, setCardsOpen] = useState<string | null>(null);
   const [bulkQty, setBulkQty] = useState("500");
   const [decorLimit, setDecorLimit] = useState(36);
   const [decorTheme, setDecorTheme] = useState<DecorTheme>("All");
@@ -1178,7 +1177,8 @@ export function StudioApp() {
   const avatarSel = useSetMap();
   const skinSel = useSetMap();
   const itemSel = useSetMap();
-  const cardsSel = useSetMap();
+  const [cardsQty, setCardsQty] = useState<Record<string, number>>({});
+  const [cardsFill, setCardsFill] = useState("1");
   const [decorSel, setDecorSel] = useState<Set<string>>(new Set());
   const [stickerSel, setStickerSel] = useState<Set<string>>(new Set());
   const [museumSel, setMuseumSel] = useState<Set<string>>(new Set());
@@ -1422,7 +1422,7 @@ export function StudioApp() {
       avatarSel.clear();
       skinSel.clear();
       itemSel.clear();
-      cardsSel.clear();
+      setCardsQty({});
       setDecorSel(new Set());
       setStickerSel(new Set());
       setMuseumSel(new Set());
@@ -1454,8 +1454,10 @@ export function StudioApp() {
     return Object.entries(barnItems).some(([k, v]) => v !== (session.barn.items[k] ?? 0));
   }, [session, barnUpgrades, barnItems]);
 
+  const cardsCount = useMemo(() => Object.values(cardsQty).filter((v) => v > 0).length, [cardsQty]);
+
   const pending =
-    profileSel.count + avatarSel.count + skinSel.count + itemSel.count + cardsSel.count + decorSel.size + stickerSel.size + museumSel.size +
+    profileSel.count + avatarSel.count + skinSel.count + itemSel.count + cardsCount + decorSel.size + stickerSel.size + museumSel.size +
     (barnDirty ? 1 : 0) + (pendingRegatta ? 1 : 0) + (pendingSeason ? 1 : 0) + (pendingUnban ? 1 : 0) +
     (pendingDecorFragments ? 1 : 0) + (pendingDecorClone ? 1 : 0) + (pendingDecorMaxAll ? 1 : 0);
 
@@ -1475,6 +1477,10 @@ export function StudioApp() {
     try {
       const qty = parseQty();
       const itemIds = Object.values(itemSel.asRecord()).flat();
+      const changedCards: Record<string, number> = {};
+      for (const [k, v] of Object.entries(cardsQty)) {
+        if (v > 0) changedCards[k] = Math.floor(v);
+      }
       const changedBarn: Record<string, number> = {};
       for (const [k, v] of Object.entries(barnItems)) {
         if (v !== (session.barn.items[k] ?? 0)) changedBarn[k] = v;
@@ -1525,7 +1531,7 @@ export function StudioApp() {
         avatarSel.count > 0 ||
         skinSel.count > 0 ||
         itemSel.count > 0 ||
-        cardsSel.count > 0 ||
+        cardsCount > 0 ||
         decorSel.size > 0 ||
         stickerSel.size > 0 ||
         museumSel.size > 0 ||
@@ -1568,7 +1574,7 @@ export function StudioApp() {
           avatars: Object.values(avatarSel.asRecord()).flat(),
           skins: skinSel.asRecord(),
           items: Object.fromEntries(itemIds.map((id) => [id, qty])),
-          cards: Object.values(cardsSel.asRecord()).flat(),
+          cards: Object.keys(changedCards).length ? changedCards : undefined,
           decor: [...decorSel],
           decorQty: parseDecorQty(),
           sticker: [...stickerSel],
@@ -1602,7 +1608,7 @@ export function StudioApp() {
       avatarSel.clear();
       skinSel.clear();
       itemSel.clear();
-      cardsSel.clear();
+      setCardsQty({});
       profileSel.clear();
       setDecorSel(new Set());
       setStickerSel(new Set());
@@ -1618,7 +1624,7 @@ export function StudioApp() {
     } finally {
       setBusy(false);
     }
-  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, cardsSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, pendingSeason, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingDecorMaxAll, parseDecorQty, tr, device]);
+  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, cardsQty, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, pendingSeason, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingDecorMaxAll, parseDecorQty, tr, device]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1680,7 +1686,7 @@ export function StudioApp() {
     items: itemSel.count,
     barn: barnDirty ? 1 : 0,
     museum: museumSel.size,
-    cards: cardsSel.count,
+    cards: cardsCount,
   };
 
   const barnTotal = Object.values(barnItems).reduce((n, v) => n + (Number(v) || 0), 0);
@@ -2317,25 +2323,92 @@ export function StudioApp() {
                     <p className="rounded-md bg-input px-3 py-2 text-sm text-amber">{tr("cardsNote")}</p>
                     <Bar
                       hint={tr("cardsHint")}
-                      onAll={() => cardsSel.allOn([...CARD_GROUPS])}
-                      onClear={cardsSel.clear}
+                      onAll={() => {
+                        const n = Math.max(1, Number.parseInt(cardsFill, 10) || 1);
+                        const next: Record<string, number> = {};
+                        for (const g of CARD_GROUPS) for (const it of g.items) next[it.id] = n;
+                        setCardsQty(next);
+                      }}
+                      onClear={() => setCardsQty({})}
                       allLabel={tr("selectAll")}
                       clearLabel={tr("clear")}
+                      extra={
+                        <label className="flex items-center gap-2 text-xs text-muted">
+                          {tr("cardsFill")}
+                          <input
+                            className="field field-qty"
+                            inputMode="numeric"
+                            aria-label={tr("cardsFill")}
+                            value={cardsFill}
+                            onChange={(e) => setCardsFill(e.target.value.replace(/[^\d]/g, ""))}
+                          />
+                        </label>
+                      }
                     />
                     {CARD_GROUPS.map((g, i) => (
-                      <GroupCard
-                        lang={lang}
-                        key={g.id}
-                        group={g}
-                        selected={cardsSel.map[g.id] ?? new Set()}
-                        onToggle={(id) => cardsSel.toggle(g.id, id)}
-                        onGroup={(on) => cardsSel.setGroup(g.id, g.items.map((it) => it.id), on)}
-                        collapsed={false}
-                        onCollapse={() => setCardsOpen(cardsOpen === g.id ? null : g.id)}
-                        allLabel={tr("allShort")}
-                        noneLabel={tr("noneShort")}
-                        toneClass={groupTone(g.id, i)}
-                      />
+                      <section key={g.id} className="panel inventory-group">
+                        <header className="mb-3 flex items-center gap-2">
+                          <span className="group-emoji" aria-hidden="true">🃏</span>
+                          <GameIcon name="cards" className="group-icon" />
+                          <h3 className={cn("truncate text-xs font-bold tracking-wider uppercase", groupTone(g.id, i))}>
+                            {g.label}
+                          </h3>
+                          <span className="text-xs text-muted tabular-nums">
+                            {g.items.filter((it) => (cardsQty[it.id] ?? 0) > 0).length}/{g.items.length}
+                          </span>
+                          <div className="ml-auto flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              className="h-8 px-2 text-xs text-muted hover:text-primary"
+                              onClick={() => {
+                                const n = Math.max(1, Number.parseInt(cardsFill, 10) || 1);
+                                setCardsQty((prev) => {
+                                  const next = { ...prev };
+                                  for (const it of g.items) next[it.id] = n;
+                                  return next;
+                                });
+                              }}
+                            >
+                              {tr("allShort")}
+                            </button>
+                            <button
+                              type="button"
+                              className="h-8 px-2 text-xs text-muted hover:text-primary"
+                              onClick={() => {
+                                setCardsQty((prev) => {
+                                  const next = { ...prev };
+                                  for (const it of g.items) delete next[it.id];
+                                  return next;
+                                });
+                              }}
+                            >
+                              {tr("noneShort")}
+                            </button>
+                          </div>
+                        </header>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          {g.items.map((it) => (
+                            <label key={it.id} className="premium-chip flex min-h-11 items-center justify-between gap-3 rounded-lg border border-transparent bg-input px-3 hover:border-primary/25">
+                              <span className="flex min-w-0 items-center gap-2.5">
+                                <span className="chip-asset chip-emoji" aria-hidden="true">
+                                  <span className="chip-emoji-glyph">🃏</span>
+                                </span>
+                                <span className="chip-label truncate">{it.label}</span>
+                              </span>
+                              <input
+                                className="field field-qty"
+                                inputMode="numeric"
+                                aria-label={it.label}
+                                value={cardsQty[it.id] ?? 0}
+                                onChange={(e) => {
+                                  const n = Number.parseInt(e.target.value.replace(/[^\d]/g, ""), 10);
+                                  setCardsQty((prev) => ({ ...prev, [it.id]: Number.isFinite(n) ? n : 0 }));
+                                }}
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      </section>
                     ))}
                   </div>
                 )}
