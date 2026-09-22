@@ -79,3 +79,32 @@ test("the capped hint keeps its {max} placeholder in every language", () => {
     );
   }
 });
+
+test("train & island tab strings exist in every shipped language", () => {
+  const keys = ["tabUpgrades", "trainMax", "islandMax", "trainNone", "islandNone"] as const satisfies readonly (keyof Dict)[];
+  for (const lang of LANGS) {
+    for (const key of keys) {
+      const value = DICT[lang.id][key];
+      assert.ok(value, `${lang.id}.${key} is missing`);
+      assert.equal(typeof value, "string", `${lang.id}.${key} must be a string`);
+    }
+  }
+});
+
+test("train & island strings are actually translated, not English fallbacks", () => {
+  for (const key of ["tabUpgrades", "trainMax", "islandMax", "trainNone", "islandNone"] as const) {
+    const untranslated = LANGS.filter((l) => l.id !== "en" && l.id !== "vi")
+      .filter((l) => DICT[l.id][key] === DICT.en[key]);
+    assert.deepEqual(untranslated.map((l) => l.id), [], `${key} still reads as English in these`);
+  }
+});
+
+test("train and island lists stay separate on the client snapshot", () => {
+  // A save carries both kinds in the same <Upgrade> block, so a bug that maps
+  // one list into the other would silently write train levels onto islands.
+  const src = read("server/studio.server.ts");
+  assert.match(src, /s\.trains = rows;/, "trains must be assigned from the train rows");
+  assert.match(src, /s\.islands = rows;/, "islands must be assigned from the island rows");
+  assert.match(src, /trains: s\.trains,\s*\n\s*trainMax: s\.trainMax,/, "the snapshot must expose trains");
+  assert.match(src, /islands: s\.islands,\s*\n\s*islandMax: s\.islandMax,/, "the snapshot must expose islands");
+});

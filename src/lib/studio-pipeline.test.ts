@@ -222,11 +222,13 @@ const factorySave = [
   "<Global>",
   '<Version version="35.1.0" FVer="3510"/>',
   '<Upgrade version="4">',
-  '<Train id="train" level="31" slx="32162034"/>',
+  '<Train id="1" level="12" slx="32162017" xpBonus="100" timeBonus="100"/>',
+  '<Train id="2" level="31" slx="32162034" xpBonus="100" timeBonus="100"/>',
   '<Factory id="mill" level="13" slx="32162016" timeBonus="100" shelfBonus="2"/>',
   '<Factory id="bakery" level="23" slx="32162042" xpBonus="100" moneyBonus="100" timeBonus="100" shelfBonus="2"/>',
   '<Factory id="dairyfactory" level="53" slx="32162008" xpBonus="100" shelfBonus="2"/>',
-  '<Island id="island" level="31" slx="32162034"/>',
+  '<Island id="i1" level="20" slx="32162041" timeBonus="101" probability2="100" probability3="100"/>',
+  '<Island id="i2" level="31" slx="32162034" timeBonus="101" probability2="100" probability3="100"/>',
   "</Upgrade>",
   "</Global>",
 ].join("");
@@ -282,8 +284,8 @@ test("factory: maxing raises every factory and rewrites slx coherently", () => {
   assert.match(out.xml!, /<Factory id="bakery" level="53" slx="32162008"/);
   assert.match(out.xml!, /<Factory id="dairyfactory" level="53" slx="32162008"[^>]*xpBonus="100"/);
   // Trains and islands are a different system and must be left alone.
-  assert.match(out.xml!, /<Train id="train" level="31" slx="32162034"\/>/);
-  assert.match(out.xml!, /<Island id="island" level="31" slx="32162034"\/>/);
+  assert.match(out.xml!, /<Train id="1" level="12" slx="32162017"/);
+  assert.match(out.xml!, /<Island id="i1" level="20" slx="32162041"/);
 });
 
 test("factory: per-row bonus attributes survive the level bump", () => {
@@ -331,4 +333,92 @@ test("factory: the backup returns the save exactly as it was loaded", () => {
     /Không có xưởng nào thay đổi/,
     "the session must keep the edit after a backup is read",
   );
+});
+
+// --- Train / Island: same `<Upgrade>` block, same slx rule, separate tab. ---
+
+test("train: exposed with the save's own ceiling and cloaked ids", () => {
+  const snap = loadFactories();
+  assert.equal(snap.trainMax, 31, "cap must come from the highest train level in the save");
+  assert.equal(snap.trains.length, 2, "only trains belong in the train list");
+  assert.deepEqual(snap.trains.map((t) => t.label), ["Train 1", "Train 2"], "bare ids need a readable label");
+  for (const t of snap.trains) {
+    assert.ok(!["1", "2"].includes(t.id), `${t.id} must be a public id, not the raw save id`);
+  }
+});
+
+test("island: exposed separately from trains and factories", () => {
+  const snap = loadFactories();
+  assert.equal(snap.islandMax, 31, "cap must come from the highest island level in the save");
+  assert.equal(snap.islands.length, 2, "only islands belong in the island list");
+  assert.deepEqual(snap.islands.map((i) => i.label), ["Island 1", "Island 2"], "the `i` prefix must be stripped");
+});
+
+test("train: maxing rewrites level+slx and leaves factories and islands alone", () => {
+  const snap = loadFactories();
+  const ids = snap.trains.map((t) => t.id);
+  const out = studio.applySave({ token, sessionId: snap.sessionId, trains: ids, trainLevel: 31 });
+  balanced(out.xml!);
+  slxCoherent(out.xml!);
+  assert.ok(out.parts.some((p) => p.startsWith("trains(")), "the run must be reported in parts");
+  assert.match(out.xml!, /<Train id="1" level="31" slx="32162034"/, "train 1 must reach the cap");
+  assert.match(out.xml!, /<Train id="2" level="31" slx="32162034"[^>]*xpBonus="100"/, "bonus attrs must survive");
+  assert.match(out.xml!, /<Factory id="mill" level="13" slx="32162016"/, "factories must not move");
+  assert.match(out.xml!, /<Island id="i1" level="20" slx="32162041"/, "islands must not move");
+});
+
+test("island: raising one island keeps its probability attributes", () => {
+  const snap = loadFactories();
+  const only = snap.islands.find((i) => i.label === "Island 1")!;
+  const out = studio.applySave({ token, sessionId: snap.sessionId, islands: [only.id], islandLevel: 31 });
+  slxCoherent(out.xml!);
+  assert.match(
+    out.xml!,
+    /<Island id="i1" level="31" slx="32162034" timeBonus="101" probability2="100" probability3="100"\/>/,
+  );
+  assert.match(out.xml!, /<Island id="i2" level="31" slx="32162034"/, "the unselected island keeps its level");
+});
+
+test("train: a target above the save's max is clamped, never written raw", () => {
+  const snap = loadFactories();
+  const ids = snap.trains.map((t) => t.id);
+  const out = studio.applySave({ token, sessionId: snap.sessionId, trains: ids, trainLevel: 999 });
+  slxCoherent(out.xml!);
+  assert.match(out.xml!, /<Train id="1" level="31" slx="32162034"/, "must clamp to 31, the save's own max");
+});
+
+test("island: re-running a maxed save is a real no-op, not a false success", () => {
+  const snap = loadFactories();
+  const ids = snap.islands.map((i) => i.id);
+  studio.applySave({ token, sessionId: snap.sessionId, islands: ids, islandLevel: 31 });
+  assert.throws(
+    () => studio.applySave({ token, sessionId: snap.sessionId, islands: ids, islandLevel: 31 }),
+    /Không có đảo nào thay đổi/,
+    "a second identical run must say nothing changed instead of claiming success",
+  );
+});
+
+test("train: a no-op on one kind must not half-apply the other kinds", () => {
+  const snap = loadFactories();
+  const trains = snap.trains.map((t) => t.id);
+  const mill = snap.factories.find((f) => f.label === "Mill")!;
+  // First run maxes the trains, so the second run's train edit is a no-op while
+  // its factory edit would have moved. The factory edit must be dropped with it.
+  studio.applySave({ token, sessionId: snap.sessionId, trains, trainLevel: 31 });
+  assert.throws(
+    () =>
+      studio.applySave({
+        token,
+        sessionId: snap.sessionId,
+        trains,
+        trainLevel: 31,
+        factories: [mill.id],
+        factoryLevel: 53,
+      }),
+    /Không có tàu nào thay đổi/,
+  );
+  // Mill is still at 13, so maxing it alone is a real change — proof the failed
+  // combined run did not leave its factory edit committed on the session.
+  const after = studio.applySave({ token, sessionId: snap.sessionId, factories: [mill.id], factoryLevel: 53 });
+  assert.match(after.xml!, /<Factory id="mill" level="53" slx="32162008"/);
 });
