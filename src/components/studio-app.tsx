@@ -66,7 +66,10 @@ function downloadB64(name: string, b64: string) {
   a.href = url;
   a.download = name;
   a.rel = "noopener";
+  // WebView2 ignores clicks on detached anchors, so attach first.
+  document.body.appendChild(a);
   a.click();
+  a.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
@@ -77,7 +80,10 @@ function downloadText(name: string, text: string) {
   a.href = url;
   a.download = name;
   a.rel = "noopener";
+  // WebView2 ignores clicks on detached anchors, so attach first.
+  document.body.appendChild(a);
   a.click();
+  a.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
