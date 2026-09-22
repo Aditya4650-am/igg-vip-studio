@@ -50,6 +50,7 @@ type NativeBridge = {
   loadSavedKey: () => Promise<string>;
   saveKey: (key: string) => Promise<{ ok: boolean }>;
   clearSavedKey: () => Promise<{ ok: boolean }>;
+  exportFile?: (name: string, b64: string) => Promise<{ ok: boolean; path: string; size?: number }>;
 };
 
 function nativeBridge(): NativeBridge | undefined {
@@ -1962,6 +1963,16 @@ export function StudioApp() {
                   setBusy(true);
                   try {
                     const r = await exportCurrent({ data: { token, sessionId: session.sessionId } });
+                    const native = nativeBridge();
+                    if (native && typeof native.exportFile === "function") {
+                      try {
+                        const saved = await native.exportFile("mGameInfo.current.xml", r.fileB64);
+                        toast.success(saved.path);
+                        return;
+                      } catch {
+                        /* fall through to the browser download */
+                      }
+                    }
                     downloadB64("mGameInfo.current.xml", r.fileB64);
                     toast.success(tr("savedXml"));
                   } catch (e) {

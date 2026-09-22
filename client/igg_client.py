@@ -44,7 +44,7 @@ if sys.stderr is None:
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
-APP_VERSION = "1.1.4"
+APP_VERSION = "1.1.5"
 
 # Where the app UI comes from. Override with env IGG_VIP_URL or
 # %APPDATA%\IGG-VIP-Studio\server.txt
@@ -407,6 +407,30 @@ class NativeBridge:
             return {"ok": True}
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "error": str(e)}
+
+    # file export (the WebView2 shell can silently drop blob-URL downloads,
+    # so the UI prefers this native path and keeps the blob as fallback)
+    def exportFile(self, name: str, b64: str) -> dict:
+        try:
+            data = base64.b64decode(b64)
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(f"bad payload: {e}")
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", str(name)).strip("._") or "export.bin"
+        if len(data) > 64 * 1024 * 1024:
+            raise RuntimeError("Export exceeds the 64 MB safety limit.")
+        target = Path.home() / "Downloads"
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except Exception:  # noqa: BLE001
+            target = Path(tempfile.gettempdir())
+        dest = target / safe
+        n = 1
+        while dest.exists():
+            n += 1
+            stem, suffix = safe.rsplit(".", 1) if "." in safe else (safe, "")
+            dest = target / f"{stem}-{n}.{suffix}" if suffix else target / f"{stem}-{n}"
+        dest.write_bytes(data)
+        return {"ok": True, "path": str(dest), "size": len(data)}
 
     # ADB
     def devices(self) -> list[dict]:
