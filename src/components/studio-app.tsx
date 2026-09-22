@@ -1691,6 +1691,13 @@ export function StudioApp() {
 
   const barnTotal = Object.values(barnItems).reduce((n, v) => n + (Number(v) || 0), 0);
   const barnKinds = Object.values(barnItems).filter((v) => v > 0).length;
+  // The game keeps only what fits the barn tier — anything above capacity is
+  // trimmed on load, which reads as "only some items collected".
+  const barnEffectiveCap = useMemo(() => {
+    const picked = catalogs?.barnCapacity.find((c) => c.upgrades === barnUpgrades)?.capacity;
+    return picked ?? session?.barn.capacity ?? null;
+  }, [catalogs, barnUpgrades, session]);
+  const barnOverCap = barnEffectiveCap != null && barnTotal > barnEffectiveCap;
 
   if (!token) {
     return (
@@ -2510,6 +2517,11 @@ export function StudioApp() {
                         <span className="text-xs text-muted">
                           {tr("barnItemsCount")}: {barnKinds} · {tr("barnItemsTotal")}: {barnTotal}
                         </span>
+                        {barnOverCap ? (
+                          <span className="text-xs font-semibold text-amber">
+                            {tr("barnOverCapacity")}: {barnTotal} / {barnEffectiveCap}
+                          </span>
+                        ) : null}
                         <label className="ml-auto flex items-center gap-2 text-xs text-muted">
                           {tr("barnFill")}
                           <input
@@ -2527,6 +2539,12 @@ export function StudioApp() {
                             const next: Record<string, number> = {};
                             for (const id of catalogs.barnProducts.map((p) => p.id)) next[id] = n;
                             setBarnItems(next);
+                            // Auto-pick the smallest tier that fits the fill so
+                            // the game has no reason to trim anything on load.
+                            const total = n * catalogs.barnProducts.length;
+                            const fit = catalogs.barnCapacity.find((c) => c.capacity >= total)
+                              ?? catalogs.barnCapacity[catalogs.barnCapacity.length - 1];
+                            if (fit && total > 0) setBarnUpgrades(fit.upgrades);
                           }}
                         >
                           {tr("barnFill")}
