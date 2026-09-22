@@ -10,7 +10,8 @@ const { verifyLicenseKey } = await import("./server/license.server.ts");
 const { findUnbalancedTag } = await import("./server/township/xml-edit.server.ts");
 const { avatarEmoji, avatarIconPath, AVATAR_EMOJIS, AVATAR_ICON_MAX, AVATAR_MAX } =
   await import("./catalogs.ts");
-const { readdirSync } = await import("node:fs");
+const { iconForBarn } = await import("./game-icon-map.ts");
+const { readdirSync, existsSync } = await import("node:fs");
 
 const { token } = verifyLicenseKey("VIP-DEMO", "TEST-DEVICE-0001");
 
@@ -421,4 +422,15 @@ test("barn: extended products roundtrip through the same counter mechanism", () 
   assert.match(out.xml!, /<Var\b[^>]*\bname="BronzeBullionCounter"[^>]*\bv="44"/i, "ingot counter must be written");
   assert.match(out.xml!, /<Var\b[^>]*\bname="appleCounter"[^>]*\bv="5"/i, "goods counter must be written");
   balanced(out.xml!);
+});
+
+test("barn: every mapped product icon resolves to a file on disk", () => {
+  let mapped = 0;
+  for (const p of studio.catalogs().barnProducts) {
+    const src = iconForBarn(p.id);
+    if (!src) continue;
+    mapped += 1;
+    assert.ok(existsSync(`public${src}`), `${p.id} -> ${src} is missing on disk`);
+  }
+  assert.ok(mapped >= 100, `expected 100+ mapped barn icons, got ${mapped}`);
 });
