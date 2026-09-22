@@ -214,3 +214,121 @@ test("avatars: out-of-range numbers never produce a broken icon", () => {
     assert.equal(avatarIconPath(bad), null, `${bad} must not resolve to a path`);
   }
 });
+
+// A save whose `<Upgrade>` block mirrors the real one: levels mixed, `slx` the
+// XOR-obfuscated copy of `level`, and per-row bonus attributes that vary.
+const factorySave = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  "<Global>",
+  '<Version version="35.1.0" FVer="3510"/>',
+  '<Upgrade version="4">',
+  '<Train id="train" level="31" slx="32162034"/>',
+  '<Factory id="mill" level="13" slx="32162016" timeBonus="100" shelfBonus="2"/>',
+  '<Factory id="bakery" level="23" slx="32162042" xpBonus="100" moneyBonus="100" timeBonus="100" shelfBonus="2"/>',
+  '<Factory id="dairyfactory" level="53" slx="32162008" xpBonus="100" shelfBonus="2"/>',
+  '<Island id="island" level="31" slx="32162034"/>',
+  "</Upgrade>",
+  "</Global>",
+].join("");
+
+function loadFactories() {
+  return studio.connectLoad(
+    token,
+    "test-device",
+    undefined,
+    undefined,
+    Buffer.from(factorySave).toString("base64"),
+  );
+}
+
+/** `slx` must always decode back to `level`, for every upgrade row. */
+function slxCoherent(xml: string) {
+  const rows = [...xml.matchAll(/<(Factory|Train|Island)\b[^>]*\blevel="(\d+)"[^>]*\bslx="(\d+)"/g)];
+  assert.ok(rows.length, "there must be upgrade rows to check");
+  for (const m of rows) {
+    assert.equal(
+      32162029 ^ Number(m[2]),
+      Number(m[3]),
+      `${m[1]} level=${m[2]} has a stale slx=${m[3]} — the game reads this as inconsistent`,
+    );
+  }
+}
+
+test("factory: the save's own max level is the ceiling, not a made-up number", () => {
+  const snap = loadFactories();
+  assert.equal(snap.factoryMax, 53, "cap must come from the highest level in the save");
+  // Levels are reported as-is so the user can see what will move.
+  assert.equal(snap.factories.length, 3, "trains and islands must not be listed as factories");
+});
+
+test("factory: ids are cloaked, never raw save ids", () => {
+  const snap = loadFactories();
+  for (const f of snap.factories) {
+    assert.ok(!["mill", "bakery", "dairyfactory"].includes(f.id), `${f.id} must be a public id, not the raw save id`);
+  }
+  const labels = snap.factories.map((f) => f.label).sort();
+  assert.deepEqual(labels, ["Bakery", "Dairy", "Mill"], "each factory needs a readable label");
+});
+
+test("factory: maxing raises every factory and rewrites slx coherently", () => {
+  const snap = loadFactories();
+  const ids = snap.factories.map((f) => f.id);
+  const out = studio.applySave({ token, sessionId: snap.sessionId, factories: ids, factoryLevel: 53 });
+  balanced(out.xml!);
+  slxCoherent(out.xml!);
+  assert.ok(out.parts.some((p) => p.startsWith("factories(")), "the run must be reported in parts");
+  // Every factory is at the cap; the already-maxed one must not have been rewritten.
+  assert.match(out.xml!, /<Factory id="mill" level="53" slx="32162008"/);
+  assert.match(out.xml!, /<Factory id="bakery" level="53" slx="32162008"/);
+  assert.match(out.xml!, /<Factory id="dairyfactory" level="53" slx="32162008"[^>]*xpBonus="100"/);
+  // Trains and islands are a different system and must be left alone.
+  assert.match(out.xml!, /<Train id="train" level="31" slx="32162034"\/>/);
+  assert.match(out.xml!, /<Island id="island" level="31" slx="32162034"\/>/);
+});
+
+test("factory: per-row bonus attributes survive the level bump", () => {
+  const snap = loadFactories();
+  const mill = snap.factories.find((f) => f.label === "Mill")!;
+  const out = studio.applySave({ token, sessionId: snap.sessionId, factories: [mill.id], factoryLevel: 53 });
+  slxCoherent(out.xml!);
+  // Only the selected factory moves, and it keeps everything else it had.
+  assert.match(out.xml!, /<Factory id="mill" level="53" slx="32162008" timeBonus="100" shelfBonus="2"\/>/);
+  assert.match(out.xml!, /<Factory id="bakery" level="23" slx="32162042"/);
+});
+
+test("factory: a target above the save's max is clamped, never written raw", () => {
+  const snap = loadFactories();
+  const mill = snap.factories.find((f) => f.label === "Mill")!;
+  const out = studio.applySave({ token, sessionId: snap.sessionId, factories: [mill.id], factoryLevel: 999 });
+  slxCoherent(out.xml!);
+  assert.match(out.xml!, /<Factory id="mill" level="53" slx="32162008"/, "must clamp to 53, the save's own max");
+});
+
+test("factory: re-running a maxed save is a real no-op, not a false success", () => {
+  const snap = loadFactories();
+  const ids = snap.factories.map((f) => f.id);
+  studio.applySave({ token, sessionId: snap.sessionId, factories: ids, factoryLevel: 53 });
+  assert.throws(
+    () => studio.applySave({ token, sessionId: snap.sessionId, factories: ids, factoryLevel: 53 }),
+    /Không có xưởng nào thay đổi/,
+    "a second identical run must say nothing changed instead of claiming success",
+  );
+});
+
+test("factory: the backup returns the save exactly as it was loaded", () => {
+  const snap = loadFactories();
+  const mill = snap.factories.find((f) => f.label === "Mill")!;
+  studio.applySave({ token, sessionId: snap.sessionId, factories: [mill.id], factoryLevel: 53 });
+
+  const backup = studio.exportOriginal(token, snap.sessionId);
+  const xml = Buffer.from(backup.fileB64, "base64").toString("utf8");
+  assert.match(xml, /<Factory id="mill" level="13"/, "backup must hold mill's original level");
+  assert.doesNotMatch(xml, /<Factory id="mill" level="53"/, "backup must not contain the edited level");
+  // Reading the backup must not touch the live session: the edited factory is
+  // still at 53 and a repeat run still reports a no-op rather than reverting.
+  assert.throws(
+    () => studio.applySave({ token, sessionId: snap.sessionId, factories: [mill.id], factoryLevel: 53 }),
+    /Không có xưởng nào thay đổi/,
+    "the session must keep the edit after a backup is read",
+  );
+});

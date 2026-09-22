@@ -63,6 +63,34 @@ which the game's loader rejects).
 - Match container tags in both forms (`<X/>` and `<X>…</X>`). A fresh save ships
   `<BuildingsStash/>`, so a paired-only matcher appends a second stash that the
   game ignores — decoration "applies" in the UI but never appears in game.
+- `<Upgrade version="4">` holds the `Factory` / `Train` / `Island` levels, and
+  `slx` is **not a checksum — it is `level` XOR `32162029`**. Always rewrite the
+  pair together; bumping `level` alone is what makes the game read inconsistent
+  upgrade data. The ceiling is the highest level already in the document: a level
+  the save never reached cannot be shown to be valid, so never invent one.
+  Rows differ in which bonus attributes they carry (`xpBonus`, `moneyBonus`,
+  `timeBonus`, `shelfBonus`, `probability2/3`) and the game reads those
+  independently — replace only the two values in place.
+
+## Factory / upgrade levels
+
+The **Factories** tab (`tab === "factory"`) raises `<Upgrade version="4">`
+`Factory` rows to a target level — per factory or all at once. `Train` and
+`Island` rows share the same block but are a separate system and are never
+touched.
+
+- `discoverUpgrades(xml, kind)` / `upgradeMaxLevel(xml, kind)` /
+  `injectUpgradeLevels(xml, kind, ids, target)` live in `inject.server.ts`.
+- The target is clamped to the save's own maximum (`factoryMax` in the
+  snapshot): a level the save never contained cannot be shown to be valid.
+- `injectUpgradeLevels` reports `changed: 0` when nothing would move, and
+  `applySave` turns that into a thrown "không có xưởng nào thay đổi" so a no-op
+  is never reported as success — the failure mode that got the card tab removed.
+- Factory ids are cloaked like every other real game id, via `cloakFactories` /
+  the `factories` entry in `catalogs.server.ts`.
+- The **backup** button calls `exportOriginal`, which returns the save exactly as
+  loaded (`originalDecrypted` for container saves, `loadedXml` for plain XML), so
+  an edit that misbehaves on device can be reverted by writing it back.
 
 ## Fetch City / Unban
 
@@ -133,8 +161,11 @@ artwork and `AVATAR_MAX` (398) is the highest avatar the game offers, so avatars
 needed) so the trailing avatars never repeat and never fall back to the star
 placeholder. Both parse the number strictly, so `-3` is rejected instead of
 being read as `3`. `GroupCard` passes `avatar` to `Chip`, which swaps in
-`.chip-asset-avatar` — a circular well with `object-fit: cover` — since the
-source art is square but the well is 40px round.
+`.chip-asset-avatar` — a **square** well that shows the artwork whole with
+`object-fit: contain`. The well must stay square: the source art is square, and
+rounding it to a circle (or switching to `cover`) crops the picture. Guard rail:
+`ui-regressions.test.mts` fails if any `.chip-asset-avatar` rule regains
+`border-radius: 999px` or stops using `contain`.
 
 Guard rails: `studio-pipeline.test.ts` asserts every shipped file maps to its own
 path, that the trailing avatars get unique non-star emoji, and that out-of-range

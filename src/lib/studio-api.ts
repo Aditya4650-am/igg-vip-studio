@@ -80,6 +80,8 @@ const saveSchema = z.object({
   decorFragments: z.boolean().optional(),
   decorClone: z.boolean().optional(),
   decorMaxAll: z.boolean().optional(),
+  factories: z.array(z.string()).optional(),
+  factoryLevel: z.number().int().min(1).max(1000).optional(),
 });
 
 export const saveAll = createServerFn({ method: "POST" })
@@ -87,6 +89,15 @@ export const saveAll = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { applySave } = await import("./server/studio.server");
     return applySave(data);
+  });
+
+// Backup: returns the save exactly as it was loaded, so an edit that turns out
+// to be unwelcome on the device can be undone by writing this file back.
+export const downloadOriginal = createServerFn({ method: "POST" })
+  .validator(z.object({ token: z.string(), sessionId: z.string() }))
+  .handler(async ({ data }) => {
+    const { exportOriginal } = await import("./server/studio.server");
+    return exportOriginal(data.token, data.sessionId);
   });
 
 export const runRegatta = createServerFn({ method: "POST" })

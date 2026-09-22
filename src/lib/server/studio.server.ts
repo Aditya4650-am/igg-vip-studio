@@ -7,7 +7,7 @@ import { applyStatChanges, parseStats, readAnyVar, STAT_ALIASES } from "./townsh
 import { shellErrorMessage } from "./township/save-decode.server";
 import { findUnbalancedTag } from "./township/xml-edit.server";
 import { applyBarnCapacity, applyBarnItems, barnInfo } from "./township/barn.server";
-import { injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, parseProfileUnlocked } from "./township/inject.server";
+import { injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, injectUpgradeLevels, discoverUpgrades, upgradeMaxLevel, parseProfileUnlocked } from "./township/inject.server";
 import {
   applyDesban,
   cloneDecorOnly,
@@ -26,6 +26,7 @@ import {
   cloakStats,
   publicCatalogs,
   cloakProfileUnlocked,
+  cloakFactories,
   revealSave,
 } from "./catalogs.server";
 
@@ -45,6 +46,8 @@ export type Session = {
   rawXml: string | null;
   header: Buffer | null;
   originalDecrypted: Buffer | null;
+  /** The save text exactly as loaded, before any edit — the undo source. */
+  loadedXml: string | null;
   friendXml: string | null;
   ownMeta: { cityId: string; bver: string; fver: string };
   stats: Record<string, string>;
@@ -54,6 +57,8 @@ export type Session = {
   skins: Record<string, string[]>;
   items: Record<string, number>;
   decor: string[];
+  factories: { id: string; label: string; level: number }[];
+  factoryMax: number;
   barn: BarnState;
   season: { premium: boolean; score: number };
   regatta: { tasks: number; score: number } | null;
@@ -78,6 +83,27 @@ function requireSession(sessionId: string, token: string): Session {
 
 export function catalogs() {
   return publicCatalogs();
+}
+
+/** Factory rows for the client: real ids cloaked, levels as stored. */
+function factoryRows(xml: string) {
+  return cloakFactories(discoverUpgrades(xml, "Factory"));
+}
+
+/**
+ * The save as it was loaded, before any edits. This is the undo path for an
+ * edit that turns out to be unwelcome on the device: the container bytes are
+ * kept on the session, so the user can write the original file straight back.
+ */
+export function exportOriginal(token: string, sessionId: string) {
+  const s = requireSession(sessionId, token);
+  // Two save shapes reach here. An encrypted/compressed pull keeps the raw
+  // container in `originalDecrypted`. A plain-XML save (already decoded, or
+  // loaded from LocalInfo) has no container, so the untouched XML text is the
+  // original — that is exactly the bytes `encodeSave` would have written.
+  const buf = s.originalDecrypted ?? (s.loadedXml ? Buffer.from(s.loadedXml, "utf8") : null);
+  if (!buf) throw new Error("Chưa có save gốc để sao lưu");
+  return { fileB64: buf.toString("base64") };
 }
 
 export function listDevices() {
@@ -151,6 +177,9 @@ export function connectLoad(token: string, device: string, _saveXml?: string, _p
       skins: {},
       items: {},
       decor: [],
+      factories: factoryRows(opened.xml),
+      factoryMax: upgradeMaxLevel(opened.xml, "Factory"),
+      loadedXml: opened.xml.replace(/^\uFEFF/, ""),
       barn,
       season: { premium: /premium="1"/i.test(opened.xml), score: Number(opened.xml.match(/SeasonTicket[^>]*score="(\d+)"/i)?.[1] ?? 0) },
       regatta: null,
@@ -183,6 +212,7 @@ export function refreshOwnSave(token: string, sessionId: string, saveB64: string
   s.rawXml = opened.xml;
   s.header = opened.header;
   s.originalDecrypted = opened.original;
+  s.loadedXml = opened.xml.replace(/^\uFEFF/, "");
   s.friendXml = friendXml;
   s.friendCity = friendCity;
   s.friends = friends;
@@ -191,6 +221,8 @@ export function refreshOwnSave(token: string, sessionId: string, saveB64: string
   s.stats = parseStats(opened.xml);
   s.profileUnlocked = cloakProfileUnlocked(parseProfileUnlocked(opened.xml));
   s.barn = barnInfo(opened.xml);
+  s.factories = factoryRows(opened.xml);
+  s.factoryMax = upgradeMaxLevel(opened.xml, "Factory");
   s.log.push(`Reloaded mGameInfo from emulator`);
   return snapshot(s);
 }
@@ -214,6 +246,8 @@ export type SavePayload = {
   decorFragments?: boolean;
   decorClone?: boolean;
   decorMaxAll?: boolean;
+  factories?: string[];
+  factoryLevel?: number;
 };
 
 function mergeUnique(a: string[], b: string[]) {
@@ -325,9 +359,25 @@ export function applySave(p: SavePayload) {
     }
   }
 
+  if (s.factoryMax > 0 && p.factoryLevel !== undefined && revealed.factories.length) {
+    const r = injectUpgradeLevels(s.rawXml, "Factory", revealed.factories, p.factoryLevel);
+    if (!r.changed) {
+      // Report the no-op instead of claiming success: every selected factory is
+      // already at or above the target the save allows.
+      throw new Error(
+        `Không có xưởng nào thay đổi — tất cả đã đạt cấp ${r.target} (tối đa trong save: ${s.factoryMax})`,
+      );
+    }
+    s.rawXml = r.xml;
+    parts.push(`factories(${r.changed}→${r.target})`);
+    s.log.push(r.capped ? `Factory level capped to save max ${s.factoryMax}` : `Factory level set to ${r.target}`);
+  }
+
   s.stats = parseStats(s.rawXml);
   s.profileUnlocked = cloakProfileUnlocked(parseProfileUnlocked(s.rawXml));
   s.barn = barnInfo(s.rawXml);
+  s.factories = factoryRows(s.rawXml);
+  s.factoryMax = upgradeMaxLevel(s.rawXml, "Factory");
   if (!parts.length) throw new Error("Nothing selected");
   const malformed = findUnbalancedTag(s.rawXml);
   if (malformed) throw new Error(`Save XML không hợp lệ (${malformed}) — hủy để tránh hỏng file`);
@@ -478,6 +528,8 @@ export function snapshot(s: Session) {
     },
     season: s.season,
     regatta: s.regatta,
+    factories: s.factories,
+    factoryMax: s.factoryMax,
     friends: s.friends,
     friendCity: s.friendCity,
     unban: s.unban,
