@@ -2576,12 +2576,13 @@ export function StudioApp() {
                       </div>
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         {catalogs.barnProducts.map((p) => {
-                          // Locked = no counter in the save yet. Still
-                          // grantable: the game hides it until its level /
-                          // building unlocks, then shows it pre-stocked.
-                          const locked = !(p.id in (session?.barn.items ?? {}));
+                          // No counter in the save only means zero stock, not
+                          // locked — carrot grows in the fields with no
+                          // counter until stocked. Everything stays grantable;
+                          // the game shows each good once its level unlocks.
+                          const missing = !(p.id in (session?.barn.items ?? {}));
                           return (
-                          <label key={p.id} className="premium-chip flex min-h-11 items-center justify-between gap-3 rounded-lg border border-transparent bg-input px-3 hover:border-primary/25" title={locked ? tr("barnLockedNote") : undefined}>
+                          <label key={p.id} className="premium-chip flex min-h-11 items-center justify-between gap-3 rounded-lg border border-transparent bg-input px-3 hover:border-primary/25" title={missing ? tr("barnNotInSaveNote") : undefined}>
                             <span className="flex min-w-0 items-center gap-2.5">
                               {iconForBarn(p.id) ? (
                                 <span className="chip-asset" aria-hidden="true">
@@ -2592,7 +2593,7 @@ export function StudioApp() {
                                   <span className="chip-emoji-glyph">{itemEmoji(undefined, p.label, "barn")}</span>
                                 </span>
                               )}
-                              <span className="chip-label truncate">{locked ? `🔒 ${p.label}` : p.label}</span>
+                              <span className="chip-label truncate">{p.label}</span>
                             </span>
                             <input
                               className="field field-qty"
