@@ -1709,6 +1709,18 @@ export function StudioApp() {
 
   const barnTotal = Object.values(barnItems).reduce((n, v) => n + (Number(v) || 0), 0);
   const barnKinds = Object.values(barnItems).filter((v) => v > 0).length;
+  // Buttons mirror working stock only: positively-stocked counters from the
+  // loaded save. Zeroed/locked goods and catalog extras stay out, so every
+  // button on screen maps to something the game actually holds.
+  const barnVisible = useMemo(() => {
+    if (!catalogs) return [] as { id: string; label: string }[];
+    const stocked = Object.keys(session?.barn.items ?? {}).filter((k) => (session?.barn.items[k] ?? 0) > 0);
+    const base = stocked.length ? stocked : catalogs.barnProducts.map((p) => p.id);
+    return base.map((id) => ({
+      id,
+      label: catalogs.barnProducts.find((p) => p.id === id)?.label ?? id,
+    }));
+  }, [catalogs, session]);
   // The game keeps only what fits the barn tier — anything above capacity is
   // trimmed on load, which reads as "only some items collected".
   const barnEffectiveCap = useMemo(() => {
@@ -2556,12 +2568,7 @@ export function StudioApp() {
                           onClick={() => {
                             const n = Math.max(0, Number.parseInt(barnFill, 10) || 0);
                             const next: Record<string, number> = {};
-                            // Fill only goods the save already holds (unlocked
-                            // in game). Locked goods have no counter in the
-                            // document and the game hides them, so writing
-                            // them only litters the save.
-                            const unlocked = Object.keys(session?.barn.items ?? {});
-                            const ids = unlocked.length ? unlocked : catalogs.barnProducts.map((p) => p.id);
+                            const ids = barnVisible.map((p) => p.id);
                             for (const id of ids) next[id] = n;
                             setBarnItems(next);
                             // Auto-pick the smallest tier that fits the fill so
@@ -2576,14 +2583,13 @@ export function StudioApp() {
                         </Button>
                       </div>
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                        {catalogs.barnProducts.map((p) => {
+                        {barnVisible.map((p) => {
                           // No counter in the save only means zero stock, not
                           // locked — carrot grows in the fields with no
                           // counter until stocked. Everything stays grantable;
                           // the game shows each good once its level unlocks.
-                          const missing = !(p.id in (session?.barn.items ?? {}));
                           return (
-                          <label key={p.id} className="premium-chip flex min-h-11 items-center justify-between gap-3 rounded-lg border border-transparent bg-input px-3 hover:border-primary/25" title={missing ? tr("barnNotInSaveNote") : undefined}>
+                          <label key={p.id} className="premium-chip flex min-h-11 items-center justify-between gap-3 rounded-lg border border-transparent bg-input px-3 hover:border-primary/25">
                             <span className="flex min-w-0 items-center gap-2.5">
                               {iconForBarn(p.id) ? (
                                 <span className="chip-asset" aria-hidden="true">
