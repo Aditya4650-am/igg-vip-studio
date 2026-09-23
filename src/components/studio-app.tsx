@@ -2556,7 +2556,11 @@ export function StudioApp() {
                           onClick={() => {
                             const n = Math.max(0, Number.parseInt(barnFill, 10) || 0);
                             const next: Record<string, number> = {};
-                            const ids = catalogs.barnProducts.map((p) => p.id);
+                            // Fill only counters the save already holds: the
+                            // server keeps those and purges everything else
+                            // on load, so filling unknown goods only litters.
+                            const unlocked = Object.keys(session?.barn.items ?? {});
+                            const ids = unlocked.length ? unlocked : catalogs.barnProducts.map((p) => p.id);
                             for (const id of ids) next[id] = n;
                             setBarnItems(next);
                             // Auto-pick the smallest tier that fits the fill so
