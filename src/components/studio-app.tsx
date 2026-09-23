@@ -2531,6 +2531,7 @@ export function StudioApp() {
                       ) : null}
                     </section>
                     <section className="panel">
+                      <p className="mb-3 rounded-md bg-input px-3 py-2 text-sm text-amber">{tr("barnStockNote")}</p>
                       <div className="mb-3 flex flex-wrap items-center gap-2">
                         <h3 className="text-xs font-bold tracking-wider text-amber uppercase">{tr("barnItemsTitle")}</h3>
                         <span className="text-xs text-muted">
