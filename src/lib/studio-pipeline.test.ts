@@ -434,8 +434,28 @@ test("barn: every mapped product icon resolves to a file on disk", () => {  let 
   assert.ok(mapped >= 100, `expected 100+ mapped barn icons, got ${mapped}`);
 });
 
-test("barn: discovery finds catalog stock in any letter case, never order counters", () => {
+test("data: experience and expansion counters roundtrip like any stat", () => {
   const xml = [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    "<Global>",
+    '<Var name="experience" v="3138" t="i"/>',
+    '<Var name="ExpandLevel" v="12" t="i"/>',
+    "</Global>",
+  ].join("");
+  const snap = studio.connectLoad(token, "test-device", undefined, undefined, Buffer.from(xml).toString("base64"));
+  const idOf = (key: string) => studio.catalogs().fields.find((f) => f.key === key)!.id;
+  assert.equal(snap.stats[idOf("xpr")], "3138", "experience must be exposed");
+  const out = studio.applySave({
+    token,
+    sessionId: snap.sessionId,
+    stats: { [idOf("xpr")]: "2436381253", [idOf("xpl")]: "386" },
+  });
+  assert.match(out.xml!, /name="experience"[^>]*v="2436381253"/, "experience must be written");
+  assert.match(out.xml!, /name="ExpandLevel"[^>]*v="386"/, "expansion must be created");
+  balanced(out.xml!);
+});
+
+test("barn: discovery finds catalog stock in any letter case, never order counters", () => {  const xml = [
     '<?xml version="1.0" encoding="utf-8"?>',
     "<Global>",
     '<Var name="BronzeBullionCounter" v="44" t="i"/>',

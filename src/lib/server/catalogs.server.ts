@@ -83,6 +83,9 @@ const STAT_INTERNAL: { id: string; emoji: string; labelEn: string; labelVi: stri
   { id: "WareHouseCashUpgrade", emoji: "🏬", labelEn: "Warehouse Cash Upgrade", labelVi: "Nâng cấp kho $" },
   { id: "WHUdup", emoji: "🏬", labelEn: "Barn Capacity Code", labelVi: "Mã sức chứa kho" },
   { id: "Match3Lives_infTime", emoji: "♾️", labelEn: "Match-3 Infinite Lives", labelVi: "Match-3 mạng vô hạn" },
+  { id: "xpr", emoji: "💫", labelEn: "Experience", labelVi: "Kinh nghiệm" },
+  { id: "xpl", emoji: "🗺️", labelEn: "Town Expansions", labelVi: "Cấp mở rộng" },
+  { id: "zxl", emoji: "🏝️", labelEn: "Zoo Expansions", labelVi: "Mở rộng sở thú" },
 ];
 
 const BARN_INTERNAL: { id: string; label: string }[] = [
