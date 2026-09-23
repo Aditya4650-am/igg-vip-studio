@@ -2576,21 +2576,12 @@ export function StudioApp() {
                       </div>
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         {catalogs.barnProducts.map((p) => {
+                          // Locked = no counter in the save yet. Still
+                          // grantable: the game hides it until its level /
+                          // building unlocks, then shows it pre-stocked.
                           const locked = !(p.id in (session?.barn.items ?? {}));
-                          if (locked) {
-                            return (
-                              <div key={p.id} className="premium-chip flex min-h-11 items-center gap-3 rounded-lg border border-transparent bg-input px-3 opacity-50" title={tr("barnLockedNote")}>
-                                <span className="flex min-w-0 items-center gap-2.5">
-                                  <span className="chip-asset chip-emoji" aria-hidden="true">
-                                    <span className="chip-emoji-glyph">🔒</span>
-                                  </span>
-                                  <span className="chip-label truncate">{p.label}</span>
-                                </span>
-                              </div>
-                            );
-                          }
                           return (
-                          <label key={p.id} className="premium-chip flex min-h-11 items-center justify-between gap-3 rounded-lg border border-transparent bg-input px-3 hover:border-primary/25">
+                          <label key={p.id} className="premium-chip flex min-h-11 items-center justify-between gap-3 rounded-lg border border-transparent bg-input px-3 hover:border-primary/25" title={locked ? tr("barnLockedNote") : undefined}>
                             <span className="flex min-w-0 items-center gap-2.5">
                               {iconForBarn(p.id) ? (
                                 <span className="chip-asset" aria-hidden="true">
@@ -2601,7 +2592,7 @@ export function StudioApp() {
                                   <span className="chip-emoji-glyph">{itemEmoji(undefined, p.label, "barn")}</span>
                                 </span>
                               )}
-                              <span className="chip-label truncate">{p.label}</span>
+                              <span className="chip-label truncate">{locked ? `🔒 ${p.label}` : p.label}</span>
                             </span>
                             <input
                               className="field field-qty"
