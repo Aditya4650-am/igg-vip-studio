@@ -415,6 +415,9 @@ const BARN_INTERNAL: { id: string; label: string }[] = [
   { id: "yogurt", label: "Yogurt" },
 ];
 
+/** Every genuine warehouse product id (classic + inventoried). */
+export const BARN_PRODUCT_IDS: ReadonlySet<string> = new Set(BARN_INTERNAL.map((p) => p.id));
+
 export const BARN_CAPACITY: { upgrades: number; capacity: number }[] = [
   { upgrades: 100, capacity: 5085 },
   { upgrades: 250, capacity: 16335 },

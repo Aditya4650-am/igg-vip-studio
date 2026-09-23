@@ -2555,11 +2555,17 @@ export function StudioApp() {
                           onClick={() => {
                             const n = Math.max(0, Number.parseInt(barnFill, 10) || 0);
                             const next: Record<string, number> = {};
-                            for (const id of catalogs.barnProducts.map((p) => p.id)) next[id] = n;
+                            // Fill only goods the save already holds (unlocked
+                            // in game). Locked goods have no counter in the
+                            // document and the game hides them, so writing
+                            // them only litters the save.
+                            const unlocked = Object.keys(session?.barn.items ?? {});
+                            const ids = unlocked.length ? unlocked : catalogs.barnProducts.map((p) => p.id);
+                            for (const id of ids) next[id] = n;
                             setBarnItems(next);
                             // Auto-pick the smallest tier that fits the fill so
                             // the game has no reason to trim anything on load.
-                            const total = n * catalogs.barnProducts.length;
+                            const total = n * ids.length;
                             const fit = catalogs.barnCapacity.find((c) => c.capacity >= total)
                               ?? catalogs.barnCapacity[catalogs.barnCapacity.length - 1];
                             if (fit && total > 0) setBarnUpgrades(fit.upgrades);
@@ -2569,7 +2575,21 @@ export function StudioApp() {
                         </Button>
                       </div>
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                        {catalogs.barnProducts.map((p) => (
+                        {catalogs.barnProducts.map((p) => {
+                          const locked = !(p.id in (session?.barn.items ?? {}));
+                          if (locked) {
+                            return (
+                              <div key={p.id} className="premium-chip flex min-h-11 items-center gap-3 rounded-lg border border-transparent bg-input px-3 opacity-50" title={tr("barnLockedNote")}>
+                                <span className="flex min-w-0 items-center gap-2.5">
+                                  <span className="chip-asset chip-emoji" aria-hidden="true">
+                                    <span className="chip-emoji-glyph">🔒</span>
+                                  </span>
+                                  <span className="chip-label truncate">{p.label}</span>
+                                </span>
+                              </div>
+                            );
+                          }
+                          return (
                           <label key={p.id} className="premium-chip flex min-h-11 items-center justify-between gap-3 rounded-lg border border-transparent bg-input px-3 hover:border-primary/25">
                             <span className="flex min-w-0 items-center gap-2.5">
                               {iconForBarn(p.id) ? (
@@ -2593,7 +2613,8 @@ export function StudioApp() {
                               }}
                             />
                           </label>
-                        ))}
+                          );
+                        })}
                       </div>
                     </section>
                   </div>

@@ -424,8 +424,7 @@ test("barn: extended products roundtrip through the same counter mechanism", () 
   balanced(out.xml!);
 });
 
-test("barn: every mapped product icon resolves to a file on disk", () => {
-  let mapped = 0;
+test("barn: every mapped product icon resolves to a file on disk", () => {  let mapped = 0;
   for (const p of studio.catalogs().barnProducts) {
     const src = iconForBarn(p.id);
     if (!src) continue;
@@ -433,4 +432,21 @@ test("barn: every mapped product icon resolves to a file on disk", () => {
     assert.ok(existsSync(`public${src}`), `${p.id} -> ${src} is missing on disk`);
   }
   assert.ok(mapped >= 100, `expected 100+ mapped barn icons, got ${mapped}`);
+});
+
+test("barn: discovery finds catalog stock in any letter case, never order counters", () => {
+  const xml = [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    "<Global>",
+    '<Var name="BronzeBullionCounter" v="44" t="i"/>',
+    '<Var name="appleCounter" v="50" t="i"/>',
+    '<Var name="MapOrderCounter" v="3" t="i"/>',
+    '<Var name="QuestCompleteCounter" v="7" t="i"/>',
+    "</Global>",
+  ].join("");
+  const snap = studio.connectLoad(token, "test-device", undefined, undefined, Buffer.from(xml).toString("base64"));
+  assert.equal(snap.barn.items["BronzeBullion"], 44, "camelCase catalog stock must be discovered");
+  assert.equal(snap.barn.items["apple"], 50, "lowercase stock must be discovered");
+  assert.ok(!("MapOrder" in snap.barn.items), "order progress must not leak into the barn");
+  assert.ok(!("QuestComplete" in snap.barn.items), "quest progress must not leak into the barn");
 });

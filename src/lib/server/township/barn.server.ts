@@ -1,4 +1,5 @@
 import { readVar, writeVar } from "./vars.server";
+import { BARN_PRODUCT_IDS } from "../catalogs.server";
 
 export const BARN_CAPACITY_MAP: Record<number, number> = {
   100: 5085,
@@ -48,15 +49,24 @@ export function barnUpgradesFromWhudup(raw: string | null) {
 
 export function listBarnItems(xml: string): Record<string, number> {
   const items: Record<string, number> = {};
+  // Genuine stock the heuristic rejects (camelCase ingots like BronzeBullion)
+  // is still recognized when the id sits in the shipped product catalog.
+  // Anything else unknown stays excluded, so counters the game never reads
+  // as stock (orders, quests, shows) cannot leak into the barn.
+  const known = (name: string) => {
+    if (isProductCounter(name)) return true;
+    const pid = name.endsWith("Counter") ? name.slice(0, -7) : name;
+    return BARN_PRODUCT_IDS.has(pid);
+  };
   const reA = /<Var\b[^>]*\bname="([A-Za-z0-9_]+Counter)"[^>]*\bv="(-?\d+)"/gi;
   const reB = /<Var\b[^>]*\bv="(-?\d+)"[^>]*\bname="([A-Za-z0-9_]+Counter)"/gi;
   for (const m of xml.matchAll(reA)) {
-    if (!isProductCounter(m[1]!)) continue;
+    if (!known(m[1]!)) continue;
     const pid = m[1]!.slice(0, -7);
     items[pid] = Number(m[2]);
   }
   for (const m of xml.matchAll(reB)) {
-    if (!isProductCounter(m[2]!)) continue;
+    if (!known(m[2]!)) continue;
     const pid = m[2]!.slice(0, -7);
     if (items[pid] === undefined) items[pid] = Number(m[1]);
   }
