@@ -14,7 +14,7 @@ import { isDeviceId, mintDeviceId } from "@/lib/device-id";
 import { AVATAR_MAX, avatarEmoji, avatarGroupId, avatarIconPath, avatarsInRange, type Group, type Item } from "@/lib/catalogs";
 import { MUSEUM_IDS, artifactEmoji, artifactIconPath, museumLabel } from "@/lib/museum";
 import { CARD_GROUPS } from "@/lib/cards";
-import { iconForBarn, iconForDecorLabel, iconForGem, iconForGroup, iconForItemLabel, iconForProfileLabel, iconForSkin, iconForStat, iconForSticker } from "@/lib/game-icon-map";
+import { iconForBarn, iconForDecorLabel, iconForGem, iconForGroup, iconForItemLabel, iconForProfileLabel, iconForSkin, iconForStat, iconForSticker, iconForZoo } from "@/lib/game-icon-map";
 import {
   connectLoad,
   fetchCity,
@@ -1026,6 +1026,7 @@ function GroupCard({
   allLabel,
   noneLabel,
   toneClass,
+  iconFor,
 }: {
   lang: Lang;
   group: Group;
@@ -1037,10 +1038,13 @@ function GroupCard({
   allLabel: string;
   noneLabel: string;
   toneClass?: string;
+  iconFor?: (groupId: string, label: string) => string | null;
 }) {
   const n = selected.size;
   const collapsible = Boolean(onCollapse);
   const open = !collapsible || !collapsed;
+  const customGroupArt = iconFor?.(group.id, group.label) ?? null;
+  const headerArt = customGroupArt ?? iconForGroup(group.id);
   return (
     <section className="panel inventory-group">
       <header className={cn("flex items-center gap-2", open && "mb-3")}>
@@ -1051,9 +1055,9 @@ function GroupCard({
             onClick={onCollapse}
             aria-expanded={open}
           >
-            {iconForGroup(group.id) ? (
+            {headerArt ? (
               <span className="group-asset" aria-hidden="true">
-                <img src={iconForGroup(group.id)!} alt="" className="group-asset-img" draggable={false} />
+                <img src={headerArt} alt="" className="group-asset-img" draggable={false} />
               </span>
             ) : (
               <span className="group-emoji" aria-hidden="true">{groupEmoji(group.id)}</span>
@@ -1074,9 +1078,9 @@ function GroupCard({
           </button>
         ) : (
           <div className="flex min-h-11 min-w-0 flex-1 items-center gap-2">
-            {iconForGroup(group.id) ? (
+            {headerArt ? (
               <span className="group-asset" aria-hidden="true">
-                <img src={iconForGroup(group.id)!} alt="" className="group-asset-img" draggable={false} />
+                <img src={headerArt} alt="" className="group-asset-img" draggable={false} />
               </span>
             ) : (
               <span className="group-emoji" aria-hidden="true">{groupEmoji(group.id)}</span>
@@ -1109,11 +1113,12 @@ function GroupCard({
             const profileIcon = iconForProfileLabel(it.label);
             const itemIcon = iconForItemLabel(it.label);
             const gemIcon = group.id === "Gems" ? iconForGem(it.label) : null;
+            const customIcon = iconFor?.(group.id, it.label) ?? null;
             return (
               <Chip
                 key={it.id}
                 label={it.label}
-                iconSrc={avaIcon ?? skinIcon ?? profileIcon ?? itemIcon ?? gemIcon}
+                iconSrc={customIcon ?? avaIcon ?? skinIcon ?? profileIcon ?? itemIcon ?? gemIcon}
                 emoji={avaEmoji ?? (avaIcon ? null : itemEmoji(group.id, it.label))}
                 avatar={Boolean(avaIcon)}
                 banner={group.id === "Styles" || group.id === "Themes"}
@@ -2503,6 +2508,7 @@ export function StudioApp() {
                           allLabel={tr("allShort")}
                           noneLabel={tr("noneShort")}
                           toneClass={groupTone(g.id, i)}
+                          iconFor={(gid) => iconForZoo(gid)}
                         />
                       ))
                     )}

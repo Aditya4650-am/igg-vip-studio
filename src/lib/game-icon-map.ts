@@ -558,6 +558,55 @@ export const GAME_ICON_MAP = {
     "Gem 2": "/game-icons/Gem2.webp",
     "Gem 3": "/game-icons/Gem3.webp"
   },
+  "zooByPaddock": {
+"paddock_WhiteOwl": "/zoo/snowy_owl.webp",
+    "paddock_anteater": "/zoo/anteater.webp",
+    "paddock_arcticfox": "/zoo/arctic_fox.webp",
+    "paddock_bear": "/zoo/bear.webp",
+    "paddock_beaver": "/zoo/beaver.webp",
+    "paddock_boar": "/zoo/wild_boar.webp",
+    "paddock_camel": "/zoo/camel.webp",
+    "paddock_crane": "/zoo/black_crowned_crane.webp",
+    "paddock_crocodile": "/zoo/crocodile.webp",
+    "paddock_deer": "/zoo/reindeer.webp",
+    "paddock_eagle": "/zoo/bald_eagle.webp",
+    "paddock_elephant": "/zoo/elephant.webp",
+    "paddock_fennec": "/zoo/fennec_fox.webp",
+    "paddock_flamingo": "/zoo/flamingo.webp",
+    "paddock_gazelle": "/zoo/gazelle.webp",
+    "paddock_girrafe": "/zoo/giraffe.webp",
+    "paddock_gorilla": "/zoo/gorilla.webp",
+    "paddock_hippo": "/zoo/hippopotamus.webp",
+    "paddock_kangaroo": "/zoo/kangaroo.webp",
+    "paddock_koala": "/zoo/koala.webp",
+    "paddock_lion": "/zoo/lion.webp",
+    "paddock_llama": "/zoo/llama.webp",
+    "paddock_lynx": "/zoo/lynx.webp",
+    "paddock_monkey": "/zoo/chimpanzee.webp",
+    "paddock_muskOx": "/zoo/muskox.webp",
+    "paddock_ostrich": "/zoo/ostrich.webp",
+    "paddock_panda": "/zoo/panda.webp",
+    "paddock_panther": "/zoo/black_panther.webp",
+    "paddock_parrot": "/zoo/macaw.webp",
+    "paddock_peacock": "/zoo/peacock.webp",
+    "paddock_pelican": "/zoo/pelican.webp",
+    "paddock_penguin": "/zoo/penguin.webp",
+    "paddock_platypus": "/zoo/platypus.webp",
+    "paddock_polar_bear": "/zoo/polar_bear.webp",
+    "paddock_polarwolf": "/zoo/arctic_wolf.webp",
+    "paddock_porcupine": "/zoo/porcupine.webp",
+    "paddock_raccoon": "/zoo/raccoon.webp",
+    "paddock_redPanda": "/zoo/red_panda.webp",
+    "paddock_rhino": "/zoo/rhinoceros.webp",
+    "paddock_seal": "/zoo/seal.webp",
+    "paddock_skunk": "/zoo/skunk.webp",
+    "paddock_snow_monkey": "/zoo/snow_monkey.webp",
+    "paddock_tapir": "/zoo/tapir.webp",
+    "paddock_tiger": "/zoo/tiger.webp",
+    "paddock_toucan": "/zoo/toucan.webp",
+    "paddock_walrus": "/zoo/walrus.webp",
+    "paddock_zebra": "/zoo/zebra.webp",
+  },
   "stickerById": {
     "sp1": "/game-icons/Sticker_001.png",
     "sp4": "/game-icons/Sticker_002.png",
@@ -653,4 +702,8 @@ export function iconForGem(id: string): string | null {
   return (GAME_ICON_MAP.gemById as Record<string, string>)[id]
     ?? (GAME_ICON_MAP.gemById as Record<string, string>)[id.toLowerCase().replace(/\s+/g, "")]
     ?? null;
+}
+
+export function iconForZoo(paddockId: string): string | null {
+  return (GAME_ICON_MAP.zooByPaddock as Record<string, string>)[paddockId] ?? null;
 }

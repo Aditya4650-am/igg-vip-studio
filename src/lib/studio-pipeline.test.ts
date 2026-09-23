@@ -11,6 +11,8 @@ const { findUnbalancedTag } = await import("./server/township/xml-edit.server.ts
 const { avatarEmoji, avatarIconPath, AVATAR_EMOJIS, AVATAR_ICON_MAX, AVATAR_MAX } =
   await import("./catalogs.ts");
 const { iconForBarn } = await import("./game-icon-map.ts");
+const { iconForZoo } = await import("./game-icon-map.ts");
+const { ZOO_REQUIREMENTS } = await import("./server/township/zoo.server.ts");
 const { readdirSync, existsSync } = await import("node:fs");
 
 const { token } = verifyLicenseKey("VIP-DEMO", "TEST-DEVICE-0001");
@@ -522,6 +524,19 @@ test("barn: every mapped product icon resolves to a file on disk", () => {  let 
     assert.ok(existsSync(`public${src}`), `${p.id} -> ${src} is missing on disk`);
   }
   assert.ok(mapped >= 100, `expected 100+ mapped barn icons, got ${mapped}`);
+});
+
+test("zoo: every mapped paddock icon resolves to a file on disk", () => {
+  const paddocks = Object.keys(ZOO_REQUIREMENTS);
+  assert.equal(paddocks.length, 50, "reference map must hold 50 paddocks");
+  let mapped = 0;
+  for (const p of paddocks) {
+    const src = iconForZoo(p);
+    if (!src) continue;
+    mapped += 1;
+    assert.ok(existsSync(`public${src}`), `${p} -> ${src} is missing on disk`);
+  }
+  assert.ok(mapped >= 47, `expected 47 mapped paddock icons, got ${mapped}`);
 });
 
 test("data: experience and expansion counters roundtrip like any stat", () => {
