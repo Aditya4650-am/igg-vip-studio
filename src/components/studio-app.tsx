@@ -2018,6 +2018,7 @@ export function StudioApp() {
               </Button>
             </div>
             <p className="mt-2 hidden text-xs text-muted lg:block">{tr("shortcut")}</p>
+            <p className="mt-1 hidden text-xs text-muted tabular-nums lg:block">build {__BUILD_ID__}</p>
           </div>
 
           <div className="sidebar-tools">

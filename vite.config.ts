@@ -1,4 +1,5 @@
 import { readdirSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
@@ -142,11 +143,26 @@ function authPopupPlugin(): Plugin {
   };
 }
 
+// Short commit hash baked into the bundle so a screenshot proves which build
+// the EXE is actually running (WebView2 caches aggressively).
+function buildId(): string {
+  try {
+    return execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim()
+      .slice(0, 12) || "dev";
+  } catch {
+    return "dev";
+  }
+}
+
 // `0.0.0.0:8080` is the live-preview contract — don't change host/port.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
 export default defineConfig(({ command, isPreview }) => ({
-  server: {
+  define: {
+    __BUILD_ID__: JSON.stringify(buildId()),
+  },  server: {
     host: "0.0.0.0",
     port: 8080,
     strictPort: true,
