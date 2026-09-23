@@ -2117,9 +2117,12 @@ export function StudioApp() {
                     </div>
                     <div className="stagger-in grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {fields.filter((f) => !new Set([
+                        "key", "match3Life", "spentCash", "earnedCash", "EarnedCoins",
+                        "wheatCounter", "plowFieldsAchiev", "defaultOrdersCount", "mineCounter", "timeInGame",
                         // The barn tab owns this XOR pair — editing either
                         // value alone desyncs capacity and the game resets it.
-                        "WareHouseCashUpgrade", "WHUdup",
+                        "WareHouseCashUpgrade", "WHUdup", "Match3Lives_infTime",
+                        "xpr", "xpl", "zxl",
                       ]).has(f.key ?? f.id)).map((f, i) => (
                         <label key={f.id} className="stat-card panel" data-tone={String((i % 7) + 1)}>
                           <span className="stat-title">
