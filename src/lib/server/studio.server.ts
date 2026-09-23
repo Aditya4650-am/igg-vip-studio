@@ -10,6 +10,7 @@ import { applyBarnCapacity, applyBarnItems, barnInfo } from "./township/barn.ser
 import { injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, parseProfileUnlocked } from "./township/inject.server";
 import { grantArtifacts } from "./township/museum.server";
 import { grantCards } from "./township/cards.server";
+import { completeZoo, discoverZoo, type ZooPaddock } from "./township/zoo.server";
 import {
   applyDesban,
   cloneDecorOnly,
@@ -59,6 +60,7 @@ export type Session = {
   items: Record<string, number>;
   decor: string[];
   barn: BarnState;
+  zoo: ZooPaddock[];
   season: { premium: boolean; score: number };
   regatta: { tasks: number; score: number } | null;
   friends: Friend[];
@@ -183,6 +185,7 @@ export function connectLoad(token: string, device: string, _saveXml?: string, _p
       decor: [],
       loadedXml: opened.xml.replace(/^\uFEFF/, ""),
       barn,
+      zoo: discoverZoo(opened.xml),
       season: { premium: /premium="1"/i.test(opened.xml), score: Number(opened.xml.match(/SeasonTicket[^>]*score="(\d+)"/i)?.[1] ?? 0) },
       regatta: null,
       friends,
@@ -223,6 +226,7 @@ export function refreshOwnSave(token: string, sessionId: string, saveB64: string
   s.stats = parseStats(opened.xml);
   s.profileUnlocked = cloakProfileUnlocked(parseProfileUnlocked(opened.xml));
   s.barn = barnInfo(opened.xml);
+  s.zoo = discoverZoo(opened.xml);
   s.log.push(`Reloaded mGameInfo from emulator`);
   return snapshot(s);
 }
@@ -240,6 +244,7 @@ export type SavePayload = {
   sticker?: string[];
   museum?: string[];
   cards?: Record<string, number>;
+  zoo?: string[];
   barnUpgrades?: number;
   barnItems?: Record<string, number>;
   regatta?: boolean;
@@ -357,6 +362,16 @@ export function applySave(p: SavePayload) {
     s.rawXml = r.xml;
     parts.push(`cards(${r.changed})`);
   }
+  if (revealed.zoo.length) {
+    const r = completeZoo(s.rawXml, revealed.zoo);
+    if (!r.changed) {
+      throw new Error(
+        `Không có con vật nào thay đổi — tất cả đã hoàn thành`,
+      );
+    }
+    s.rawXml = r.xml;
+    parts.push(`zoo(${r.changed})`);
+  }
   if (p.barnUpgrades && p.barnUpgrades > 0) {
     const preset = BARN_CAPACITY.find((c) => c.upgrades === p.barnUpgrades);
     if (!preset) throw new Error("Invalid barn upgrades");
@@ -382,6 +397,7 @@ export function applySave(p: SavePayload) {
   s.stats = parseStats(s.rawXml);
   s.profileUnlocked = cloakProfileUnlocked(parseProfileUnlocked(s.rawXml));
   s.barn = barnInfo(s.rawXml);
+  s.zoo = discoverZoo(s.rawXml);
   if (!parts.length) throw new Error("Nothing selected");
   const malformed = findUnbalancedTag(s.rawXml);
   if (malformed) throw new Error(`Save XML không hợp lệ (${malformed}) — hủy để tránh hỏng file`);
@@ -442,6 +458,7 @@ export function applyUnban(token: string, sessionId: string, mode: "inicial" | "
   s.stats = parseStats(s.rawXml);
   s.profileUnlocked = cloakProfileUnlocked(parseProfileUnlocked(s.rawXml));
   s.barn = barnInfo(s.rawXml);
+  s.zoo = discoverZoo(s.rawXml);
   s.unban = { mode, applied: true };
   s.log.push(`Restore changes prepared`);
   return { ...snapshot(s), fileB64: encodeSave(s) };
@@ -532,6 +549,7 @@ export function snapshot(s: Session) {
     },
     season: s.season,
     regatta: s.regatta,
+    zoo: s.zoo,
     friends: s.friends,
     friendCity: s.friendCity,
     unban: s.unban,

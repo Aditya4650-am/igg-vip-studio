@@ -543,6 +543,7 @@ export function revealSave(p: {
   barnItems?: Record<string, number>;
   museum?: string[];
   cards?: Record<string, number>;
+  zoo?: string[];
 }) {
   return {
     stats: remapRecord("stat", p.stats),
@@ -552,6 +553,7 @@ export function revealSave(p: {
     cards: Object.fromEntries(
       Object.entries(p.cards ?? {}).filter(([id]) => /^card_0*\d+$/.test(id)),
     ),
+    zoo: (p.zoo ?? []).filter((id) => /^[^:]+:\d+$/.test(id)),
     skins: remapGroups("skin", p.skins),
     items: remapRecord("item", p.items),
     decor: (p.decor ?? []).map((id) => remapOne("decor", id)).filter((x): x is string => Boolean(x)),

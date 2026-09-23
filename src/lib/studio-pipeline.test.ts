@@ -407,6 +407,96 @@ test("exportCurrent returns the live session XML for diagnostics", () => {
   assert.equal(Buffer.from(exp.fileB64, "base64").toString("utf8"), out.xml);
 });
 
+const zooDoc = {
+  list: [
+    {
+      balanceRatingVer: 1, type: "paddock_bear", count: 4, rewardCollected: false,
+      members: [
+        { name: "Max", status: 0, piecesCount: 5 },
+        { name: "Bamby", status: 3, piecesCount: 30 },
+        { name: "Zzz", status: 0, piecesCount: 0 },
+        { name: "Max", status: 3, piecesCount: 10 },
+      ],
+    },
+    {
+      balanceRatingVer: 1, type: "paddock_flamingo", count: 4, rewardCollected: true,
+      members: [{ name: "Scooby", status: 3, piecesCount: 30 }],
+    },
+  ],
+};
+
+const zooSave = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  "<Global>",
+  `<ZooInfo Paddocks='${JSON.stringify(zooDoc)}'></ZooInfo>`,
+  "</Global>",
+].join("");
+
+function loadZoo() {
+  return studio.connectLoad(
+    token,
+    "test-device",
+    undefined,
+    undefined,
+    Buffer.from(zooSave).toString("base64"),
+  );
+}
+
+function zooMember(xml: string, paddock: string, name: string) {
+  const m = xml.match(new RegExp(`"name":"${name}"[^}]*?}`, ""));
+  assert.ok(m, `${paddock}/${name} must be present`);
+  return m![0];
+}
+
+test("zoo: snapshot exposes paddocks with per-animal requirements", () => {
+  const snap = loadZoo();
+  assert.equal(snap.zoo.length, 2, "both paddocks must be exposed");
+  const bear = snap.zoo.find((p) => p.paddock === "paddock_bear")!;
+  assert.equal(bear.members[0]!.required, 30, "Max needs 30 per the reference map");
+});
+
+test("zoo: completing members sets status and pieces, rewards untouched", () => {
+  const snap = loadZoo();
+  const out = studio.applySave({ token, sessionId: snap.sessionId, zoo: ["paddock_bear:0", "paddock_bear:2"] });
+  assert.ok(out.parts.some((p) => p.startsWith("zoo(")), "the run must be reported in parts");
+  assert.match(zooMember(out.xml!, "paddock_bear", "Max"), /"status":3/, "Max must complete");
+  assert.match(zooMember(out.xml!, "paddock_bear", "Max"), /"piecesCount":30/, "Max must reach its requirement");
+  assert.match(zooMember(out.xml!, "paddock_bear", "Zzz"), /"piecesCount":30/, "unknown names fall back to the global max");
+  assert.match(out.xml!, /"rewardCollected":false/, "reward flags must survive untouched");
+  assert.match(zooMember(out.xml!, "paddock_bear", "Bamby"), /"piecesCount":30/, "completed members stay byte-identical");
+  assert.match(out.xml!, /"name":"Max","status":3,"piecesCount":10/, "a complete twin keeps its own count, never overfilled");
+  balanced(out.xml!);
+});
+
+test("zoo: a repeat run is a real no-op, not a false success", () => {
+  const snap = loadZoo();
+  studio.applySave({ token, sessionId: snap.sessionId, zoo: ["paddock_bear:0"] });
+  assert.throws(
+    () => studio.applySave({ token, sessionId: snap.sessionId, zoo: ["paddock_bear:0"] }),
+    /Không có con vật nào thay đổi/,
+    "a second identical run must say nothing changed instead of claiming success",
+  );
+});
+
+test("zoo: a foreign JSON dialect refuses instead of rewriting", () => {
+  const spaced = zooSave.replace(`Paddocks='${JSON.stringify(zooDoc)}'`, `Paddocks='${JSON.stringify(zooDoc).replaceAll('":', '": ')}'`);
+  const snap = studio.connectLoad(token, "test-device", undefined, undefined, Buffer.from(spaced).toString("base64"));
+  assert.throws(
+    () => studio.applySave({ token, sessionId: snap.sessionId, zoo: ["paddock_bear:0"] }),
+    /Định dạng Paddocks lạ/,
+    "a dialect our writer cannot reproduce must refuse",
+  );
+});
+
+test("zoo: a save without the block refuses with guidance", () => {
+  const snap = load();
+  assert.throws(
+    () => studio.applySave({ token, sessionId: snap.sessionId, zoo: ["paddock_bear:0"] }),
+    /Không thấy Zoo/,
+    "missing Paddocks must refuse with guidance",
+  );
+});
+
 test("barn: extended products roundtrip through the same counter mechanism", () => {
   const products = studio.catalogs().barnProducts;
   assert.equal(products.length, 325, "18 classic + 307 inventoried products");

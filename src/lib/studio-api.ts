@@ -74,6 +74,7 @@ const saveSchema = z.object({
   sticker: z.array(z.string()).optional(),
   museum: z.array(z.string()).optional(),
   cards: z.record(z.string(), z.number()).optional(),
+  zoo: z.array(z.string()).optional(),
   barnUpgrades: z.number().optional(),
   barnItems: z.record(z.string(), z.number()).optional(),
   regatta: z.boolean().optional(),
