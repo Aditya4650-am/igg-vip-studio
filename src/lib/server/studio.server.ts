@@ -6,7 +6,7 @@ import {
 import { applyStatChanges, parseStats, readAnyVar, STAT_ALIASES } from "./township/vars.server";
 import { shellErrorMessage } from "./township/save-decode.server";
 import { findUnbalancedTag } from "./township/xml-edit.server";
-import { applyBarnCapacity, applyBarnItems, barnInfo } from "./township/barn.server";
+import { applyBarnCapacity, applyBarnItems, barnInfo, ensureBarnCapacity } from "./township/barn.server";
 import { injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, injectUpgradeLevels, parseProfileUnlocked, upgradeMaxLevel, discoverUpgrades } from "./township/inject.server";
 import { grantArtifacts } from "./township/museum.server";
 import { grantCards, countOwnedCards } from "./township/cards.server";
@@ -26,6 +26,7 @@ import {
 } from "./township/desban.server";
 import {
   BARN_CAPACITY,
+  BARN_PRODUCT_IDS,
   cloakBarnItems,
   cloakStats,
   publicCatalogs,
@@ -393,14 +394,27 @@ export function applySave(p: SavePayload) {
   }
   if (Object.keys(revealed.barnItems).length) {
     let n = 0;
+    const validUpdates: Record<string, number> = {};
+    
     for (const [pid, raw] of Object.entries(revealed.barnItems)) {
       const qty = Math.floor(Number(raw));
       if (!Number.isFinite(qty) || qty < 0) continue;
-      s.barn.items[pid] = qty;
-      n += 1;
+      
+      // VALIDATE: Only allow known barn product IDs
+      if (BARN_PRODUCT_IDS.has(pid)) {
+        validUpdates[pid] = qty;
+        n += 1;
+      }
     }
-    if (n) {
-      s.rawXml = applyBarnItems(s.rawXml, revealed.barnItems);
+    
+    if (n > 0) {
+      // Apply items
+      s.rawXml = applyBarnItems(s.rawXml, validUpdates);
+      
+      // AUTO-UPGRADE capacity to fit total
+      const totalItems = Object.values(validUpdates).reduce((sum, q) => sum + q, 0);
+      s.rawXml = ensureBarnCapacity(s.rawXml, totalItems);
+      
       parts.push(`barn-items(${n})`);
     }
   }

@@ -90,13 +90,53 @@ export function applyBarnCapacity(xml: string, upgrades: number) {
   return text;
 }
 
-export function applyBarnItems(xml: string, updates: Record<string, number>) {
+export function applyBarnItems(xml: string, updates: Record<string, number>): string {
   let text = xml;
+  const results: { success: string[]; failed: string[] } = { success: [], failed: [] };
+  
   for (const [pid, qty] of Object.entries(updates)) {
     if (!Number.isFinite(qty) || qty < 0) continue;
     let name = pid.endsWith("Counter") ? pid : `${pid}Counter`;
     if (name.endsWith("CounterCounter")) name = name.slice(0, -7);
+    
+    const before = text;
     text = writeVar(text, name, String(Math.floor(qty)));
+    
+    // VERIFY the write actually happened
+    if (text !== before) {
+      results.success.push(pid);
+    } else {
+      results.failed.push(pid);
+    }
+  }
+  
+  if (results.failed.length > 0) {
+    console.warn(`[BARN] Failed to write items: ${results.failed.join(", ")}`);
+  }
+  
+  return text;
+}
+
+// ADD new function: auto-upgrade barn capacity to fit total
+export function ensureBarnCapacity(xml: string, totalItems: number): string {
+  let text = xml;
+  const capacities = [
+    { upgrades: 100, capacity: 5085 },
+    { upgrades: 250, capacity: 16335 },
+    { upgrades: 500, capacity: 35085 },
+    { upgrades: 1000, capacity: 72585 },
+    { upgrades: 2500, capacity: 185085 },
+    { upgrades: 5000, capacity: 372585 },
+    { upgrades: 8000, capacity: 597585 },
+    { upgrades: 10000, capacity: 747585 },
+  ];
+  
+  const needed = capacities.find(c => c.capacity >= totalItems) ?? capacities[capacities.length - 1]!;
+  const currentRaw = readVar(xml, "WareHouseCashUpgrade");
+  const current = currentRaw ? Number(currentRaw) : 0;
+  
+  if (current < needed.capacity) {
+    text = applyBarnCapacity(text, needed.upgrades);
   }
   return text;
 }

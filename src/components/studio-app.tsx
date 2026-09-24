@@ -1197,6 +1197,8 @@ export function StudioApp() {
   const [barnUpgrades, setBarnUpgrades] = useState<number | null>(null);
   const [barnItems, setBarnItems] = useState<Record<string, number>>({});
   const [barnFill, setBarnFill] = useState("500");
+  const [barnVerify, setBarnVerify] = useState<{ success: string[]; failed: string[] } | null>(null);
+  const [barnShowAll, setBarnShowAll] = useState(false);
 
   const profileSel = useSetMap();
   const avatarSel = useSetMap();
