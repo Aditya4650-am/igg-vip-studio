@@ -322,7 +322,7 @@ function copyTutorialsFromFriend(own: string, friend: string) {
   return out;
 }
 
-function skipTutorials(xml: string, friend?: string) {
+export function skipTutorials(xml: string, friend?: string) {
   let out = friend ? copyTutorialsFromFriend(xml, friend) : xml;
   for (const n of TUTORIAL_DONE) out = writeVar(out, n, "1");
   for (const n of TUTORIAL_OFF) out = writeVar(out, n, "0");

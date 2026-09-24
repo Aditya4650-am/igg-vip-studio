@@ -269,6 +269,8 @@ const vi = {
  toastDecorAll: "Đã chọn toàn bộ Decor — bấm Lưu & đẩy để áp dụng",
  toastRegattaQueued: "Regatta đã chọn — bấm Lưu & đẩy để áp dụng",
  toastSeasonQueued: "Season Pass đã chọn — bấm Lưu & đẩy để áp dụng",
+ toastTutorialSkipQueued: "Đã bỏ qua hướng dẫn — bấm Lưu & đẩy để áp dụng",
+ skipTutorials: "Bỏ qua hướng dẫn",
  connectFailed: "Kết nối thất bại",
  actionFailed: "Thao tác thất bại",
 };
@@ -518,6 +520,8 @@ const en: typeof vi = {
  toastDecorAll: "All Decor selected — press Save & push to apply",
  toastRegattaQueued: "Regatta queued — press Save & push to apply",
  toastSeasonQueued: "Season Pass queued — press Save & push to apply",
+ toastTutorialSkipQueued: "Tutorials skipped — press Save & push to apply",
+ skipTutorials: "Skip Tutorials",
  stickerSelectedHint: "{count} stickers selected. Choices apply when you press Save & push.",
  connectFailed: "Connection failed",
  actionFailed: "Action failed",

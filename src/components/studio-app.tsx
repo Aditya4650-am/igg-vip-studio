@@ -1212,6 +1212,7 @@ export function StudioApp() {
   const [pendingDecorFragments, setPendingDecorFragments] = useState(false);
   const [pendingDecorClone, setPendingDecorClone] = useState(false);
   const [pendingDecorMaxAll, setPendingDecorMaxAll] = useState(false);
+  const [pendingTutorialSkip, setPendingTutorialSkip] = useState(false);
   const initialStatsRef = useRef<Record<string, string>>({});
   const localInfoAtRef = useRef(0);
   const autoLoginStartedRef = useRef(false);
@@ -1466,6 +1467,7 @@ export function StudioApp() {
       setMuseumSel(new Set());
       setPendingRegatta(false);
       setPendingSeason(false);
+      setPendingTutorialSkip(false);
       setPendingUnban(null);
       setPendingDecorFragments(false);
       setPendingDecorClone(false);
@@ -1496,7 +1498,7 @@ export function StudioApp() {
 
   const pending =
     profileSel.count + avatarSel.count + skinSel.count + itemSel.count + cardsCount + zooSel.count + decorSel.size + stickerSel.size + museumSel.size +
-    (barnDirty ? 1 : 0) + (pendingRegatta ? 1 : 0) + (pendingSeason ? 1 : 0) + (pendingUnban ? 1 : 0) +
+    (barnDirty ? 1 : 0) + (pendingRegatta ? 1 : 0) + (pendingSeason ? 1 : 0) + (pendingTutorialSkip ? 1 : 0) + (pendingUnban ? 1 : 0) +
     (pendingDecorFragments ? 1 : 0) + (pendingDecorClone ? 1 : 0) + (pendingDecorMaxAll ? 1 : 0);
 
   const parseQty = useCallback(() => {
@@ -1595,6 +1597,7 @@ export function StudioApp() {
         Object.keys(changedBarn).length > 0 ||
         pendingRegatta ||
         pendingSeason ||
+        pendingTutorialSkip ||
         pendingDecorFragments ||
         pendingDecorClone ||
         pendingDecorMaxAll;
@@ -1641,6 +1644,7 @@ export function StudioApp() {
           barnItems: Object.keys(changedBarn).length ? changedBarn : undefined,
           regatta: pendingRegatta,
           season: pendingSeason,
+          tutorialSkip: pendingTutorialSkip ? true : undefined,
           unbanMode: pendingUnban ?? undefined,
           decorFragments: pendingDecorFragments,
           decorClone: pendingDecorClone,
@@ -1674,6 +1678,7 @@ export function StudioApp() {
       setMuseumSel(new Set());
       setPendingRegatta(false);
       setPendingSeason(false);
+      setPendingTutorialSkip(false);
       setPendingUnban(null);
       setPendingDecorFragments(false);
       setPendingDecorClone(false);
@@ -1683,7 +1688,7 @@ export function StudioApp() {
     } finally {
       setBusy(false);
     }
-  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, cardsQty, zooSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, pendingSeason, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingDecorMaxAll, parseDecorQty, tr, device]);
+  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, cardsQty, zooSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, pendingSeason, pendingTutorialSkip, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingDecorMaxAll, parseDecorQty, tr, device]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -2090,6 +2095,20 @@ export function StudioApp() {
                   <img src="/game-icons/Season_pass.png" alt="" className="tool-asset-img" draggable={false} />
                 </span>
                 {tr("season")}
+              </Button>
+              <Button
+                className="tool-action w-full"
+                variant="outline"
+                disabled={!session || busy}
+                onClick={() => {
+                  setPendingTutorialSkip(true);
+                  toast.success(tr("toastTutorialSkipQueued"));
+                }}
+              >
+                <span className="flex size-6 items-center justify-center rounded-md bg-primary/15 text-primary">
+                  <GameIcon name="control" className="size-4" />
+                </span>
+                {tr("skipTutorials")}
               </Button>
             </div>
           </div>
