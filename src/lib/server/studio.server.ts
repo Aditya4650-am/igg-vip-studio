@@ -9,7 +9,7 @@ import { findUnbalancedTag } from "./township/xml-edit.server";
 import { applyBarnCapacity, applyBarnItems, barnInfo } from "./township/barn.server";
 import { injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, parseProfileUnlocked } from "./township/inject.server";
 import { grantArtifacts } from "./township/museum.server";
-import { grantCards } from "./township/cards.server";
+import { grantCards, countOwnedCards } from "./township/cards.server";
 import { completeZoo, discoverZoo, type ZooPaddock } from "./township/zoo.server";
 import {
   applyDesban,
@@ -550,6 +550,7 @@ export function snapshot(s: Session) {
     season: s.season,
     regatta: s.regatta,
     zoo: s.zoo,
+    cardsOwned: countOwnedCards(s.rawXml ?? ""),
     friends: s.friends,
     friendCity: s.friendCity,
     unban: s.unban,

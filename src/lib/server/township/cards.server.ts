@@ -88,6 +88,17 @@ function docInt(doc: string, name: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
+/** Distinct owned card ids — a read-only progress number, never edited. */
+export function countOwnedCards(xml: string): number {
+  const span = ownedCardsSpan(xml);
+  if (!span) return 0;
+  return new Set(
+    [...xml.slice(span[0], span[1]).matchAll(/<DataElem\b[^>]*\bname="cardId"[^>]*\bvalue="([^"]*)"/gi)].map(
+      (x) => x[1],
+    ),
+  ).size;
+}
+
 /**
  * Ensure every selected card is owned with the requested stock.
  * `qtyMap` maps loose-or-canonical ids to wanted `inStockCount` copies;

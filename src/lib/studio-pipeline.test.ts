@@ -409,6 +409,12 @@ test("exportCurrent returns the live session XML for diagnostics", () => {
   assert.equal(Buffer.from(exp.fileB64, "base64").toString("utf8"), out.xml);
 });
 
+test("cards: snapshot exposes the real owned count for display", () => {
+  const snap = loadCards();
+  assert.equal(snap.cardsOwned, 2, "two owned entries in the fixture");
+  assert.equal(load().cardsOwned, 0, "no CardCollections block means zero");
+});
+
 const zooDoc = {
   list: [
     {

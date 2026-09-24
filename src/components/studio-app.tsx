@@ -2156,6 +2156,10 @@ export function StudioApp() {
                           {tr("regatta")} {session.regatta.tasks}×{session.regatta.score}
                         </span>
                       ) : null}
+                      <span className="state-badge rounded-full px-2.5 py-1 text-xs font-medium" title={tr("cardsHint")}>
+                        <GameIcon name="cards" className="size-3.5" />
+                        {tr("tabCards")} {session.cardsOwned}/{CARD_GROUPS.reduce((n, g) => n + g.items.length, 0)}
+                      </span>
                     </div>
                     <div className="stagger-in grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {fields.filter((f) => !new Set([
