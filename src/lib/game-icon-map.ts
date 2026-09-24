@@ -12,6 +12,7 @@ export const GAME_ICON_MAP = {
     "m3l": "/game-icons/M3_Level.png",
     "match3Life": "/game-icons/Lives_x3.png",
     "residents": "/game-icons/Residents.png",
+    "crd": "/game-icons/Cards.png",
     "wheatCounter": "/game-icons/Wheat.png",
     "defaultOrdersCount": "/game-icons/Game_Token.png"
   },
