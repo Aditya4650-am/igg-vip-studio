@@ -333,32 +333,40 @@ export function skipTutorials(xml: string, friend?: string) {
   for (const n of TUTORIAL_OFF) out = writeVar(out, n, "0");
 
   // Iterate over both Var and DataElem elements with flexible attribute order
-  // Match: name="..." value="..." (Var uses v="...", DataElem uses value="...")
-  const varRe = /<(Var|DataElem)\b[^>]*\bname="([^"]+)"[^>]*\bv(?:alue)?="([^"]*)"[^>]*>/gi;
-  const varRe2 = /<(Var|DataElem)\b[^>]*\bv(?:alue)?="([^"]*)"[^>]*\bname="([^"]+)"[^>]*>/gi;
-  // Match self-closing DataElem without value: <DataElem name="..." type="..."/>
-  const dataElemNoValRe = /<DataElem\b[^>]*\bname="([^"]+)"[^>]*\/>/gi;
+  // Match ALL formats: v="...", value="...", type="..." value="..."
+  // Var/DataElem with name before value/v
+  const re1 = /<(Var|DataElem)\b[^>]*\bname="([^"]+)"[^>]*\b(?:v|value)="([^"]*)"[^>]*>/gi;
+  // Var/DataElem with value/v before name
+  const re2 = /<(Var|DataElem)\b[^>]*\b(?:v|value)="([^"]*)"[^>]*\bname="([^"]+)"[^>]*>/gi;
+  // DataElem with type="..." value="..." (name before type)
+  const re3 = /<DataElem\b[^>]*\bname="([^"]+)"[^>]*\btype="[^"]*"[^>]*\bvalue="([^"]*)"[^>]*>/gi;
+  // DataElem with type="..." value="..." (value before name)
+  const re4 = /<DataElem\b[^>]*\btype="[^"]*"[^>]*\bvalue="([^"]*)"[^>]*\bname="([^"]+)"[^>]*>/gi;
+  // DataElem with type="..." value="..." (name after value)
+  const re5 = /<DataElem\b[^>]*\bvalue="([^"]*)"[^>]*\btype="[^"]*"[^>]*\bname="([^"]+)"[^>]*>/gi;
+  // DataElem with type="..." value="..." (type before name)
+  const re6 = /<DataElem\b[^>]*\btype="[^"]*"[^>]*\bname="([^"]+)"[^>]*\bvalue="([^"]*)"[^>]*>/gi;
+  // Self-closing DataElem without value: <DataElem name="..." type="..."/>
+  const reNoVal = /<DataElem\b[^>]*\bname="([^"]+)"[^>]*\/>/gi;
   
-  for (const m of out.matchAll(varRe)) {
-    const name = m[2]!;
-    const current = m[3]!;
-    if (!isTutorialName(name)) continue;
+  const processMatch = (name: string, current: string) => {
+    if (!isTutorialName(name)) return;
     const target = tutorialTargetValue(name, current);
     if (target !== current) out = writeVar(out, name, target);
-  }
-  for (const m of out.matchAll(varRe2)) {
-    const name = m[3]!;
-    const current = m[2]!;
-    if (!isTutorialName(name)) continue;
-    const target = tutorialTargetValue(name, current);
-    if (target !== current) out = writeVar(out, name, target);
-  }
+  };
+
+  for (const m of out.matchAll(re1)) processMatch(m[2]!, m[3]!);
+  for (const m of out.matchAll(re2)) processMatch(m[3]!, m[2]!);
+  for (const m of out.matchAll(re3)) processMatch(m[1]!, m[2]!);
+  for (const m of out.matchAll(re4)) processMatch(m[2]!, m[1]!);
+  for (const m of out.matchAll(re5)) processMatch(m[2]!, m[1]!);
+  for (const m of out.matchAll(re6)) processMatch(m[1]!, m[2]!);
+  
   // Handle DataElem without value attribute (self-closing) - insert value if tutorial-related
-  for (const m of out.matchAll(dataElemNoValRe)) {
+  for (const m of out.matchAll(reNoVal)) {
     const name = m[1]!;
     if (!isTutorialName(name)) continue;
     const target = tutorialTargetValue(name, "");
-    // Insert value attribute into the self-closing tag
     const tagRe = new RegExp(`(<DataElem\\b[^>]*\\bname="${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*)/>`);
     out = out.replace(tagRe, `$1 value="${target}"/>`);
   }

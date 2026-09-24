@@ -78,14 +78,27 @@ export function readAnyVar(xml: string, names: readonly string[]): string | null
 export function writeVar(xml: string, varName: string, value: string): string {
   const n = varName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const v = String(value);
+  // Var with v="..." (name before v)
   const a = new RegExp(`(<Var\\b[^>]*?\\bname="${n}"[^>]*?\\bv=")([^"]*)(")`, "i");
   if (a.test(xml)) return xml.replace(a, `$1${v}$3`);
+  // Var with v="..." (v before name)
   const b = new RegExp(`(<Var\\b[^>]*?\\bv=")([^"]*)("[^>]*?\\bname="${n}")`, "i");
   if (b.test(xml)) return xml.replace(b, `$1${v}$3`);
+  // DataElem with value="..." (name before value)
   const c = new RegExp(`(<DataElem\\b[^>]*?\\bname="${n}"[^>]*?\\bvalue=")([^"]*)(")`, "i");
   if (c.test(xml)) return xml.replace(c, `$1${v}$3`);
+  // DataElem with value="..." (value before name)
   const d = new RegExp(`(<DataElem\\b[^>]*?\\bvalue=")([^"]*)("[^>]*?\\bname="${n}")`, "i");
   if (d.test(xml)) return xml.replace(d, `$1${v}$3`);
+  // DataElem with type="..." value="..." (type before value, name anywhere)
+  const e = new RegExp(`(<DataElem\\b[^>]*?\\bname="${n}"[^>]*?\\btype="[^"]*"[^>]*?\\bvalue=")([^"]*)(")`, "i");
+  if (e.test(xml)) return xml.replace(e, `$1${v}$3`);
+  const f = new RegExp(`(<DataElem\\b[^>]*?\\btype="[^"]*"[^>]*?\\bvalue=")([^"]*)("[^>]*?\\bname="${n}")`, "i");
+  if (f.test(xml)) return xml.replace(f, `$1${v}$3`);
+  const g = new RegExp(`(<DataElem\\b[^>]*?\\bname="${n}"[^>]*?\\bvalue=")([^"]*)("[^>]*?\\btype="[^"]*")`, "i");
+  if (g.test(xml)) return xml.replace(g, `$1${v}$3`);
+  const h = new RegExp(`(<DataElem\\b[^>]*?\\bvalue=")([^"]*)("[^>]*?\\btype="[^"]*"[^>]*?\\bname="${n}")`, "i");
+  if (h.test(xml)) return xml.replace(h, `$1${v}$3`);
   // A value typed as `i` but holding something non-numeric makes the game's
   // loader reject the whole save, so only claim a numeric type when the value
   // really is an integer.
