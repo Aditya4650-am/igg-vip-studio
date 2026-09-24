@@ -72,6 +72,7 @@ const STAT_INTERNAL: { id: string; emoji: string; labelEn: string; labelVi: stri
   { id: "m3l", emoji: "🎯", labelEn: "Match-3 Level", labelVi: "Cấp Match-3" },
   { id: "match3Life", emoji: "🎮", labelEn: "Match-3 Lives", labelVi: "Mạng Match-3" },
   { id: "residents", emoji: "🏠", labelEn: "Residents", labelVi: "Dân số" },
+  { id: "crd", emoji: "🃏", labelEn: "Card collections", labelVi: "Bộ sưu tập thẻ" },
   { id: "spentCash", emoji: "💸", labelEn: "Spent T-Cash", labelVi: "Đã tiêu $" },
   { id: "earnedCash", emoji: "💵", labelEn: "Earned T-Cash", labelVi: "Kiếm $" },
   { id: "EarnedCoins", emoji: "💰", labelEn: "Earned Coins", labelVi: "Kiếm xu" },

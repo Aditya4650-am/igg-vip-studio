@@ -15,6 +15,7 @@ export const FIELD_MAP: Record<string, string> = {
   residents: "residents",
   match3Life: "match3Life",
   key: "key",
+  crd: "FullCardCollections",
   xpr: "experience",
   xpl: "ExpandLevel",
   zxl: "ZooExpandLevel",

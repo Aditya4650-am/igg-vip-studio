@@ -2184,19 +2184,6 @@ export function StudioApp() {
                           />
                         </label>
                       ))}
-                      <label className="stat-card panel" data-tone="3">
-                        <span className="stat-title">
-                          <GameIcon name="cards" className="size-4" />
-                          Card collections
-                        </span>
-                        <input
-                          className="field field-stat mt-2"
-                          value={`${session.cardsOwned} / 150`}
-                          readOnly
-                          title="Real progress from your collection — use the Cards tab to add cards"
-                        />
-                        <span className="mt-1 text-xs text-muted">Cards tab adds real cards · this counts them</span>
-                      </label>
                     </div>
                   </div>
                 )}

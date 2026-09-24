@@ -75,11 +75,11 @@ test("unban: a broken save read is named as a device problem, not a format", () 
 });
 
 test("card collections are gone from the catalogue and the session", () => {
-  // The feature was removed: it wrote a counter the game does not honour, so
-  // it reported success while changing nothing. Guard the removal at the
-  // catalogue level (what the UI renders) and the session level (what the
-  // friend flow returns), so it cannot quietly come back.
-  assert.equal(studio.catalogs().fields.find((f) => f.key === "crd"), undefined);
+  // Restored: `crd` writes the legacy `FullCardCollections` counter exactly
+  // as the original zip does (single Var, same FIELD_MAP). Not claimed to
+  // grant real cards — the real collection lives in `OwnedCards` and is
+  // edited via the Cards tab. Guard that both mechanisms coexist.
+  assert.notEqual(studio.catalogs().fields.find((f) => f.key === "crd"), undefined);
 
   const { sessionId } = load();
   const withFriend = studio.attachFriendXml(token, sessionId, friendSave);
