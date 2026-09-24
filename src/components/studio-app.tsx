@@ -2156,10 +2156,6 @@ export function StudioApp() {
                           {tr("regatta")} {session.regatta.tasks}×{session.regatta.score}
                         </span>
                       ) : null}
-                      <span className="state-badge rounded-full px-2.5 py-1 text-xs font-medium" title={tr("cardsHint")}>
-                        <GameIcon name="cards" className="size-3.5" />
-                        {tr("tabCards")} {session.cardsOwned}/{CARD_GROUPS.reduce((n, g) => n + g.items.length, 0)}
-                      </span>
                     </div>
                     <div className="stagger-in grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {fields.filter((f) => !new Set([
@@ -2188,6 +2184,19 @@ export function StudioApp() {
                           />
                         </label>
                       ))}
+                      <label className="stat-card panel" data-tone="3">
+                        <span className="stat-title">
+                          <GameIcon name="cards" className="size-4" />
+                          Card collections
+                        </span>
+                        <input
+                          className="field field-stat mt-2"
+                          value={`${session.cardsOwned} / 150`}
+                          readOnly
+                          title="Real progress from your collection — use the Cards tab to add cards"
+                        />
+                        <span className="mt-1 text-xs text-muted">Cards tab adds real cards · this counts them</span>
+                      </label>
                     </div>
                   </div>
                 )}
