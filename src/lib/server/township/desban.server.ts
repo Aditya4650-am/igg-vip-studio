@@ -284,8 +284,13 @@ function isTutorialName(name: string) {
   if (name.startsWith("tip") && name.endsWith("TipSO")) return true;
   if (low.includes("tutorial") || low.includes("tutshowed")) return true;
   if (low.startsWith("needarrow")) return true;
-  if (low.includes("tutor") && /(show|state|complete|finish)/i.test(low)) return true;
+  if (low.startsWith("needshow")) return true;
+  if (low.includes("hand") && (low.includes("tutor") || low.includes("show") || low.includes("guide"))) return true;
+  if (low.includes("guide") && (low.includes("tutor") || low.includes("show") || low.includes("complete"))) return true;
+  if (low.includes("hint") && (low.includes("tutor") || low.includes("show"))) return true;
+  if (low.includes("tutor") && /(show|state|complete|finish|start)/i.test(low)) return true;
   if (low.endsWith("tutshowed") || low.endsWith("tutor_showed")) return true;
+  if (low.includes("arrow") && (low.includes("tutor") || low.includes("need") || low.includes("show"))) return true;
   return [
     "FirstGameLoad", "wasTrainTutorial", "StartTutorialFinished",
     "SecondStartTutorialFinished", "SecondStartTutorialShowed",
@@ -327,8 +332,19 @@ export function skipTutorials(xml: string, friend?: string) {
   for (const n of TUTORIAL_DONE) out = writeVar(out, n, "1");
   for (const n of TUTORIAL_OFF) out = writeVar(out, n, "0");
 
-  for (const m of out.matchAll(/<Var\s+name="([^"]+)"\s+v="([^"]*)"/gi)) {
-    const name = m[1]!;
+  // Iterate over both Var and DataElem elements with flexible attribute order
+  const varRe = /<(Var|DataElem)\b[^>]*\bname="([^"]+)"[^>]*\bv(?:alue)?="([^"]*)"[^>]*>/gi;
+  const varRe2 = /<(Var|DataElem)\b[^>]*\bv(?:alue)?="([^"]*)"[^>]*\bname="([^"]+)"[^>]*>/gi;
+  
+  for (const m of out.matchAll(varRe)) {
+    const name = m[2]!;
+    const current = m[3]!;
+    if (!isTutorialName(name)) continue;
+    const target = tutorialTargetValue(name, current);
+    if (target !== current) out = writeVar(out, name, target);
+  }
+  for (const m of out.matchAll(varRe2)) {
+    const name = m[3]!;
     const current = m[2]!;
     if (!isTutorialName(name)) continue;
     const target = tutorialTargetValue(name, current);
@@ -348,6 +364,17 @@ export function skipTutorials(xml: string, friend?: string) {
     ["FirstDiggingClayTutorial_state", "18"], ["FirstDiggingStoneTutorial_state", "18"],
     ["FirstDiggingHardstoneTutorial_state", "18"], ["DiggingTutorial_state", "18"],
     ["BarnUpgradeTutorial_state", "18"], ["FactoryTutorial_state", "18"],
+    // Additional hand/arrow/guide/hint states that cause visual tutorials
+    ["HandTutorial_state", "18"], ["HandTutorialsq0_state", "0"], ["HandTutorialsq1_state", "0"],
+    ["GuideTutorial_state", "18"], ["GuideTutorialsq0_state", "0"], ["GuideTutorialsq1_state", "0"],
+    ["HintTutorial_state", "18"], ["HintTutorialsq0_state", "0"], ["HintTutorialsq1_state", "0"],
+    ["NeedShowHandOnMarket", "0"], ["NeedShowHandOnZoo", "0"], ["NeedShowHandOnTrain", "0"],
+    ["NeedShowHandOnAirport", "0"], ["NeedShowHandOnHarbor", "0"], ["NeedShowHandOnDigging", "0"],
+    ["NeedShowHandOnClan", "0"], ["NeedShowHandOnIsland", "0"],
+    ["ShowHandOnFactory", "0"], ["ShowHandOnBarn", "0"], ["ShowHandOnMarket", "0"],
+    ["ArrowTutorial_state", "18"], ["ArrowTutorialsq0_state", "0"],
+    ["TutorialHandShown", "1"], ["TutorialGuideShown", "1"], ["TutorialHintShown", "1"],
+    ["TapToContinueTutorialShown", "1"], ["SwipeTutorialShown", "1"],
   ];
   for (const [name, value] of forced) out = writeVar(out, name, value);
   return out;
