@@ -291,6 +291,13 @@ function isTutorialName(name: string) {
   if (low.includes("tutor") && /(show|state|complete|finish|start)/i.test(low)) return true;
   if (low.endsWith("tutshowed") || low.endsWith("tutor_showed")) return true;
   if (low.includes("arrow") && (low.includes("tutor") || low.includes("need") || low.includes("show"))) return true;
+  // Mining/digging/cascade tutorial control vars
+  if (low.includes("digging") && (low.includes("visited") || low.includes("fullcompleted") || low.includes("ready") || low.includes("regenerated") || low.includes("tutor") || low.includes("showed") || low.includes("room") || low.includes("stone") || low.includes("hardstone") || low.includes("clay") || low.includes("premium"))) return true;
+  if (low.includes("cascade") && (low.includes("event") || low.includes("window") || low.includes("reward") || low.includes("launch") || low.includes("stop") || low.includes("merge") || low.includes("expedition") || low.includes("tutorial"))) return true;
+  if (low.includes("exped") && (low.includes("lock") || low.includes("reward") || low.includes("tutorial") || low.includes("energy") || low.includes("playbtn") || low.includes("quest") || low.includes("show"))) return true;
+  if (low.startsWith("tutm3_")) return true;
+  if (low.includes("digging") && (low.includes("beauty") || low.includes("generated") || low.includes("tools") || low.includes("chunk"))) return true;
+  if (low.includes("m3_cascade")) return true;
   return [
     "FirstGameLoad", "wasTrainTutorial", "StartTutorialFinished",
     "SecondStartTutorialFinished", "SecondStartTutorialShowed",
@@ -775,6 +782,21 @@ export function skipTutorials(xml: string, friend?: string) {
     ["lastShowedStep", "0"],
     // Tutorial manager component
     ["tutorialManager", "{\"enabled\":false,\"finishedTutorials\":[\"all\"],\"vars\":[]}"],
+    // Mining/digging/cascade tutorial control vars (critical for preventing mining tutorial)
+    ["DiggingVisited", "1"], ["diggingFullCompleted", "1"], ["ExpedLockRewardCascadeWindow", "1"],
+    ["GenerateDiggingBeautys", "0"], ["LastLaunchId_CascadeEventExpedition", "0"],
+    ["LastLaunchId_CascadeEventMerge", "0"], ["OnEventStop_CascadeEventExpedition", "0"],
+    ["OnEventStop_CascadeEventMerge", "0"], ["cascadeRewardsToShow", "[]"],
+    ["diggingChunk", "0"], ["diggingToolsCount", "[]"],
+    ["m3_cascade_points_for_moves", "0"], ["m3_cascade_points_total", "0"],
+    ["DiggingReady", "1"], ["DiggingRegeneratedForMuseum", "1"],
+    ["NeedShowDiggingFirecracker", "0"], ["NeedShowDiggingMissTools", "0"],
+    ["NeedShowHandOnDigging", "0"], ["NeedArrowOnDigging", "0"],
+    ["FirstDiggingClayShowed", "1"], ["FirstDiggingStoneShowed", "1"],
+    ["FirstDiggingHardstoneShowed", "1"], ["FirstDiggingRoomShowed", "1"],
+    ["OldPlayersDiggingTutShowed", "1"], ["RepairDiggingTutShowed", "1"],
+    ["DiggingTutorShowed", "1"], ["Tutorial_SP_DiggingPremium", "1"],
+    ["FirstShowCascadePromoWindowForExpeditionStatus", "0"],
   ];
   for (const [name, value] of forced) out = writeVar(out, name, value);
   return out;
