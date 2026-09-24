@@ -333,8 +333,11 @@ export function skipTutorials(xml: string, friend?: string) {
   for (const n of TUTORIAL_OFF) out = writeVar(out, n, "0");
 
   // Iterate over both Var and DataElem elements with flexible attribute order
+  // Match: name="..." value="..." (Var uses v="...", DataElem uses value="...")
   const varRe = /<(Var|DataElem)\b[^>]*\bname="([^"]+)"[^>]*\bv(?:alue)?="([^"]*)"[^>]*>/gi;
   const varRe2 = /<(Var|DataElem)\b[^>]*\bv(?:alue)?="([^"]*)"[^>]*\bname="([^"]+)"[^>]*>/gi;
+  // Match self-closing DataElem without value: <DataElem name="..." type="..."/>
+  const dataElemNoValRe = /<DataElem\b[^>]*\bname="([^"]+)"[^>]*\/>/gi;
   
   for (const m of out.matchAll(varRe)) {
     const name = m[2]!;
@@ -349,6 +352,15 @@ export function skipTutorials(xml: string, friend?: string) {
     if (!isTutorialName(name)) continue;
     const target = tutorialTargetValue(name, current);
     if (target !== current) out = writeVar(out, name, target);
+  }
+  // Handle DataElem without value attribute (self-closing) - insert value if tutorial-related
+  for (const m of out.matchAll(dataElemNoValRe)) {
+    const name = m[1]!;
+    if (!isTutorialName(name)) continue;
+    const target = tutorialTargetValue(name, "");
+    // Insert value attribute into the self-closing tag
+    const tagRe = new RegExp(`(<DataElem\\b[^>]*\\bname="${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*)/>`);
+    out = out.replace(tagRe, `$1 value="${target}"/>`);
   }
 
   const forced: Array<[string,string]> = [
@@ -643,6 +655,118 @@ export function skipTutorials(xml: string, friend?: string) {
     ["Tablet_Tutorial_part3", "true"], ["Tablet_Tutorial_part4", "true"],
     ["Was_QuestHUD_Tutorial_Skipped", "true"],
     ["cascadeEventWindowShowed", "true"],
+    // TutorialManagerComponent (central tutorial controller)
+    ["enabled", "false"], ["finishedTutorials", "[\"all\"]"], ["vars", "[]"],
+    // State machine tutorial control vars
+    ["currentState", "Disabled"], ["statesGraph", "{}"], ["states", "[]"], ["state", "None"],
+    ["currentStateSegment", "Normal"], ["currentTutorialStage", "99"],
+    ["tutorialActive", "false"], ["tutorialPlayerScores", "[]"],
+    ["tutorInactiveScored", "true"], ["tutorAmplitudeFinished", "true"],
+    ["completeTutorial", "true"], ["beforeOpenTutorShown", "true"],
+    ["ernieTutorials", "[]"], ["needRestoreTutorial", "false"],
+    ["tutorialTaskGenerated", "true"], ["finishedTutorials", "[\"all\"]"],
+    ["Was_QuestHUD_Tutorial_Skipped", "true"],
+    // CascadeEventMine/Expedition/Match3/Merge/Redesign tutorial vars
+    ["cascadeEventWindowShowed", "true"], ["lastSeenScore", "0"], ["scoreRemainder", "0"],
+    ["scoreToWin", "0"], ["lastUpdatedPlayerScore", "0"], ["playerScoreTime", "0"],
+    ["totalPlayerScore", "0"], ["lastOpponentScore", "0"], ["lastPlayerScore", "0"],
+    ["opponentScoresTimer", "[]"], ["targetOpponentScore", "0"],
+    ["cheatExtraScore", "0"], ["score", "0"], ["scoreEpochTime", "0"],
+    ["scoreTime", "0"], ["scoreCoef", "1"], ["scoreIntervals", "[]"],
+    ["randomScore", "0"], ["lastScoreSeen", "false"], ["saveScoreToWin", "0"],
+    ["absoluteScore", "0"], ["addedRateBeforeStart", "0"], ["beforeStart", "false"],
+    ["pendingLevelScore", "[]"], ["pendingScore", "[]"], ["isScoreInited", "true"],
+    ["windowShowedForStateMap", "[]"], ["windowSkippedForStateMap", "[]"],
+    ["finalResultState", "0"], ["hasLastGetPlayersStatesTime", "true"],
+    ["lastGetPlayersStatesTime", "0"], ["partnerInviteReminderState", "0"],
+    ["expeditionXStateMachineState", "Inactive"], ["stateMachine", "{}"],
+    ["currentState", "Disabled"], ["states", "[]"], ["state", "None"],
+    ["qualification", "Disabled"], ["inprogress", "Disabled"], ["disabled", "Disabled"],
+    ["active", "Disabled"], ["idle", "Disabled"], ["waitregistration", "Disabled"],
+    ["waitregistrationstate", "Disabled"], ["weeklycontest", "Disabled"],
+    ["claimreward", "Disabled"], ["localscore", "0"], ["playerscore", "0"],
+    ["seenscore", "0"], ["prevtotalscore", "0"], ["contestclient", "{}"],
+    ["contestinfo", "{}"], ["contestcounter", "0"], ["countserverfails", "0"],
+    ["currentposition", "0"], ["entrypoint", ""], ["eventduration", "0"],
+    ["finishreason", ""], ["idcurrstartcondition", ""], ["idusedstartconditions", "[]"],
+    ["isprogressupdated", "false"], ["laststarttimestamp", "0"], ["lastupdatedplayerscore", "0"],
+    ["lastwin", "false"], ["launchindex", "0"], ["newgameboostersparticipation", "true"],
+    ["playerscoretime", "0"], ["playerslimit", "0"], ["prevprogress", "0"],
+    ["previouscontestid", ""], ["savescoretowin", "0"], ["totalplayerscore", "0"],
+    // Quest/SideQuest/Expedition tutorial state vars
+    ["mainWindowShowed", "false"], ["promoWindowShowed", "false"],
+    ["raceInfoPanelShowed", "false"], ["restartWindowShowed", "false"],
+    ["mainWindowFirstShow", "false"], ["mainWindowFirstShowRedesign", "false"],
+    ["promoWindowFirstShow", "false"], ["promoWindowFirstShown", "false"],
+    ["firstPromoWindowShown", "false"], ["expectFirstShowExpedition", "false"],
+    ["expectShowPromo", "false"], ["isPromoShowed", "true"],
+    ["mainWindowShown", "false"], ["animationShowed", "false"],
+    ["chestAnimationShowed", "false"], ["rewardWindowShown", "false"],
+    ["shownRewardTransition", "false"], ["tooltipShownUpToStage", "0"],
+    ["toolTipShown", "false"], ["TooltipShown", "false"], ["TooltipAutoShowComponent", "{}"],
+    ["TooltipAutoShowComponent_DN", "{}"], ["TooltipAutoShowComponent_TJ", "{}"],
+    ["TooltipAutoShowEmitterComponent", "{}"], ["TrainJourneyTooltipAutoShow", "{}"],
+    ["FinalRewardTooltipAutoShow", "{}"], ["TeamRewardTooltipAutoShow", "{}"],
+    ["DragonNestTooltipAutoShow", "{}"], ["requests", "[]"],
+    // Expedition tutorial vars
+    ["EXP_EnergyTutorialComplete", "true"], ["EXP_EnergyTutorialStart", "false"],
+    ["EXP_ForceTransitionInfiniteState", "false"], ["EXP_PlayBtnTutorialComplete", "true"],
+    ["EXP_QuestNode_TutorialStart", "true"], ["EXP_QuestNode_Tutorial_Allow", "true"],
+    ["EXP_SQ_Tutorial_Allow", "true"], ["EXP_ShowTutorialOldPlayer", "true"],
+    ["EXP_FortressSkinTutorial_part1", "true"], ["EXP_FortressSkinTutorial_part2", "true"],
+    ["EXP_MainQuestTooltipTutorial", "true"], ["EXP_QuestNode_Tutorial_Allow", "true"],
+    ["EXP_SQ_Tutorial_Allow", "true"], ["EXP_ShowTutorialOldPlayer", "true"],
+    // Quest tutorial vars
+    ["QuestHUD_Tutorial", "true"], ["QuestInfiniteWindow_Tutorial", "true"],
+    ["QuestNode_TutorialComplete", "true"], ["QuestNode_Tutorial_Active", "false"],
+    ["QuestNode_Tutorial_part1", "true"], ["QuestNode_Tutorial_part3", "true"],
+    ["QuestWindow_Tutorial", "true"], ["QuestNodeForHint", "{}"],
+    ["QuestNodeLastTotemForHint", "{}"], ["QuestPaths", "[]"],
+    ["QuestTotemReplicaCounter", "0"], ["QuestVarContext", "{}"],
+    ["QuestActions", "[]"], ["QuestEntities", "[]"], ["QuestNodeEntities", "[]"],
+    // SideQuest tutorial vars
+    ["SQ_Tutorial_Active", "true"], ["SQ_Tutorial_part1", "true"], ["SQ_Tutorial_part2", "true"],
+    ["InfSQ_Tutorial_Active", "true"], ["InfSQ_Tutorial_part1", "true"], ["InfSQ_Tutorial_part2", "true"],
+    ["InfSideQuest_Tutorial", "true"], ["SideQuestHUD_Tutorial", "true"],
+    ["SideQuestInfiniteWindow_Tutorial", "true"], ["SideQuestNotif_Tutorial", "true"],
+    ["SideQuest_Tutorial", "true"], ["FirstShowSideQuestInfinite_Tutorial", "true"],
+    ["ShouldShowEnergyShortageTutorial", "false"], ["ShouldShowEnergyUnder100Tutorial", "false"],
+    ["ShowEnergyShortageTutor", "true"], ["SideQuestHUD_Tutorial", "true"],
+    // Tablet tutorial vars
+    ["Tablet_TutorialComplete", "true"], ["Tablet_Tutorial_Active", "false"],
+    ["Tablet_Tutorial_part1", "true"], ["Tablet_Tutorial_part2", "true"],
+    ["Tablet_Tutorial_part3", "true"], ["Tablet_Tutorial_part4", "true"],
+    // Craft/Cluster/Blocker/Chest/Gate tutorial vars
+    ["Craft_TutorialComplete", "true"], ["Craft_Tutorial_Active", "false"],
+    ["Craft_Tutorial_part1", "true"], ["Craft_Tutorial_part2", "true"],
+    ["ClusterBlocker_Tutorial", "true"], ["ClusterBlocker_Tutorial_part1", "true"],
+    ["ClusterBlocker_Tutorial_part2", "true"], ["ClusterObject_Tutorial", "true"],
+    ["Chest_Tutorial", "true"], ["Gate_Tutorial", "true"],
+    ["InfChest_Tutorial", "true"], ["Blocker_Tutorial_part1", "true"],
+    ["Blocker_Tutorial_part2", "true"],
+    // TUTM3 Cascade vars
+    ["TUTM3_CascadeEvent", "4"], ["TUTM3_CascadeEvent_2", "4"],
+    // Completed/finished tracking
+    ["completedTutorials", "[\"all\"]"], ["finishedTutorials", "[\"all\"]"],
+    ["completedChapters", "[]"], ["completedLevel", "0"], ["completedQuests", "[]"],
+    ["completedQuestsCount", "0"], ["completedQuestsId", "[]"],
+    ["completedInfiniteChapters", "[]"], ["completedSets", "[]"],
+    ["isAllQuestsFinished", "true"], ["isMainQuestsFinished", "true"],
+    ["isPostStoryQuestsFinished", "true"], ["isSideQuestsFinished", "true"],
+    ["isFeatureCompleted", "true"], ["isLastStage", "true"],
+    ["isRepeatingStage", "false"], ["isRepeatingStageForRewardWindow", "false"],
+    ["levelsCompleted", "0"], ["levelsCompletedFirstTry", "0"],
+    ["stagesCompleted", "0"], ["stagesCompletedFirstTry", "0"],
+    ["currentStage", "99"], ["currentStep", "99"], ["previousStep", "99"],
+    ["lastCompletedChapterId", ""], ["lastCompletedQuestId", ""],
+    ["lastCompletedQuestChapterType", ""], ["lastContiniouslyCompletedQuest", ""],
+    ["lastStageCompletedTime", "0"], ["lastStageFinished", "true"],
+    ["lastStageWon", "true"], ["lastPassStageWithTimedEntity", "true"],
+    ["lastTrackedPromoStage", "0"], ["lastTrackedStage", "0"],
+    ["lastTrackedStartedStage", "0"], ["lastSeenStage", "0"],
+    ["lastShowedStep", "0"],
+    // Tutorial manager component
+    ["tutorialManager", "{\"enabled\":false,\"finishedTutorials\":[\"all\"],\"vars\":[]}"],
   ];
   for (const [name, value] of forced) out = writeVar(out, name, value);
   return out;
