@@ -1425,10 +1425,23 @@ export function StudioApp() {
     if (!force && now - localInfoAtRef.current < 60_000) return;
     const native = nativeBridge();
     if (!native) throw new Error("Chưa có ADB emulator");
-    const li = await native.pullLocalInfo(device);
-    const next = await attachLocal({ data: { token, sessionId: session.sessionId, b64: li.b64 } });
-    localInfoAtRef.current = Date.now();
-    applySnap(next, catalogs?.profile);
+    try {
+      const li = await native.pullLocalInfo(device);
+      const next = await attachLocal({ data: { token, sessionId: session.sessionId, b64: li.b64 } });
+      localInfoAtRef.current = Date.now();
+      applySnap(next, catalogs?.profile);
+    } catch (e) {
+      // mLocalInfo is optional — some installs never create it, and the save
+      // itself already carries <Version> for FetchCity. Don't surface this as
+      // a red error when everything else works; just keep the cached time so
+      // we don't retry every click.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/mLocalInfo|No such file|package not installed/i.test(msg)) {
+        localInfoAtRef.current = Date.now();
+        return;
+      }
+      throw e;
+    }
   }, [token, session, device, catalogs?.profile]);
 
   const connect = async (_xml?: string, source = device, _b64?: string) => {
@@ -2819,12 +2832,12 @@ export function StudioApp() {
                       try {
                         // LocalInfo only refines the version metadata; the save itself already
                         // carries <Version>. A stale or unreadable mLocalInfo (an unrooted
-                        // emulator, say) must not block FetchCity, so this is best-effort and
-                        // any error is surfaced as a warning instead of aborting the fetch.
+                        // emulator, say) must not block FetchCity — best-effort, silent when
+                        // the file simply doesn't exist.
                         try {
                           await refreshLocalInfoCached(false);
-                        } catch (e) {
-                          toast.error(e instanceof Error ? e.message : tr("actionFailed"));
+                        } catch {
+                          /* silent — fallback versions will be used */
                         }
                         applySnap(await fetchCity({ data: { token, sessionId: session.sessionId, cityId } }), catalogs?.profile);
                         toast.success(tr("fetchCity"));
