@@ -84,6 +84,11 @@ const saveSchema = z.object({
   decorFragments: z.boolean().optional(),
   decorClone: z.boolean().optional(),
   decorMaxAll: z.boolean().optional(),
+  upgrades: z.object({
+    factory: z.record(z.string(), z.number()).optional(),
+    train: z.record(z.string(), z.number()).optional(),
+    island: z.record(z.string(), z.number()).optional(),
+  }).optional(),
 });
 
 export const saveAll = createServerFn({ method: "POST" })

@@ -1,6 +1,134 @@
 /** Server-only game catalogs. Never import from client modules. */
 export type RawItem = { id: string; label: string };
-export type RawGroup = { id: string; items: RawItem[] };
+export type RawGroup = { id: string; label?: string; items: RawItem[] };
+
+export const RAW_FACTORIES: RawGroup[] = [
+  {
+    id: "FactoryUpgrades",
+    label: "Factories",
+    items: [
+      { id: "factory_bakery", label: "Bakery" },
+      { id: "factory_dairy", label: "Dairy Factory" },
+      { id: "factory_sugar", label: "Sugar Factory" },
+      { id: "factory_textile", label: "Textile Factory" },
+      { id: "factory_rubber", label: "Rubber Factory" },
+      { id: "factory_feed_mill", label: "Feed Mill" },
+      { id: "factory_slaughterhouse", label: "Slaughterhouse" },
+      { id: "factory_canning", label: "Canning Factory" },
+      { id: "factory_juice", label: "Juice Factory" },
+      { id: "factory_jam", label: "Jam Factory" },
+      { id: "factory_biscuit", label: "Biscuit Factory" },
+      { id: "factory_chocolate", label: "Chocolate Factory" },
+      { id: "factory_ice_cream", label: "Ice Cream Factory" },
+      { id: "factory_pizza", label: "Pizza Factory" },
+      { id: "factory_burger", label: "Burger Factory" },
+      { id: "factory_sushi", label: "Sushi Factory" },
+      { id: "factory_popcorn", label: "Popcorn Factory" },
+      { id: "factory_coffee", label: "Coffee Factory" },
+      { id: "factory_tea", label: "Tea Factory" },
+      { id: "factory_honey", label: "Honey Factory" },
+      { id: "factory_candy", label: "Candy Factory" },
+      { id: "factory_chips", label: "Chips Factory" },
+      { id: "factory_french_fries", label: "French Fries Factory" },
+      { id: "factory_nuggets", label: "Nuggets Factory" },
+      { id: "factory_cheese", label: "Cheese Factory" },
+      { id: "factory_yogurt", label: "Yogurt Factory" },
+      { id: "factory_butter", label: "Butter Factory" },
+      { id: "factory_milk", label: "Milk Factory" },
+      { id: "factory_egg_powder", label: "Egg Powder Factory" },
+      { id: "factory_flour", label: "Flour Factory" },
+      { id: "factory_oil", label: "Oil Factory" },
+      { id: "factory_vinegar", label: "Vinegar Factory" },
+      { id: "factory_ketchup", label: "Ketchup Factory" },
+      { id: "factory_mayonnaise", label: "Mayonnaise Factory" },
+      { id: "factory_sauce", label: "Sauce Factory" },
+      { id: "factory_soup", label: "Soup Factory" },
+      { id: "factory_noodle", label: "Noodle Factory" },
+      { id: "factory_pasta", label: "Pasta Factory" },
+      { id: "factory_bread", label: "Bread Factory" },
+      { id: "factory_cake", label: "Cake Factory" },
+      { id: "factory_cookie", label: "Cookie Factory" },
+      { id: "factory_donut", label: "Donut Factory" },
+      { id: "factory_muffin", label: "Muffin Factory" },
+      { id: "factory_croissant", label: "Croissant Factory" },
+      { id: "factory_bagel", label: "Bagel Factory" },
+      { id: "factory_pretzel", label: "Pretzel Factory" },
+      { id: "factory_waffle", label: "Waffle Factory" },
+      { id: "factory_pancake", label: "Pancake Factory" },
+      { id: "factory_crepe", label: "Crepe Factory" },
+      { id: "factory_smoothie", label: "Smoothie Factory" },
+      { id: "factory_shake", label: "Shake Factory" },
+      { id: "factory_energy_drink", label: "Energy Drink Factory" },
+      { id: "factory_soda", label: "Soda Factory" },
+      { id: "factory_mineral_water", label: "Mineral Water Factory" },
+      { id: "factory_beer", label: "Beer Factory" },
+      { id: "factory_wine", label: "Wine Factory" },
+      { id: "factory_vodka", label: "Vodka Factory" },
+      { id: "factory_whiskey", label: "Whiskey Factory" },
+      { id: "factory_rum", label: "Rum Factory" },
+      { id: "factory_brandy", label: "Brandy Factory" },
+      { id: "factory_liqueur", label: "Liqueur Factory" },
+    ]
+  }
+];
+
+export const RAW_TRAINS: RawGroup[] = [
+  {
+    id: "TrainUpgrades",
+    label: "Trains",
+    items: [
+      { id: "train_express", label: "Express Train" },
+      { id: "train_freight", label: "Freight Train" },
+      { id: "train_passenger", label: "Passenger Train" },
+      { id: "train_highspeed", label: "High-Speed Train" },
+      { id: "train_steam", label: "Steam Train" },
+      { id: "train_diesel", label: "Diesel Train" },
+      { id: "train_electric", label: "Electric Train" },
+      { id: "train_maglev", label: "Maglev Train" },
+      { id: "train_metro", label: "Metro Train" },
+      { id: "train_tram", label: "Tram" },
+      { id: "train_cargo", label: "Cargo Train" },
+      { id: "train_tanker", label: "Tanker Train" },
+      { id: "train_container", label: "Container Train" },
+      { id: "train_refrigerated", label: "Refrigerated Train" },
+      { id: "train_livestock", label: "Livestock Train" },
+      { id: "train_auto", label: "Auto Train" },
+      { id: "train_ore", label: "Ore Train" },
+      { id: "train_coal", label: "Coal Train" },
+      { id: "train_grain", label: "Grain Train" },
+      { id: "train_lumber", label: "Lumber Train" },
+    ]
+  }
+];
+
+export const RAW_ISLANDS: RawGroup[] = [
+  {
+    id: "IslandUpgrades",
+    label: "Islands",
+    items: [
+      { id: "island_tropical", label: "Tropical Island" },
+      { id: "island_arctic", label: "Arctic Island" },
+      { id: "island_volcanic", label: "Volcanic Island" },
+      { id: "island_desert", label: "Desert Island" },
+      { id: "island_jungle", label: "Jungle Island" },
+      { id: "island_coral", label: "Coral Island" },
+      { id: "island_mountain", label: "Mountain Island" },
+      { id: "island_forest", label: "Forest Island" },
+      { id: "island_swamp", label: "Swamp Island" },
+      { id: "island_canyon", label: "Canyon Island" },
+      { id: "island_glacier", label: "Glacier Island" },
+      { id: "island_reef", label: "Reef Island" },
+      { id: "island_atoll", label: "Atoll Island" },
+      { id: "island_archipelago", label: "Archipelago" },
+      { id: "island_privilege", label: "Privilege Island" },
+      { id: "island_treasure", label: "Treasure Island" },
+      { id: "island_mystery", label: "Mystery Island" },
+      { id: "island_event", label: "Event Island" },
+      { id: "island_seasonal", label: "Seasonal Island" },
+      { id: "island_premium", label: "Premium Island" },
+    ]
+  }
+];
 
 export const RAW_PROFILE: RawGroup[] = [
   {

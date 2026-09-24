@@ -328,3 +328,112 @@ export function injectRegata(xml: string, nTasks = 105, score = 135) {
   return text;
 }
 
+const UPGRADE_KEY = 32162029;
+
+function slxFor(level: number): number {
+  return level ^ UPGRADE_KEY;
+}
+
+function parseUpgradeBlock(xml: string) {
+  const m = xml.match(/<Upgrade\b[^>]*version="4"[^>]*>([\s\S]*?)<\/Upgrade>/i);
+  if (!m) return { factories: [], trains: [], islands: [], raw: "", index: -1, length: 0 };
+  const inner = m[1];
+  const factories = [...inner.matchAll(/<Factory\b([^>]*?)\/?>/gi)].map(m => parseAttrs(m[1]));
+  const trains = [...inner.matchAll(/<Train\b([^>]*?)\/?>/gi)].map(m => parseAttrs(m[1]));
+  const islands = [...inner.matchAll(/<Island\b([^>]*?)\/?>/gi)].map(m => parseAttrs(m[1]));
+  return { factories, trains, islands, raw: m[0], index: m.index!, length: m[0].length };
+}
+
+function parseAttrs(attrStr: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of attrStr.matchAll(/(\w+)="([^"]*)"/g)) out[m[1]] = m[2];
+  return out;
+}
+
+function serializeAttrs(attrs: Record<string, string>): string {
+  return Object.entries(attrs).map(([k, v]) => ` ${k}="${v}"`).join("");
+}
+
+function rebuildUpgradeBlock(block: { factories: Record<string,string>[]; trains: Record<string,string>[]; islands: Record<string,string>[] }): string {
+  const parts: string[] = [];
+  for (const f of block.factories) parts.push(`<Factory${serializeAttrs(f)}/>`);
+  for (const t of block.trains) parts.push(`<Train${serializeAttrs(t)}/>`);
+  for (const i of block.islands) parts.push(`<Island${serializeAttrs(i)}/>`);
+  return `<Upgrade version="4">${parts.join("")}</Upgrade>`;
+}
+
+/** Discover all upgrade rows in the save. Returns real game IDs. */
+export function discoverUpgrades(xml: string) {
+  return parseUpgradeBlock(xml);
+}
+
+/** Maximum level already present in the save for a given kind (ceiling). */
+export function upgradeMaxLevel(xml: string, kind: "Factory" | "Train" | "Island"): number {
+  const { factories, trains, islands } = parseUpgradeBlock(xml);
+  const arr = kind === "Factory" ? factories : kind === "Train" ? trains : islands;
+  return arr.reduce((max, row) => Math.max(max, Number(row.level) || 0), 0);
+}
+
+/**
+ * Upgrade selected rows to targetLevel (clamped to save's own max).
+ * `ids` are real game IDs. Returns { xml, changed }.
+ * Throws no-op error via caller if changed === 0.
+ */
+export function injectUpgradeLevels(
+  xml: string,
+  kind: "Factory" | "Train" | "Island",
+  ids: string[],
+  targetLevel: number
+): { xml: string; changed: number } {
+  const parsed = parseUpgradeBlock(xml);
+  if (!parsed.raw) return { xml, changed: 0 };
+
+  const maxAllowed = upgradeMaxLevel(xml, kind);
+  const clamped = Math.min(targetLevel, maxAllowed);
+  if (clamped <= 0) return { xml, changed: 0 };
+
+  let changed = 0;
+  const want = new Set(ids);
+
+  if (kind === "Factory") {
+    for (const row of parsed.factories) {
+      if (want.has(row.id)) {
+        const newLevel = Math.min(clamped, maxAllowed);
+        if (Number(row.level) !== newLevel) {
+          row.level = String(newLevel);
+          row.slx = String(slxFor(newLevel));
+          changed++;
+        }
+      }
+    }
+  } else if (kind === "Train") {
+    for (const row of parsed.trains) {
+      if (want.has(row.id)) {
+        const newLevel = Math.min(clamped, maxAllowed);
+        if (Number(row.level) !== newLevel) {
+          row.level = String(newLevel);
+          row.slx = String(slxFor(newLevel));
+          changed++;
+        }
+      }
+    }
+  } else {
+    for (const row of parsed.islands) {
+      if (want.has(row.id)) {
+        const newLevel = Math.min(clamped, maxAllowed);
+        if (Number(row.level) !== newLevel) {
+          row.level = String(newLevel);
+          row.slx = String(slxFor(newLevel));
+          changed++;
+        }
+      }
+    }
+  }
+
+  if (!changed) return { xml, changed: 0 };
+
+  const newBlock = rebuildUpgradeBlock(parsed);
+  const newXml = xml.slice(0, parsed.index) + newBlock + xml.slice(parsed.index + parsed.length);
+  return { xml: newXml, changed };
+}
+

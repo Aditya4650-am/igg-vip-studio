@@ -32,7 +32,7 @@ import {
   attachLocal,
 } from "@/lib/studio-api";
 
-type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "barn" | "museum" | "cards" | "zoo";
+type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "barn" | "museum" | "cards" | "zoo" | "upgrades";
 type SessionSnap = Awaited<ReturnType<typeof connectLoad>>;
 type Catalogs = Awaited<ReturnType<typeof getCatalogs>>;
 type UnbanMode = "inicial" | "completo" | "novo";
@@ -88,7 +88,7 @@ function downloadText(name: string, text: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "barn", "museum", "cards", "zoo"];
+const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "barn", "museum", "cards", "zoo", "upgrades"];
 const TAB_KEY: Record<Tab, keyof Dict> = {
   data: "tabData",
   profile: "tabProfile",
@@ -102,6 +102,7 @@ const TAB_KEY: Record<Tab, keyof Dict> = {
   museum: "tabMuseum",
   cards: "tabCards",
   zoo: "tabZoo",
+  upgrades: "tabUpgrades",
 };
 const TAB_ICON: Record<Tab, GameIconName> = {
   data: "data",
@@ -116,6 +117,7 @@ const TAB_ICON: Record<Tab, GameIconName> = {
   museum: "museum",
   cards: "cards",
   zoo: "zoo",
+  upgrades: "control",
 };
 
 
@@ -1208,11 +1210,18 @@ export function StudioApp() {
   const [museumSel, setMuseumSel] = useState<Set<string>>(new Set());
   const [pendingRegatta, setPendingRegatta] = useState(false);
   const [pendingSeason, setPendingSeason] = useState(false);
+  const [pendingTutorialSkip, setPendingTutorialSkip] = useState(false);
   const [pendingUnban, setPendingUnban] = useState<UnbanMode | null>(null);
   const [pendingDecorFragments, setPendingDecorFragments] = useState(false);
   const [pendingDecorClone, setPendingDecorClone] = useState(false);
   const [pendingDecorMaxAll, setPendingDecorMaxAll] = useState(false);
-  const [pendingTutorialSkip, setPendingTutorialSkip] = useState(false);
+  const upgradeFactorySel = useSetMap();
+  const upgradeTrainSel = useSetMap();
+  const upgradeIslandSel = useSetMap();
+  const [upgradeTargetLevel, setUpgradeTargetLevel] = useState(1);
+  const [pendingUpgradeFactory, setPendingUpgradeFactory] = useState(false);
+  const [pendingUpgradeTrain, setPendingUpgradeTrain] = useState(false);
+  const [pendingUpgradeIsland, setPendingUpgradeIsland] = useState(false);
   const initialStatsRef = useRef<Record<string, string>>({});
   const localInfoAtRef = useRef(0);
   const autoLoginStartedRef = useRef(false);
@@ -1498,8 +1507,10 @@ export function StudioApp() {
 
   const pending =
     profileSel.count + avatarSel.count + skinSel.count + itemSel.count + cardsCount + zooSel.count + decorSel.size + stickerSel.size + museumSel.size +
+    upgradeFactorySel.count + upgradeTrainSel.count + upgradeIslandSel.count +
     (barnDirty ? 1 : 0) + (pendingRegatta ? 1 : 0) + (pendingSeason ? 1 : 0) + (pendingTutorialSkip ? 1 : 0) + (pendingUnban ? 1 : 0) +
-    (pendingDecorFragments ? 1 : 0) + (pendingDecorClone ? 1 : 0) + (pendingDecorMaxAll ? 1 : 0);
+    (pendingDecorFragments ? 1 : 0) + (pendingDecorClone ? 1 : 0) + (pendingDecorMaxAll ? 1 : 0) +
+    (pendingUpgradeFactory ? 1 : 0) + (pendingUpgradeTrain ? 1 : 0) + (pendingUpgradeIsland ? 1 : 0);
 
   const parseQty = useCallback(() => {
     const n = Number.parseInt(bulkQty, 10);
@@ -1649,6 +1660,11 @@ export function StudioApp() {
           decorFragments: pendingDecorFragments,
           decorClone: pendingDecorClone,
           decorMaxAll: pendingDecorMaxAll,
+          upgrades: (upgradeFactorySel.count > 0 || upgradeTrainSel.count > 0 || upgradeIslandSel.count > 0) ? {
+            factory: upgradeFactorySel.count > 0 ? Object.fromEntries(Object.values(upgradeFactorySel.asRecord()).flat().map(id => [id, upgradeTargetLevel])) : undefined,
+            train: upgradeTrainSel.count > 0 ? Object.fromEntries(Object.values(upgradeTrainSel.asRecord()).flat().map(id => [id, upgradeTargetLevel])) : undefined,
+            island: upgradeIslandSel.count > 0 ? Object.fromEntries(Object.values(upgradeIslandSel.asRecord()).flat().map(id => [id, upgradeTargetLevel])) : undefined,
+          } : undefined,
         },
       });
       applySnap(r, catalogs?.profile);
@@ -1676,6 +1692,9 @@ export function StudioApp() {
       setDecorSel(new Set());
       setStickerSel(new Set());
       setMuseumSel(new Set());
+      upgradeFactorySel.clear();
+      upgradeTrainSel.clear();
+      upgradeIslandSel.clear();
       setPendingRegatta(false);
       setPendingSeason(false);
       setPendingTutorialSkip(false);
@@ -1683,12 +1702,15 @@ export function StudioApp() {
       setPendingDecorFragments(false);
       setPendingDecorClone(false);
       setPendingDecorMaxAll(false);
+      setPendingUpgradeFactory(false);
+      setPendingUpgradeTrain(false);
+      setPendingUpgradeIsland(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tr("nothing"));
     } finally {
       setBusy(false);
     }
-  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, cardsQty, zooSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, pendingSeason, pendingTutorialSkip, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingDecorMaxAll, parseDecorQty, tr, device]);
+  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, cardsQty, zooSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, pendingSeason, pendingTutorialSkip, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingDecorMaxAll, parseDecorQty, tr, device, upgradeFactorySel, upgradeTrainSel, upgradeIslandSel, upgradeTargetLevel]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1765,6 +1787,7 @@ export function StudioApp() {
     museum: museumSel.size,
     cards: cardsCount,
     zoo: zooSel.count,
+    upgrades: upgradeFactorySel.count + upgradeTrainSel.count + upgradeIslandSel.count,
   };
 
   const barnTotal = Object.values(barnItems).reduce((n, v) => n + (Number(v) || 0), 0);
@@ -2544,6 +2567,151 @@ export function StudioApp() {
                         />
                       ))
                     )}
+                  </div>
+                )}
+
+                {tab === "upgrades" && catalogs && session && (
+                  <div className="space-y-3">
+                    <p className="rounded-md bg-input px-3 py-2 text-sm text-amber">{tr("upgradesHint")}</p>
+                    <div className="space-y-4">
+                      {/* Factories Section */}
+                      <section className="panel">
+                        <header className="mb-3 flex items-center gap-2">
+                          <GameIcon name="control" className="size-5 text-teal" />
+                          <h3 className="text-xs font-bold tracking-wider uppercase text-teal">
+                            {tr("upgradesFactoryTitle")} {session.factoryMax ? `(${tr("upgradesMax")} ${session.factoryMax})` : ""}
+                          </h3>
+                          <div className="ml-auto flex items-center gap-2">
+                            <Button size="sm" variant="ghost" onClick={() => upgradeFactorySel.allOn(catalogs.factories)}>
+                              {tr("selectAll")}
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => upgradeFactorySel.clear()}>
+                              {tr("clear")}
+                            </Button>
+                            <label className="flex items-center gap-1 text-xs text-muted">
+                              {tr("targetLevel")}
+                              <select
+                                className="field field-sm"
+                                value={upgradeTargetLevel}
+                                onChange={(e) => setUpgradeTargetLevel(Number(e.target.value))}
+                              >
+                                {Array.from({ length: session.factoryMax ?? 20 }, (_, i) => i + 1).map(n => (
+                                  <option key={n} value={n}>{n}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <Button size="sm" variant="primary" onClick={() => setPendingUpgradeFactory(true)}>
+                              {upgradeFactorySel.count === catalogs.factories.flatMap(g => g.items).length ? tr("unlockMaxAllFactories") : tr("applySelected")}
+                            </Button>
+                          </div>
+                        </header>
+                        {catalogs.factories.map((g, i) => (
+                          <GroupCard
+                            key={g.id}
+                            lang={lang}
+                            group={g}
+                            selected={upgradeFactorySel.map[g.id] ?? new Set()}
+                            onToggle={(id) => upgradeFactorySel.toggle(g.id, id)}
+                            onGroup={(on) => upgradeFactorySel.setGroup(g.id, g.items.map(it => it.id), on)}
+                            allLabel={tr("allShort")}
+                            noneLabel={tr("noneShort")}
+                            toneClass={groupTone(g.id, i)}
+                          />
+                        ))}
+                      </section>
+
+                      {/* Trains Section */}
+                      <section className="panel">
+                        <header className="mb-3 flex items-center gap-2">
+                          <GameIcon name="control" className="size-5 text-pink" />
+                          <h3 className="text-xs font-bold tracking-wider uppercase text-pink">
+                            {tr("upgradesTrainTitle")} {session.trainMax ? `(${tr("upgradesMax")} ${session.trainMax})` : ""}
+                          </h3>
+                          <div className="ml-auto flex items-center gap-2">
+                            <Button size="sm" variant="ghost" onClick={() => upgradeTrainSel.allOn(catalogs.trains)}>
+                              {tr("selectAll")}
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => upgradeTrainSel.clear()}>
+                              {tr("clear")}
+                            </Button>
+                            <label className="flex items-center gap-1 text-xs text-muted">
+                              {tr("targetLevel")}
+                              <select
+                                className="field field-sm"
+                                value={upgradeTargetLevel}
+                                onChange={(e) => setUpgradeTargetLevel(Number(e.target.value))}
+                              >
+                                {Array.from({ length: session.trainMax ?? 10 }, (_, i) => i + 1).map(n => (
+                                  <option key={n} value={n}>{n}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <Button size="sm" variant="primary" onClick={() => setPendingUpgradeTrain(true)}>
+                              {tr("applySelected")}
+                            </Button>
+                          </div>
+                        </header>
+                        {catalogs.trains.map((g, i) => (
+                          <GroupCard
+                            key={g.id}
+                            lang={lang}
+                            group={g}
+                            selected={upgradeTrainSel.map[g.id] ?? new Set()}
+                            onToggle={(id) => upgradeTrainSel.toggle(g.id, id)}
+                            onGroup={(on) => upgradeTrainSel.setGroup(g.id, g.items.map(it => it.id), on)}
+                            allLabel={tr("allShort")}
+                            noneLabel={tr("noneShort")}
+                            toneClass={groupTone(g.id, i)}
+                          />
+                        ))}
+                      </section>
+
+                      {/* Islands Section */}
+                      <section className="panel">
+                        <header className="mb-3 flex items-center gap-2">
+                          <GameIcon name="control" className="size-5 text-cyan" />
+                          <h3 className="text-xs font-bold tracking-wider uppercase text-cyan">
+                            {tr("upgradesIslandTitle")} {session.islandMax ? `(${tr("upgradesMax")} ${session.islandMax})` : ""}
+                          </h3>
+                          <div className="ml-auto flex items-center gap-2">
+                            <Button size="sm" variant="ghost" onClick={() => upgradeIslandSel.allOn(catalogs.islands)}>
+                              {tr("selectAll")}
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => upgradeIslandSel.clear()}>
+                              {tr("clear")}
+                            </Button>
+                            <label className="flex items-center gap-1 text-xs text-muted">
+                              {tr("targetLevel")}
+                              <select
+                                className="field field-sm"
+                                value={upgradeTargetLevel}
+                                onChange={(e) => setUpgradeTargetLevel(Number(e.target.value))}
+                              >
+                                {Array.from({ length: session.islandMax ?? 10 }, (_, i) => i + 1).map(n => (
+                                  <option key={n} value={n}>{n}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <Button size="sm" variant="primary" onClick={() => setPendingUpgradeIsland(true)}>
+                              {tr("applySelected")}
+                            </Button>
+                          </div>
+                        </header>
+                        {catalogs.islands.map((g, i) => (
+                          <GroupCard
+                            key={g.id}
+                            lang={lang}
+                            group={g}
+                            selected={upgradeIslandSel.map[g.id] ?? new Set()}
+                            onToggle={(id) => upgradeIslandSel.toggle(g.id, id)}
+                            onGroup={(on) => upgradeIslandSel.setGroup(g.id, g.items.map(it => it.id), on)}
+                            allLabel={tr("allShort")}
+                            noneLabel={tr("noneShort")}
+                            toneClass={groupTone(g.id, i)}
+                          />
+                        ))}
+                      </section>
+                    </div>
                   </div>
                 )}
 

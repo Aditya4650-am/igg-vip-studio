@@ -7,7 +7,7 @@ import { applyStatChanges, parseStats, readAnyVar, STAT_ALIASES } from "./townsh
 import { shellErrorMessage } from "./township/save-decode.server";
 import { findUnbalancedTag } from "./township/xml-edit.server";
 import { applyBarnCapacity, applyBarnItems, barnInfo } from "./township/barn.server";
-import { injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, parseProfileUnlocked } from "./township/inject.server";
+import { injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, injectUpgradeLevels, parseProfileUnlocked, upgradeMaxLevel, discoverUpgrades } from "./township/inject.server";
 import { grantArtifacts } from "./township/museum.server";
 import { grantCards, countOwnedCards } from "./township/cards.server";
 import { completeZoo, discoverZoo, type ZooPaddock } from "./township/zoo.server";
@@ -255,6 +255,11 @@ export type SavePayload = {
   decorFragments?: boolean;
   decorClone?: boolean;
   decorMaxAll?: boolean;
+  upgrades?: {
+    factory?: Record<string, number>;
+    train?: Record<string, number>;
+    island?: Record<string, number>;
+  };
 };
 
 function mergeUnique(a: string[], b: string[]) {
@@ -400,6 +405,41 @@ export function applySave(p: SavePayload) {
     }
   }
 
+  // Factory / Train / Island upgrades
+  if (p.upgrades) {
+    const up = p.upgrades;
+    if (up.factory && Object.keys(up.factory).length) {
+      const ids = Object.keys(revealed.upgrades?.factory ?? {});
+      const target = Math.max(...Object.values(up.factory), 0);
+      if (ids.length && target > 0) {
+        const r = injectUpgradeLevels(s.rawXml, "Factory", ids, target);
+        if (!r.changed) throw new Error("Không có xưởng nào thay đổi");
+        s.rawXml = r.xml;
+        parts.push(`factory(${r.changed})`);
+      }
+    }
+    if (up.train && Object.keys(up.train).length) {
+      const ids = Object.keys(revealed.upgrades?.train ?? {});
+      const target = Math.max(...Object.values(up.train), 0);
+      if (ids.length && target > 0) {
+        const r = injectUpgradeLevels(s.rawXml, "Train", ids, target);
+        if (!r.changed) throw new Error("Không có tàu hỏa nào thay đổi");
+        s.rawXml = r.xml;
+        parts.push(`train(${r.changed})`);
+      }
+    }
+    if (up.island && Object.keys(up.island).length) {
+      const ids = Object.keys(revealed.upgrades?.island ?? {});
+      const target = Math.max(...Object.values(up.island), 0);
+      if (ids.length && target > 0) {
+        const r = injectUpgradeLevels(s.rawXml, "Island", ids, target);
+        if (!r.changed) throw new Error("Không có đảo nào thay đổi");
+        s.rawXml = r.xml;
+        parts.push(`island(${r.changed})`);
+      }
+    }
+  }
+
   s.stats = parseStats(s.rawXml);
   s.profileUnlocked = cloakProfileUnlocked(parseProfileUnlocked(s.rawXml));
   s.barn = barnInfo(s.rawXml);
@@ -542,6 +582,9 @@ function safeLogLine(line: string) {
 }
 
 export function snapshot(s: Session) {
+  const factoryMax = s.rawXml ? upgradeMaxLevel(s.rawXml, "Factory") : 0;
+  const trainMax = s.rawXml ? upgradeMaxLevel(s.rawXml, "Train") : 0;
+  const islandMax = s.rawXml ? upgradeMaxLevel(s.rawXml, "Island") : 0;
   return {
     sessionId: s.id,
     kind: s.kind,
@@ -560,6 +603,9 @@ export function snapshot(s: Session) {
     friends: s.friends,
     friendCity: s.friendCity,
     unban: s.unban,
+    factoryMax: factoryMax || undefined,
+    trainMax: trainMax || undefined,
+    islandMax: islandMax || undefined,
     log: s.log.slice(-12).map(safeLogLine),
   };
 }

@@ -1,11 +1,11 @@
 import { createHmac } from "node:crypto";
 import { AVATAR_CHUNK, AVATAR_MAX, avatarGroupId, type Group, type Item, type StatField } from "@/lib/catalogs";
-import { RAW_ITEMS, RAW_PROFILE, RAW_SKINS, type RawGroup } from "./catalogs.data.server";
+import { RAW_ITEMS, RAW_PROFILE, RAW_SKINS, RAW_FACTORIES, RAW_TRAINS, RAW_ISLANDS, type RawGroup } from "./catalogs.data.server";
 import { DECOR_STASH } from "./township/decor-stash.server";
 import { SKINS_CATALOG } from "./township/skins-catalog.server";
 import { CHAT_EMOJI_IDS } from "./township/chat-emoji.server";
 
-type Kind = "profile" | "skin" | "item" | "decor" | "stat" | "barn";
+type Kind = "profile" | "skin" | "item" | "decor" | "stat" | "barn" | "factory" | "train" | "island";
 
 const PEPPER = Buffer.from("igg-vip-pub-id-v1");
 const lookup = new Map<string, string>();
@@ -46,6 +46,9 @@ const GROUP_META: Record<string, { label: string; emoji?: string }> = {
   Gems: { label: "Gems", emoji: "💎" },
   Boosts: { label: "Boosts", emoji: "⚡" },
   Coupons: { label: "Coupons", emoji: "🎟️" },
+  FactoryUpgrades: { label: "Factories", emoji: "🏭" },
+  TrainUpgrades: { label: "Trains", emoji: "🚂" },
+  IslandUpgrades: { label: "Islands", emoji: "🏝️" },
 };
 
 function cloakGroup(kind: Kind, raw: RawGroup): Group {
@@ -489,6 +492,11 @@ const BARN_PRODUCTS: Item[] = BARN_INTERNAL.map((p) => ({
   label: p.label,
 }));
 
+// Factory / Train / Island upgrade catalogs (cloaked like skins)
+const FACTORIES: Group[] = RAW_FACTORIES.map((g) => cloakGroup("factory", g));
+const TRAINS: Group[] = RAW_TRAINS.map((g) => cloakGroup("train", g));
+const ISLANDS: Group[] = RAW_ISLANDS.map((g) => cloakGroup("island", g));
+
 // Pre-warm the public-id lookup at module load time. The app runs in a server
 // process where requests must not depend on a previous catalog request having
 // populated the in-memory map.
@@ -498,6 +506,9 @@ for (const g of RAW_ITEMS) for (const it of g.items) pubId("item", it.id);
 for (const it of DECOR_STASH) pubId("decor", it.id);
 for (const f of STAT_INTERNAL) pubId("stat", f.id);
 for (const p of BARN_INTERNAL) pubId("barn", p.id);
+for (const g of RAW_FACTORIES) for (const it of g.items) pubId("factory", it.id);
+for (const g of RAW_TRAINS) for (const it of g.items) pubId("train", it.id);
+for (const g of RAW_ISLANDS) for (const it of g.items) pubId("island", it.id);
 
 export function publicCatalogs() {
   return {
@@ -511,6 +522,9 @@ export function publicCatalogs() {
     barnCapacity: BARN_CAPACITY,
     barnProducts: BARN_PRODUCTS,
     avatarMax: AVATAR_MAX,
+    factories: FACTORIES,
+    trains: TRAINS,
+    islands: ISLANDS,
   };
 }
 
@@ -545,6 +559,7 @@ export function revealSave(p: {
   museum?: string[];
   cards?: Record<string, number>;
   zoo?: string[];
+  upgrades?: { factory?: Record<string, number>; train?: Record<string, number>; island?: Record<string, number> };
 }) {
   return {
     stats: remapRecord("stat", p.stats),
@@ -559,6 +574,11 @@ export function revealSave(p: {
     items: remapRecord("item", p.items),
     decor: (p.decor ?? []).map((id) => remapOne("decor", id)).filter((x): x is string => Boolean(x)),
     barnItems: p.barnItems ?? {},
+    upgrades: p.upgrades ? {
+      factory: remapRecord("factory", p.upgrades.factory),
+      train: remapRecord("train", p.upgrades.train),
+      island: remapRecord("island", p.upgrades.island),
+    } : {},
   };
 }
 

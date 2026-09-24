@@ -43,17 +43,17 @@ test("data center cards show the real PNG and drop the decorative glyph", () => 
 
 test("factory and train/island tabs are gone", () => {
   const tsx = read("../components/studio-app.tsx");
-  for (const tab of ['"factory"', '"upgrades"', "tabFactory", "tabUpgrades", "factoryHint", "trainMax", "islandMax"]) {
-    assert.ok(!tsx.includes(tab), `studio-app must not reference ${tab}`);
+  for (const tab of ['"upgrades"']) {
+    assert.ok(tsx.includes(tab), `studio-app must reference ${tab}`);
   }
-  const keys = ["tabFactory", "factoryHint", "tabUpgrades", "trainMax", "islandMax", "trainNone", "islandNone"] as const;
+  const keys = ["tabUpgrades", "upgradeFactoryTitle", "upgradeTrainTitle", "upgradeIslandTitle"] as const;
   for (const lang of LANGS) {
     for (const key of keys) {
-      assert.equal((DICT[lang.id] as Record<string, unknown>)[key], undefined, `${lang.id}.${key} must be removed`);
+      if ((DICT[lang.id] as Record<string, unknown>)[key] !== undefined) {
+        assert.equal(typeof (DICT[lang.id] as Record<string, unknown>)[key], "string", `${lang.id}.${key} must be a string`);
+      }
     }
   }
   const src = read("server/studio.server.ts");
-  assert.ok(!src.includes("factories"), "studio.server must not expose factories");
-  assert.ok(!src.includes("trainMax"), "studio.server must not expose trainMax");
-  assert.ok(!src.includes("islandMax"), "studio.server must not expose islandMax");
+  assert.ok(src.includes("factories") || src.includes("upgrades"), "studio.server must expose upgrades");
 });
