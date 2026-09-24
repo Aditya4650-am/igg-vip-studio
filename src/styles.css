@@ -3419,12 +3419,25 @@ button.premium-button:active:not(:disabled) {
 
 /* Sidebar panels: consistent premium */
 .app-root .device-selector-card,
-.app-root .sidebar-tools,
 .app-root .sidebar-log {
   border: 1px solid rgba(38, 50, 74, 0.85) !important;
   border-radius: 0.9rem !important;
   background: linear-gradient(160deg, rgba(20, 28, 47, 0.98), rgba(10, 14, 26, 0.99)) !important;
   box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.1), 0 18px 44px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+.app-root .sidebar-tools {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 0 !important;
+  border: 1px solid rgba(38, 50, 74, 0.85) !important;
+  border-radius: 0.9rem !important;
+  background: linear-gradient(160deg, rgba(20, 28, 47, 0.98), rgba(10, 14, 26, 0.99)) !important;
+  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.1), 0 18px 44px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+  padding: 0.9rem !important;
+}
+.app-root .sidebar-tools > div:last-child {
+  width: 100% !important;
 }
 
 
@@ -3481,10 +3494,6 @@ button.premium-button:active:not(:disabled) {
 }
 
 /* 3) Section kickers: one consistent premium type treatment. */
-.app-root .kicker,
-.app-root .sidebar-tools > .kicker,
-.app-root .sidebar-log > .kicker,
-.app-root .sidebar-device-block > .kicker,
 .app-root .app-sidebar .kicker {
   display: inline-flex !important;
   align-items: center !important;
@@ -3497,6 +3506,29 @@ button.premium-button:active:not(:disabled) {
   color: rgba(248, 222, 160, 0.78) !important;
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5) !important;
   margin: 0 !important;
+}
+/* Sidebar section headers — premium centered pill. */
+.app-root .sidebar-device-block > .kicker,
+.app-root .sidebar-tools > .kicker {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.55rem !important;
+  width: fit-content !important;
+  margin: 0 auto 0.85rem !important;
+  padding: 0.42rem 0.95rem !important;
+  border: 1px solid rgba(167, 139, 250, 0.32) !important;
+  border-radius: 999px !important;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.22), rgba(56, 189, 248, 0.16)) !important;
+  box-shadow: 0 4px 14px rgba(124, 58, 237, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(6px);
+  text-align: center !important;
+  letter-spacing: 0.13em !important;
+}
+.app-root .sidebar-log > .kicker {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
 }
 /* Kicker leading icons align on the text baseline (no float/clip). */
 .app-root .kicker::before,
