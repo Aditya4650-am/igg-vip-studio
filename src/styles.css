@@ -1881,6 +1881,19 @@ textarea {
   }
 }
 
+/* Tab glyphs are real emoji (one per tab), rendered in the emoji font
+   stack — never the Inter UI face — with a soft glow on the active tab. */
+.feature-tab-emoji {
+  font-family: "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", sans-serif !important;
+  font-size: 1.15rem;
+  line-height: 1;
+  filter: saturate(1.05);
+}
+.feature-tab--active .feature-tab-emoji {
+  filter: saturate(1.15) drop-shadow(0 0 7px rgba(167, 139, 250, 0.36));
+  transform: translateY(-1px);
+}
+
 /* Second tab row: same pill family as the primary row, set apart by a
    hairline so the 8 + 5 split reads as one intentional toolbar. */
 .feature-tabs-overflow {

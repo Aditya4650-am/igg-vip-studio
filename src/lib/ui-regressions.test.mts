@@ -49,6 +49,8 @@ test("tab bar renders two premium rows: 8 primaries plus 5 below, never 13 squee
   assert.ok(!tsx.includes("{TABS.map((id) => {"), "the raw 13-tab row must be gone");
   assert.ok(tsx.includes("feature-tabs-overflow"), "the second row must carry the premium overflow treatment");
   assert.ok(!tsx.includes('role="menu"'), "no dropdown menu may remain");
+  assert.ok(tsx.includes("TAB_EMOJI[id]"), "tab slots must render real emoji glyphs");
+  assert.ok(!tsx.includes("TAB_ICON[id]"), "svg tab icons must be gone from the bar");
   const css = read("../styles.css");
   assert.ok(css.includes(".feature-tabs-overflow"), "overflow row styling must exist");
   assert.ok(css.includes(".feature-tabs-row"), "row grid styling must exist");

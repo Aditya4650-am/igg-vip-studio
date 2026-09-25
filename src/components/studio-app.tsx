@@ -108,20 +108,20 @@ const TAB_KEY: Record<Tab, keyof Dict> = {
   zoo: "tabZoo",
   upgrades: "tabUpgrades",
 };
-const TAB_ICON: Record<Tab, GameIconName> = {
-  data: "data",
-  profile: "profile",
-  avatars: "avatar",
-  skins: "skin",
-  unban: "unban",
-  decor: "decor",
-  sticker: "sticker",
-  items: "items",
-  barn: "barn",
-  museum: "museum",
-  cards: "cards",
-  zoo: "zoo",
-  upgrades: "control",
+const TAB_EMOJI: Record<Tab, string> = {
+  data: "📊",
+  profile: "👤",
+  avatars: "🎭",
+  skins: "🎨",
+  unban: "🔓",
+  decor: "🖼️",
+  sticker: "💬",
+  items: "📦",
+  barn: "🌾",
+  museum: "🏛️",
+  cards: "🃏",
+  zoo: "🐾",
+  upgrades: "⚙️",
 };
 
 
@@ -2190,7 +2190,7 @@ export function StudioApp() {
                         on ? "feature-tab--active text-primary-fg" : "text-muted hover:text-fg",
                       )}
                     >
-                      <GameIcon name={TAB_ICON[id]} className="feature-tab-icon" />
+                      <span className="feature-tab-emoji" aria-hidden="true">{TAB_EMOJI[id]}</span>
                       <span className="whitespace-nowrap">{tabLabel}</span>
                       {id !== "profile" && tabCount[id] > 0 ? (
                         <span className={cn("tabular-nums", on ? "text-primary-fg/70" : "text-primary")}>
