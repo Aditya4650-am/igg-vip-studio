@@ -1173,6 +1173,7 @@ export function StudioApp() {
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [view, setView] = useState<"client" | "control">("client");
   const [deviceId, setDeviceId] = useState("VIP-LOCAL");
+  const [deviceReady, setDeviceReady] = useState(false);
   const [copied, setCopied] = useState(false);
   const [sheet, setSheet] = useState<Sheet>("none");
   const [freshRelease, setFreshRelease] = useState<{ version: string; notes: string; downloadUrl: string; sha256: string } | null>(null);
@@ -1241,30 +1242,93 @@ export function StudioApp() {
     } catch {
       /* ignore */
     }
-    void (async () => {
-      // Inside the EXE the id comes from %APPDATA%/device.id via the native
-      // bridge, so reopening back to back keeps one id per PC. Browsers keep
-      // the localStorage id; a missing/invalid one is minted once and kept.
-      // deviceId is optional: old EXE builds simply lack it.
-      let id: string | null = null;
+
+    const readStoredOrMint = (): string => {
       try {
-        const nid = await nativeBridge()?.deviceId?.();
-        if (nid && isDeviceId(nid)) id = normalizeDeviceId(nid);
-      } catch {
-        /* fall through to the stored id */
-      }
-      try {
-        if (!id) {
-          const hwid = localStorage.getItem("igg-vip-hwid");
-          if (hwid && isDeviceId(hwid)) id = normalizeDeviceId(hwid);
-        }
-        if (!id) id = mintDeviceId();
-        localStorage.setItem("igg-vip-hwid", id);
+        const hwid = localStorage.getItem("igg-vip-hwid");
+        if (hwid && isDeviceId(hwid)) return normalizeDeviceId(hwid);
       } catch {
         /* private mode */
-        id ??= mintDeviceId();
       }
-      if (!stop) setDeviceId(id);
+      const fresh = mintDeviceId();
+      try {
+        localStorage.setItem("igg-vip-hwid", fresh);
+      } catch {
+        /* ignore */
+      }
+      return fresh;
+    };
+
+    // Instant paint from the stored id. Inside the EXE this is then
+    // upgraded to the file-backed machine id below.
+    setDeviceId(readStoredOrMint());
+
+    // The shell injects window.iggNative ~100ms after boot, i.e. AFTER this
+    // effect runs — reading it once here would miss it every launch and
+    // fall back to a fresh random id. So wait for the bridge: its ready
+    // event first, then a bounded poll (old EXE builds without deviceId
+    // resolve immediately; plain browsers hit the timeout and keep the
+    // stored id).
+    void (async () => {
+      const readNative = async (): Promise<string | null> => {
+        try {
+          const fn = nativeBridge()?.deviceId;
+          if (typeof fn !== "function") return null;
+          const nid = await fn();
+          return nid && isDeviceId(nid) ? normalizeDeviceId(nid) : null;
+        } catch {
+          return null;
+        }
+      };
+      let nid = await readNative();
+      if (!nid) {
+        nid = await new Promise<string | null>((resolve) => {
+          let settled = false;
+          let waited = 0;
+          const done = (v: string | null) => {
+            if (settled) return;
+            settled = true;
+            window.clearInterval(tick);
+            window.removeEventListener("igg-native-ready", onEvent);
+            resolve(v);
+          };
+          const probe = (): boolean => {
+            const bridge = nativeBridge();
+            if (!bridge) return false;
+            if (typeof bridge.deviceId !== "function") {
+              done(null);
+              return true;
+            }
+            void (async () => {
+              try {
+                const v = await bridge.deviceId!();
+                done(v && isDeviceId(v) ? normalizeDeviceId(v) : null);
+              } catch {
+                done(null);
+              }
+            })();
+            return true;
+          };
+          const onEvent = () => {
+            probe();
+          };
+          const tick = window.setInterval(() => {
+            waited += 1;
+            if (probe() || waited >= 30) done(null);
+          }, 50);
+          window.addEventListener("igg-native-ready", onEvent);
+          probe();
+        });
+      }
+      if (!stop && nid) {
+        try {
+          localStorage.setItem("igg-vip-hwid", nid);
+        } catch {
+          /* ignore */
+        }
+        setDeviceId(nid);
+      }
+      if (!stop) setDeviceReady(true);
     })();
     setTabReady(true);
     return () => {
@@ -1447,7 +1511,7 @@ export function StudioApp() {
   };
 
   useEffect(() => {
-    if (!tabReady || token || autoLoginStartedRef.current) return;
+    if (!tabReady || !deviceReady || token || autoLoginStartedRef.current) return;
     autoLoginStartedRef.current = true;
     let cancelled = false;
     void (async () => {
@@ -1464,7 +1528,7 @@ export function StudioApp() {
       }
     })();
     return () => { cancelled = true; };
-  }, [tabReady, token]);
+  }, [tabReady, deviceReady, token]);
 
   const refreshLocalInfoCached = useCallback(async (force = false) => {
     if (!token || !session || !device) return;
