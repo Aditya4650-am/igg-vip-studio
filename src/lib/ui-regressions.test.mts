@@ -41,6 +41,18 @@ test("data center cards show the real PNG and drop the decorative glyph", () => 
   assert.ok(!/statIcon\(/.test(card), "no decorative stat icon resolver in the data center");
 });
 
+test("main dashboard wears an animated ultra-thin RGB light-flow border", () => {
+  const css = read("../styles.css");
+  assert.ok(css.includes("@property --premium-rgb-angle"), "rgb angle property must exist");
+  assert.ok(css.includes("@keyframes premium-rgb-flow"), "rgb flow keyframes must exist");
+  for (const stop of ["34, 211, 238", "59, 130, 246", "139, 92, 246", "236, 72, 153", "239, 68, 68", "249, 115, 22", "34, 197, 94"]) {
+    assert.ok(css.includes(stop), `rgb gradient must flow through ${stop}`);
+  }
+  assert.ok(css.includes("var(--premium-rgb-border)"), "the dashboard must use the rgb border layer");
+  assert.ok(css.includes("premium-rgb-flow 14s"), "the rgb flow must run slow and smooth");
+  assert.ok(css.includes("var(--premium-rgb-shadow)"), "the matching glow must exist");
+});
+
 test("tab bar renders two premium rows: 8 primaries plus 5 below, never 13 squeezed slots", () => {
   const tsx = read("../components/studio-app.tsx");
   assert.ok(tsx.includes("PRIMARY_TABS: Tab[] = TABS.slice(0, 8)"), "8 primary tabs must derive from TABS");
@@ -54,6 +66,7 @@ test("tab bar renders two premium rows: 8 primaries plus 5 below, never 13 squee
   const css = read("../styles.css");
   assert.ok(css.includes(".feature-tabs-overflow"), "overflow row styling must exist");
   assert.ok(css.includes(".feature-tabs-row"), "row grid styling must exist");
+  assert.ok(!/\.feature-tab:nth-of-type\(\d+\)::before/.test(css), "stale per-slot css glyphs must be gone (single emoji span per tab)");
 });
 
 test("factory and train/island tabs are gone", () => {
