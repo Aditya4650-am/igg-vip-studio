@@ -334,13 +334,85 @@ function copyTutorialsFromFriend(own: string, friend: string) {
   return out;
 }
 
+export type TutorialIntent = "off" | "shown" | "done18";
+
+/**
+ * Rewrite one exact tutorial flag wherever it already exists, preserving
+ * each element's own encoding: Var bools use 0/1, DataElem bools use
+ * true/false, integer state machines use "18" for finished. Elements
+ * without a scalar value (array/dataStore blocks such as finishedTutorials
+ * or requests) are never touched — adding a value attribute there corrupts
+ * the structure. Missing names are never inserted.
+ */
+export function setTutorialFlag(xml: string, name: string, intent: TutorialIntent): string {
+  const n = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const varRe = new RegExp(`<Var\\b[^>]*?\\bname="${n}"[^>]*?>`, "gi");
+  xml = xml.replace(varRe, (tag) => {
+    if (!/\bv\s*=/i.test(tag)) return tag;
+    const t = /(\bt\s*=\s*")([^"]*)(")/i.exec(tag);
+    const type = (t?.[2] ?? "").toLowerCase();
+    if (type === "b" || type === "") {
+      const v = intent === "off" ? "0" : "1";
+      return tag.replace(/(\bv\s*=\s*")([^"]*)(")/i, `$1${v}$3`);
+    }
+    if (type === "i") {
+      const v = intent === "done18" ? "18" : intent === "off" ? "0" : "1";
+      return tag.replace(/(\bv\s*=\s*")([^"]*)(")/i, `$1${v}$3`);
+    }
+    return tag;
+  });
+  const deRe = new RegExp(`<DataElem\\b[^>]*?\\bname="${n}"[^>]*?>`, "gi");
+  xml = xml.replace(deRe, (tag) => {
+    if (!/\bvalue\s*=/i.test(tag)) return tag;
+    const ty = /(\btype\s*=\s*")([^"]*)(")/i.exec(tag);
+    const type = (ty?.[2] ?? "").toLowerCase();
+    if (type === "bool") {
+      const v = intent === "off" ? "false" : "true";
+      return tag.replace(/(\bvalue\s*=\s*")([^"]*)(")/i, `$1${v}$3`);
+    }
+    if ((type === "int" || type === "int64") && intent !== "shown") {
+      const v = intent === "done18" ? "18" : "0";
+      return tag.replace(/(\bvalue\s*=\s*")([^"]*)(")/i, `$1${v}$3`);
+    }
+    return tag;
+  });
+  return xml;
+}
+
 export function skipTutorials(xml: string, friend?: string) {
   let out = friend ? copyTutorialsFromFriend(xml, friend) : xml;
   for (const n of TUTORIAL_DONE) out = writeVar(out, n, "1");
   for (const n of TUTORIAL_OFF) out = writeVar(out, n, "0");
 
-  // Iterate over both Var and DataElem elements with flexible attribute order
-  // Match ALL formats: v="...", value="...", type="..." value="..."
+  // Safety net for tutorial flags outside the curated list (including
+  // future ones): only ever moves a flag toward its finished/hidden state,
+  // and only through setTutorialFlag, which keeps each element's own
+  // encoding and never touches valueless blocks.
+  const seen = new Set<string>();
+  const consider = (name: string, current: string) => {
+    if (seen.has(name) || !isTutorialName(name)) return;
+    seen.add(name);
+    const low = name.toLowerCase();
+    if (low.startsWith("needarrow") || TUTORIAL_OFF.includes(name) || name === "FirstGameLoad") {
+      out = setTutorialFlag(out, name, "off");
+      return;
+    }
+    if (STATE_SUFFIXES.some((suf) => name.endsWith(suf))) {
+      const num = Number(current);
+      if (!Number.isFinite(num) || num < 10) out = setTutorialFlag(out, name, "done18");
+      return;
+    }
+    if (
+      (current === "0" || current === "false") &&
+      /(showed|completed|finished|tutshowed)/i.test(low)
+    ) {
+      out = setTutorialFlag(out, name, "shown");
+      return;
+    }
+    if (name.startsWith("tip") && name.endsWith("TipSO")) {
+      out = setTutorialFlag(out, name, "shown");
+    }
+  };
   // Var/DataElem with name before value/v
   const re1 = /<(Var|DataElem)\b[^>]*\bname="([^"]+)"[^>]*\b(?:v|value)="([^"]*)"[^>]*>/gi;
   // Var/DataElem with value/v before name
@@ -353,454 +425,232 @@ export function skipTutorials(xml: string, friend?: string) {
   const re5 = /<DataElem\b[^>]*\bvalue="([^"]*)"[^>]*\btype="[^"]*"[^>]*\bname="([^"]+)"[^>]*>/gi;
   // DataElem with type="..." value="..." (type before name)
   const re6 = /<DataElem\b[^>]*\btype="[^"]*"[^>]*\bname="([^"]+)"[^>]*\bvalue="([^"]*)"[^>]*>/gi;
-  // Self-closing DataElem without value: <DataElem name="..." type="..."/>
-  const reNoVal = /<DataElem\b[^>]*\bname="([^"]+)"[^>]*\/>/gi;
-  
-  const processMatch = (name: string, current: string) => {
-    if (!isTutorialName(name)) return;
-    const target = tutorialTargetValue(name, current);
-    if (target !== current) out = writeVar(out, name, target);
-  };
 
-  for (const m of out.matchAll(re1)) processMatch(m[2]!, m[3]!);
-  for (const m of out.matchAll(re2)) processMatch(m[3]!, m[2]!);
-  for (const m of out.matchAll(re3)) processMatch(m[1]!, m[2]!);
-  for (const m of out.matchAll(re4)) processMatch(m[2]!, m[1]!);
-  for (const m of out.matchAll(re5)) processMatch(m[2]!, m[1]!);
-  for (const m of out.matchAll(re6)) processMatch(m[1]!, m[2]!);
-  
-  // Handle DataElem without value attribute (self-closing) - insert value if tutorial-related
-  for (const m of out.matchAll(reNoVal)) {
-    const name = m[1]!;
-    if (!isTutorialName(name)) continue;
-    const target = tutorialTargetValue(name, "");
-    const tagRe = new RegExp(`(<DataElem\\b[^>]*\\bname="${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*)/>`);
-    out = out.replace(tagRe, `$1 value="${target}"/>`);
-  }
+  for (const m of out.matchAll(re1)) consider(m[2]!, m[3]!);
+  for (const m of out.matchAll(re2)) consider(m[3]!, m[2]!);
+  for (const m of out.matchAll(re3)) consider(m[1]!, m[2]!);
+  for (const m of out.matchAll(re4)) consider(m[2]!, m[1]!);
+  for (const m of out.matchAll(re5)) consider(m[2]!, m[1]!);
+  for (const m of out.matchAll(re6)) consider(m[1]!, m[2]!);
 
-  const forced: Array<[string,string]> = [
-    ["tutorial_finished_step", "TutorialInFriendCity"],
-    ["tutorial_skip_CreateBread", "1"],
-    ["tutorial_state", "18"],
-    ["SellTutorial_state", "18"], ["SellTutorialsq0_state", "0"],
-    ["OrderBreadTutorial_state", "18"], ["OrderMilkTutorial_state", "18"],
-    ["PreOrderBreadTutorial_state", "18"], ["TutorialZooGetCompensation_state", "10"],
-    ["AfterCloudShopArrowTutorial_state", "18"], ["AfterCloudShopArrowHouseTutorial_state", "10"],
-    ["AfterCloudShopArrowFactoryTutorial_state", "10"], ["AfterCloudShopArrowCommunityTutorial_state", "10"],
-    ["LabTutor1_state", "18"], ["LabTutor2_state", "18"], ["LabTutor3_state", "18"], ["LabTutor4_state", "18"],
-    ["LabTutor1sq0_state", "0"], ["LabTutor2sq0_state", "0"], ["LabTutor3sq0_state", "0"], ["LabTutor4sq0_state", "0"],
-    ["FirstDiggingClayTutorial_state", "18"], ["FirstDiggingStoneTutorial_state", "18"],
-    ["FirstDiggingHardstoneTutorial_state", "18"], ["DiggingTutorial_state", "18"],
-    ["FirstDiggingClayTutorialsq0_state", "18"], ["FirstDiggingStoneTutorialsq0_state", "18"],
-    ["FirstDiggingHardstoneTutorialsq0_state", "18"], ["DiggingTutorialsq0_state", "0"],
-    ["BarnUpgradeTutorial_state", "18"], ["FactoryTutorial_state", "18"],
-    // Additional hand/arrow/guide/hint states that cause visual tutorials
-    ["HandTutorial_state", "18"], ["HandTutorialsq0_state", "0"], ["HandTutorialsq1_state", "0"],
-    ["GuideTutorial_state", "18"], ["GuideTutorialsq0_state", "0"], ["GuideTutorialsq1_state", "0"],
-    ["HintTutorial_state", "18"], ["HintTutorialsq0_state", "0"], ["HintTutorialsq1_state", "0"],
-    ["NeedShowHandOnMarket", "0"], ["NeedShowHandOnZoo", "0"], ["NeedShowHandOnTrain", "0"],
-    ["NeedShowHandOnAirport", "0"], ["NeedShowHandOnHarbor", "0"], ["NeedShowHandOnDigging", "0"],
-    ["NeedShowHandOnClan", "0"], ["NeedShowHandOnIsland", "0"],
-    ["ShowHandOnFactory", "0"], ["ShowHandOnBarn", "0"], ["ShowHandOnMarket", "0"],
-    ["ArrowTutorial_state", "18"], ["ArrowTutorialsq0_state", "0"],
-    ["TutorialHandShown", "1"], ["TutorialGuideShown", "1"], ["TutorialHintShown", "1"],
-    ["TapToContinueTutorialShown", "1"], ["SwipeTutorialShown", "1"],
-    // From user save - comprehensive tutorial states
-    ["WaitForArrowOnCow", "0"], ["WaitForArrowOnReadyField", "0"],
-    ["CHT_FactoryArrowMoving_waiting", "0"],
-    ["AppearFirstTrain_state", "18"], ["AppearFirstTrainsq0_state", "0"],
-    ["OpenTrains_state", "18"], ["OpenTrainssq0_state", "0"],
-    ["SendTheTrain_state", "18"], ["SendTheTrainsq0_state", "0"],
-    ["HurryUpTrain_state", "18"], ["HurryUpTrainsq0_state", "0"],
-    ["GetMaterials_state", "18"], ["GetMaterialssq0_state", "0"],
-    ["OpenFullFirstTime_state", "18"], ["OpenFullFirstTimesq0_state", "0"],
-    ["OpenFullSecondTime_state", "18"], ["OpenFullSecondTimesq0_state", "0"],
-    ["HarborFirstLook_state", "18"], ["HarborFirstLooksq0_state", "0"],
-    ["HarborFirstLook2_state", "18"], ["HarborFirstLook2sq0_state", "0"],
-    ["HarborBoatSend_state", "18"], ["HarborBoatSendsq0_state", "0"],
-    ["VisitAirTop_state", "18"], ["VisitAirTopsq0_state", "0"],
-    ["AirFirstLook_state", "18"], ["AirFirstLooksq0_state", "0"],
-    ["AirFirstLoadTrain_state", "18"], ["AirFirstLoadTrainsq0_state", "0"],
-    ["AirFirstLoadAllTrains_state", "18"], ["AirFirstLoadAllTrainssq0_state", "0"],
-    ["IslandsDailyChestStep1_state", "18"], ["IslandsDailyChestStep1sq0_state", "0"],
-    ["IslandsDailyChestStep2_state", "18"], ["IslandsDailyChestStep2sq0_state", "0"],
-    ["DailyLootbox_State", "1"],
-    ["AskForHelp_state", "18"], ["AskForHelpsq0_state", "0"],
-    ["AcceptHelp_state", "18"], ["AcceptHelpsq0_state", "0"],
-    ["HelpErnie2_state", "18"], ["HelpErnie2sq0_state", "0"],
-    ["HelpErnie3_state", "18"], ["HelpErnie3sq0_state", "0"],
-    ["DealerWelcome_state", "18"], ["DealerWelcomesq0_state", "0"],
-    ["SeasonTicketShowArrow", "0"],
-    ["FieldHintNeed", "0"],
-    ["BuildHouseTutorial_state", "18"], ["BuildHouseTutorialsq0_state", "18"],
-    ["PreNewFieldTutorial_state", "18"], ["PreNewFieldTutorialsq0_state", "18"],
-    ["BuildNewFieldTutorial_state", "18"], ["BuildNewFieldTutorialsq0_state", "18"],
-    ["PlaceCropfieldTutorial2_state", "10"], ["PlaceCropfieldTutorial2sq0_state", "0"],
-    ["PlaceCropfieldsTutorial_state", "10"], ["PlaceCropfieldsTutorialsq0_state", "18"],
-    ["PlaceHouseTutorial_state", "10"], ["PlaceHouseTutorialsq0_state", "18"],
-    ["SeedFieldTutorial_state", "18"], ["SeedFieldTutorialsq0_state", "18"],
-    ["HurryHouseTutorial_state", "18"], ["HurryHouseTutorialsq0_state", "18"],
-    ["GreenPinAccentTutorial_state", "10"], ["GreenPinAccentTutorialsq0_state", "18"],
-    ["ShowNeedHouses_state", "10"], ["ShowNeedHousessq0_state", "0"],
-    ["FarmFieldTutorial_state", "18"], ["FarmFieldTutorialsq0_state", "18"],
-    ["GrowFieldTutorial_state", "18"], ["GrowFieldTutorialsq0_state", "18"],
-    ["Seed6fieldsTutorial_state", "18"], ["Seed6fieldsTutorialsq0_state", "18"],
-    ["Crop6fieldsAgainTutorial_state", "18"], ["Crop6fieldsAgainTutorialsq0_state", "18"],
-    ["OpenCowpastureTutorialNew_state", "18"], ["OpenCowpastureTutorialNewsq0_state", "0"],
-    ["SelectMillTutorial_state", "10"], ["SelectMillTutorialsq0_state", "18"],
-    ["BuildMillTutorial_state", "10"], ["BuildMillTutorialsq0_state", "18"],
-    ["SelectHouseTutorial_state", "18"], ["SelectHouseTutorialsq0_state", "18"],
-    ["SelectBakeryTutorial_state", "18"], ["SelectBakeryTutorialsq0_state", "18"],
-    ["BuildBakeryTutorial_state", "18"], ["BuildBakeryTutorialsq0_state", "18"],
-    ["BuildBakery2Tutorial_state", "18"], ["BuildBakery2Tutorialsq0_state", "18"],
-    ["CreateBreadTutorial_state", "10"], ["CreateBreadTutorialsq0_state", "18"],
-    ["PreOrderBreadTutorial_state", "18"], ["PreOrderBreadTutorialsq0_state", "18"],
-    ["OrderBreadTutorial_state", "18"], ["OrderBreadTutorialsq0_state", "18"],
-    ["OrderMilkTutorial_state", "18"], ["OrderMilkTutorialsq0_state", "18"],
-    ["CreateMilkTutorial_state", "18"], ["CreateMilkTutorialsq0_state", "18"],
-    ["EndOfTimeBreadTutorial_state", "18"], ["EndOfTimeBreadTutorialsq0_state", "18"],
-    ["WaitingForExitLevelUp2_state", "15"], ["WaitingForExitLevelUp2sq0_state", "0"],
-    ["WaitingForExitLevelUp3_state", "15"], ["WaitingForExitLevelUp3sq0_state", "0"],
-    ["SendHeicopter_state", "15"], ["SendHeicoptersq0_state", "0"],
-    ["RenameCity_state", "15"], ["RenameCitysq0_state", "0"],
-    ["ValentinesDayStartTutorial_state", "10"], ["ValentinesDayStartTutorialsq0_state", "18"],
-    ["FriendshipDayStartTutorial_state", "10"], ["FriendshipDayStartTutorialsq0_state", "18"],
-    ["SwapProductsTutorial_state", "10"], ["SwapProductsTutorialsq0_state", "18"],
-    ["EventCenterTutorial_state", "10"], ["EventCenterTutorialsq0_state", "18"],
-    ["AvatarAfterUpdateTutorial_state", "10"], ["AvatarAfterUpdateTutorialsq0_state", "18"],
-    ["AvatarOpenCondTutorial_state", "10"], ["AvatarOpenCondTutorialsq0_state", "18"],
-    ["AvatarReminderTutorial_state", "10"], ["AvatarReminderTutorialsq0_state", "18"],
-    ["BuildCommunityTutorial_state", "10"], ["BuildCommunityTutorialsq0_state", "18"],
-    ["TutorialZooGetCompensation_state", "10"], ["TutorialZooGetCompensationsq0_state", "0"],
-    ["ExtractClayVideoTutorial_state", "18"], ["ExtractClayVideoTutorialsq0_state", "18"],
-    ["DestroyClayTutorial_state", "18"], ["DestroyClayTutorialsq0_state", "18"],
-    ["DestroyClay2Tutorial_state", "18"], ["DestroyClay2Tutorialsq0_state", "18"],
-    ["TutorialCloudDelaymessage_build_milkfactory_tutorial", "30"],
-    ["TutorialCloudDelaymessage_houses_tutorial", "30"],
-    ["TutorialCloudDelaymessage_build_store_tutorial", "30"],
-    ["TutorialCloudDelaymessage_community_ready_tutorial", "0"],
-    ["TutorialCloudDelaymessage_hungry_cows_tutorial", "31"],
-    ["TutorialCloudDelaymessage_free_field_tutorial", "30"],
-    ["TutorialCloudDelaymessage_full_field_tutorial", "60"],
-    ["TutorialCloudShowedAll", "1"],
-    ["TimeForExpedReturnTutorial", "0"],
-    ["ExpeditionEnergyTooltipLastValue", "200"],
-    ["tutorial_current_msg", "Does not exist!"],
-    ["WaitTutorialEnd", "0"],
-    ["WasTutorialUnlock", "1"],
-    ["NeedNotifications", "1"],
-    ["NeedPrintFilteredString", "1"],
-    ["needHouseIndicatorRecalc", "0"],
-    ["needGenDecks", "1"],
-    ["facebookActionShowTime", "2"],
-    ["facebookActionState", "show"],
-    ["GameAdvisory.LastShownTimeInGame", "0"],
-    ["Playable_Showed_On_Level", "0"],
-    ["Playable_Showed_On_Session", "0"],
-    ["ErnieBalloonsTapped", "0"],
-    ["ShowOnline", "1"],
-    ["GlobalShowLootboxChances", "1"],
-    ["HelicTutorWas", "1"],
-    ["IslandsMapShowed", "1"],
-    ["NewBankShowed", "1"],
-    ["NewPlayerProfileShowed", "1"],
-    ["OldPlayersDiggingTutShowed", "1"],
-    ["RepairHarborTutShowed", "1"],
-    ["FirstShowCascadePromoWindowForExpeditionStatus", "0"],
-    ["tip5TipSO", "1"], ["tip8TipSO", "1"], ["tip11TipSO", "1"], ["tip12TipSO", "1"],
-    ["tip13TipSO", "1"], ["tip15TipSO", "1"], ["tip23TipSO", "1"], ["tip29TipSO", "1"],
-    ["tip2TipSO", "1"], ["tip4TipSO", "1"],
-    ["exp_tutorial_tablet_rewards_banner_passed", "1"],
-    ["exp_tutorial_tablet_rewards_passed", "1"],
-    ["exp_tutorial_tablet_passed", "1"],
-    ["ExpedCanShowSTPanels", "1"],
-    ["Tutorial_SuperLightning_PlayBtn_Shown", "1"],
-    ["Tutorial:IslandsDailyChest:CountVisit", "1"],
-    ["IslandsTutor_FirstOpen_Step2", "1"],
-    ["IslandsTutor_FirstOpen_Step3", "1"],
-    ["DN_Tutor1_Completed", "1"], ["DN_Tutor1_Promo_Completed", "1"],
-    ["DN_Tutor2_Completed", "1"], ["DN_Tutor3_Completed", "1"],
-    ["DN_Tutor3_Started", "1"], ["DN_Tutor4_Completed", "1"],
-    ["DN_Tutor5_Completed", "1"], ["DN_Tutor6_Completed", "1"],
-    ["DN_Tutor6_Started", "1"],
-    ["showNewOfferSign", "0"],
-    ["CherylTutorialLastEnable", "1"],
-    ["IndustryAcademyTutShowed", "1"],
-    ["tutorialAllowBigStoreBages", "1"],
-    ["QuestsBookTutorialShowed", "1"],
-    ["BuildAcademyTutShowed", "1"],
-    ["DealerShowedOnce", "1"],
-    ["DealerAvailableTutShowed", "1"],
-    ["FirstDiggingClayShowed", "1"],
-    ["RepairDiggingTutShowed", "1"],
-    ["HarborTutorShowed", "1"],
-    ["HarborTutor2Showed", "1"],
-    ["NeedArrowOnHarbor", "0"],
-    ["NeedArrowOnMarket", "0"],
-    ["NeedArrowOnDigging", "0"],
-    ["NeedArrowOnAir", "0"],
-    ["AirTutorialShowed", "1"],
-    ["StartTutorialFinished", "1"],
-    ["SecondStartTutorialFinished", "1"],
-    ["SecondStartTutorialShowed", "1"],
-    ["TrainTutorialShowed", "1"],
-    ["wasTrainTutorial", "1"],
-    ["CommTutorialShowed", "1"],
-    ["DiggingTutorShowed", "1"],
-    ["AirTutorShowed", "1"],
-    ["NeedHousesTutShowed", "1"],
-    ["TutorialEditGroundShowed", "1"],
-    ["TutorialEditGroundTipShowed", "1"],
-    ["FirstDiggingRoomShowed", "1"],
-    ["FirstDiggingStoneShowed", "1"],
-    ["FirstDiggingHardstoneShowed", "1"],
-    ["BuildSmelteryTutShowed", "1"],
-    ["SeasonTicketTutorShowed", "1"],
-    ["CityM3FirstTutorialCompleted", "1"],
-    ["MayorsDutiesTutorialCompleted", "1"],
-    ["MayorsBreakTutorialCompleted", "1"],
-    ["CascadeEventMergeTutorialShowed", "1"],
-    ["ClanCongratShowed", "1"],
-    ["ClanInviteShowed", "1"],
-    ["museumThanksShowed", "1"],
-    ["museumUpdateShowed", "1"],
-    ["appsFlyerTutorialFinishedTracked", "1"],
-    ["TutorialTrainGenerated", "1"],
-    ["RoomsCommonTutorialShowed", "1"],
-    ["RoomOffice_Tutorial_Friend_Showed", "1"],
-    ["Room_Tutorial_CityHall_OldRoomBecomeAvailable_Shown", "1"],
-    ["TutorialCloudHousesShowed", "1"],
-    ["TutorialCloudMilkfactoryShowed", "1"],
-    ["TutorialCloudStore101Showed", "1"],
-    ["TutorialCloudCountmessage_houses_tutorial", "1"],
-    ["TutorialCloudCountmessage_build_milkfactory_tutorial", "1"],
-    ["TutorialCloudCountmessage_build_store_tutorial", "1"],
-    ["TutorialCloudCountmessage_hungry_cows_tutorial", "1"],
-    ["TutorialCloudCountmessage_sell_products_tutorial", "1"],
-    ["TutorialCloudCountmessage_community_ready_tutorial", "1"],
-    ["TutorialCloudCountmessage_free_field_tutorial", "1"],
-    ["TutorialEventRegataTaskShow", "1"],
-    ["Tutorial_SP_DiggingPremium", "1"],
-    ["Tutorial.HelpedInNewWindow", "1"],
-    ["TutorialZooShowed", "1"],
-    ["TutorialZooStartShowed", "1"],
-    ["TutorialZooDupCardShowed", "1"],
-    ["ZooRepairShowed", "1"],
-    ["ZooRepairReminderShowed", "1"],
-    ["ZooVisited", "1"],
-    ["MarketVisited", "1"],
-    ["wasMarketOffer", "1"],
-    ["RefuseOrderTutShowed", "1"],
-    ["TutorialDealerFreeDayNotice", "1"],
-    ["TutorialRegataSeasonStoreShowed", "1"],
-    ["flowerShopIntro", "1"],
-    ["NeedArrowOnZoo", "0"],
-    ["NeedArrowOnYachtPier", "0"],
-    ["NeedArrowOnTrain", "0"],
-    ["NeedArrowOnClan", "0"],
-    ["NeedArrowOnShield", "0"],
-    ["NeedOpenEventCenterPanelAfterRestartGame", "0"],
-    ["warehouse_full_tutorial", "0"],
-    ["warehouse_full_tutorial_second", "0"],
-    ["DealerNeedTutorialArrow", "0"],
-    ["TapDealerAfterTutorial", "0"],
-    ["NeedShowDiggingFirecracker", "0"],
-    ["NeedShowDiggingMissTools", "0"],
-    ["FirstGameLoad", "0"],
-    ["FirstDiggingClayShowed", "1"],
-    ["RepairDiggingTutShowed", "1"],
-    // DataElem tutorial vars from CascadeEventMine, CascadeEventMerge, etc. (mining, cascade, side quests, etc.)
-    ["TUTM3_CascadeEvent", "4"], ["TUTM3_CascadeEvent_2", "4"],
-    ["Blocker_Tutorial_part1", "true"], ["Blocker_Tutorial_part2", "true"],
-    ["Chest_Tutorial", "true"], ["ClusterBlocker_Tutorial", "true"],
-    ["ClusterBlocker_Tutorial_part1", "true"], ["ClusterBlocker_Tutorial_part2", "true"],
-    ["ClusterObject_Tutorial", "true"],
-    ["Craft_TutorialComplete", "true"], ["Craft_Tutorial_Active", "false"], ["Craft_Tutorial_part1", "true"], ["Craft_Tutorial_part2", "true"],
-    ["EXP_EnergyTutorialComplete", "true"], ["EXP_EnergyTutorialStart", "false"], ["EXP_ForceTransitionInfiniteState", "false"],
-    ["EXP_FortressSkinTutorial_part1", "true"], ["EXP_FortressSkinTutorial_part2", "true"],
-    ["EXP_MainQuestTooltipTutorial", "true"], ["EXP_PlayBtnTutorialComplete", "true"],
-    ["EXP_QuestNode_TutorialStart", "true"], ["EXP_QuestNode_Tutorial_Allow", "true"], ["EXP_SQ_Tutorial_Allow", "true"],
-    ["EXP_ShowTutorialOldPlayer", "true"], ["FirstShowSideQuestInfinite_Tutorial", "true"],
-    ["Gate_Tutorial", "true"], ["InfChest_Tutorial", "true"],
-    ["InfSQ_Tutorial_Active", "true"], ["InfSQ_Tutorial_part1", "true"], ["InfSQ_Tutorial_part2", "true"],
-    ["InfSideQuest_Tutorial", "true"],
-    ["QuestHUD_Tutorial", "true"], ["QuestInfiniteWindow_Tutorial", "true"],
-    ["QuestNode_TutorialComplete", "true"], ["QuestNode_Tutorial_Active", "false"],
-    ["QuestNode_Tutorial_part1", "true"], ["QuestNode_Tutorial_part3", "true"],
-    ["QuestWindow_Tutorial", "true"],
-    ["SQ_Tutorial_Active", "true"], ["SQ_Tutorial_part1", "true"], ["SQ_Tutorial_part2", "true"],
-    ["ShouldShowEnergyShortageTutorial", "false"], ["ShouldShowEnergyUnder100Tutorial", "false"],
-    ["ShowEnergyShortageTutor", "true"], ["SideQuestHUD_Tutorial", "true"],
-    ["SideQuestInfiniteWindow_Tutorial", "true"], ["SideQuestNotif_Tutorial", "true"],
-    ["SideQuest_Tutorial", "true"],
-    ["Tablet_TutorialComplete", "true"], ["Tablet_Tutorial_Active", "false"],
-    ["Tablet_Tutorial_part1", "true"], ["Tablet_Tutorial_part2", "true"],
-    ["Tablet_Tutorial_part3", "true"], ["Tablet_Tutorial_part4", "true"],
-    ["Was_QuestHUD_Tutorial_Skipped", "true"],
-    ["tutorialActive", "false"],
-    ["completedTutorials", "[\"all\"]"], ["tutorAmplitudeFinished", "true"],
-    ["completeTutorial", "true"], ["currentTutorialStage", "99"],
-    ["tutorInactiveScored", "true"], ["tutorialPlayerScores", "[]"],
-    ["beforeOpenTutorShown", "true"], ["ernieTutorials", "[]"],
-    ["needRestoreTutorial", "false"], ["tutorialTaskGenerated", "true"],
-    ["finishedTutorials", "[\"all\"]"],
-    // CascadeEventMine specific (mining tutorial)
-    ["cascadeEventWindowShowed", "true"], ["lastSeenScore", "0"], ["scoreRemainder", "0"],
-    // CascadeEventMerge, Expedition, Match3, Redesign
-    ["tutorialActive", "false"], ["cascadeEventWindowShowed", "true"],
-    ["tutorAmplitudeFinished", "true"],
-    ["EXP_EnergyTutorialComplete", "true"], ["EXP_EnergyTutorialStart", "false"],
-    ["EXP_PlayBtnTutorialComplete", "true"],
-    ["EXP_QuestNode_Tutorial_Allow", "true"], ["EXP_SQ_Tutorial_Allow", "true"],
-    ["EXP_ShowTutorialOldPlayer", "true"],
-    ["Gate_Tutorial", "true"], ["InfChest_Tutorial", "true"],
-    ["InfSQ_Tutorial_Active", "true"], ["InfSQ_Tutorial_part1", "true"], ["InfSQ_Tutorial_part2", "true"],
-    ["InfSideQuest_Tutorial", "true"],
-    ["QuestHUD_Tutorial", "true"], ["QuestInfiniteWindow_Tutorial", "true"],
-    ["QuestNode_TutorialComplete", "true"], ["QuestNode_Tutorial_Active", "false"],
-    ["QuestNode_Tutorial_part1", "true"], ["QuestNode_Tutorial_part3", "true"],
-    ["QuestWindow_Tutorial", "true"],
-    ["SQ_Tutorial_Active", "true"], ["SQ_Tutorial_part1", "true"], ["SQ_Tutorial_part2", "true"],
-    ["ShouldShowEnergyShortageTutorial", "false"], ["ShouldShowEnergyUnder100Tutorial", "false"],
-    ["ShowEnergyShortageTutor", "true"],
-    ["SideQuestHUD_Tutorial", "true"], ["SideQuestInfiniteWindow_Tutorial", "true"],
-    ["SideQuestNotif_Tutorial", "true"], ["SideQuest_Tutorial", "true"],
-    ["Tablet_TutorialComplete", "true"], ["Tablet_Tutorial_Active", "false"],
-    ["Tablet_Tutorial_part1", "true"], ["Tablet_Tutorial_part2", "true"],
-    ["Tablet_Tutorial_part3", "true"], ["Tablet_Tutorial_part4", "true"],
-    ["Was_QuestHUD_Tutorial_Skipped", "true"],
-    ["cascadeEventWindowShowed", "true"],
-    // TutorialManagerComponent (central tutorial controller)
-    ["enabled", "false"], ["finishedTutorials", "[\"all\"]"], ["vars", "[]"],
-    // State machine tutorial control vars
-    ["currentState", "Disabled"], ["statesGraph", "{}"], ["states", "[]"], ["state", "None"],
-    ["currentStateSegment", "Normal"], ["currentTutorialStage", "99"],
-    ["tutorialActive", "false"], ["tutorialPlayerScores", "[]"],
-    ["tutorInactiveScored", "true"], ["tutorAmplitudeFinished", "true"],
-    ["completeTutorial", "true"], ["beforeOpenTutorShown", "true"],
-    ["ernieTutorials", "[]"], ["needRestoreTutorial", "false"],
-    ["tutorialTaskGenerated", "true"], ["finishedTutorials", "[\"all\"]"],
-    ["Was_QuestHUD_Tutorial_Skipped", "true"],
-    // CascadeEventMine/Expedition/Match3/Merge/Redesign tutorial vars
-    ["cascadeEventWindowShowed", "true"], ["lastSeenScore", "0"], ["scoreRemainder", "0"],
-    ["scoreToWin", "0"], ["lastUpdatedPlayerScore", "0"], ["playerScoreTime", "0"],
-    ["totalPlayerScore", "0"], ["lastOpponentScore", "0"], ["lastPlayerScore", "0"],
-    ["opponentScoresTimer", "[]"], ["targetOpponentScore", "0"],
-    ["cheatExtraScore", "0"], ["score", "0"], ["scoreEpochTime", "0"],
-    ["scoreTime", "0"], ["scoreCoef", "1"], ["scoreIntervals", "[]"],
-    ["randomScore", "0"], ["lastScoreSeen", "false"], ["saveScoreToWin", "0"],
-    ["absoluteScore", "0"], ["addedRateBeforeStart", "0"], ["beforeStart", "false"],
-    ["pendingLevelScore", "[]"], ["pendingScore", "[]"], ["isScoreInited", "true"],
-    ["windowShowedForStateMap", "[]"], ["windowSkippedForStateMap", "[]"],
-    ["finalResultState", "0"], ["hasLastGetPlayersStatesTime", "true"],
-    ["lastGetPlayersStatesTime", "0"], ["partnerInviteReminderState", "0"],
-    ["expeditionXStateMachineState", "Inactive"], ["stateMachine", "{}"],
-    ["currentState", "Disabled"], ["states", "[]"], ["state", "None"],
-    ["qualification", "Disabled"], ["inprogress", "Disabled"], ["disabled", "Disabled"],
-    ["active", "Disabled"], ["idle", "Disabled"], ["waitregistration", "Disabled"],
-    ["waitregistrationstate", "Disabled"], ["weeklycontest", "Disabled"],
-    ["claimreward", "Disabled"], ["localscore", "0"], ["playerscore", "0"],
-    ["seenscore", "0"], ["prevtotalscore", "0"], ["contestclient", "{}"],
-    ["contestinfo", "{}"], ["contestcounter", "0"], ["countserverfails", "0"],
-    ["currentposition", "0"], ["entrypoint", ""], ["eventduration", "0"],
-    ["finishreason", ""], ["idcurrstartcondition", ""], ["idusedstartconditions", "[]"],
-    ["isprogressupdated", "false"], ["laststarttimestamp", "0"], ["lastupdatedplayerscore", "0"],
-    ["lastwin", "false"], ["launchindex", "0"], ["newgameboostersparticipation", "true"],
-    ["playerscoretime", "0"], ["playerslimit", "0"], ["prevprogress", "0"],
-    ["previouscontestid", ""], ["savescoretowin", "0"], ["totalplayerscore", "0"],
-    // Quest/SideQuest/Expedition tutorial state vars
-    ["mainWindowShowed", "false"], ["promoWindowShowed", "false"],
-    ["raceInfoPanelShowed", "false"], ["restartWindowShowed", "false"],
-    ["mainWindowFirstShow", "false"], ["mainWindowFirstShowRedesign", "false"],
-    ["promoWindowFirstShow", "false"], ["promoWindowFirstShown", "false"],
-    ["firstPromoWindowShown", "false"], ["expectFirstShowExpedition", "false"],
-    ["expectShowPromo", "false"], ["isPromoShowed", "true"],
-    ["mainWindowShown", "false"], ["animationShowed", "false"],
-    ["chestAnimationShowed", "false"], ["rewardWindowShown", "false"],
-    ["shownRewardTransition", "false"], ["tooltipShownUpToStage", "0"],
-    ["toolTipShown", "false"], ["TooltipShown", "false"], ["TooltipAutoShowComponent", "{}"],
-    ["TooltipAutoShowComponent_DN", "{}"], ["TooltipAutoShowComponent_TJ", "{}"],
-    ["TooltipAutoShowEmitterComponent", "{}"], ["TrainJourneyTooltipAutoShow", "{}"],
-    ["FinalRewardTooltipAutoShow", "{}"], ["TeamRewardTooltipAutoShow", "{}"],
-    ["DragonNestTooltipAutoShow", "{}"], ["requests", "[]"],
-    // Expedition tutorial vars
-    ["EXP_EnergyTutorialComplete", "true"], ["EXP_EnergyTutorialStart", "false"],
-    ["EXP_ForceTransitionInfiniteState", "false"], ["EXP_PlayBtnTutorialComplete", "true"],
-    ["EXP_QuestNode_TutorialStart", "true"], ["EXP_QuestNode_Tutorial_Allow", "true"],
-    ["EXP_SQ_Tutorial_Allow", "true"], ["EXP_ShowTutorialOldPlayer", "true"],
-    ["EXP_FortressSkinTutorial_part1", "true"], ["EXP_FortressSkinTutorial_part2", "true"],
-    ["EXP_MainQuestTooltipTutorial", "true"], ["EXP_QuestNode_Tutorial_Allow", "true"],
-    ["EXP_SQ_Tutorial_Allow", "true"], ["EXP_ShowTutorialOldPlayer", "true"],
-    // Quest tutorial vars
-    ["QuestHUD_Tutorial", "true"], ["QuestInfiniteWindow_Tutorial", "true"],
-    ["QuestNode_TutorialComplete", "true"], ["QuestNode_Tutorial_Active", "false"],
-    ["QuestNode_Tutorial_part1", "true"], ["QuestNode_Tutorial_part3", "true"],
-    ["QuestWindow_Tutorial", "true"], ["QuestNodeForHint", "{}"],
-    ["QuestNodeLastTotemForHint", "{}"], ["QuestPaths", "[]"],
-    ["QuestTotemReplicaCounter", "0"], ["QuestVarContext", "{}"],
-    ["QuestActions", "[]"], ["QuestEntities", "[]"], ["QuestNodeEntities", "[]"],
-    // SideQuest tutorial vars
-    ["SQ_Tutorial_Active", "true"], ["SQ_Tutorial_part1", "true"], ["SQ_Tutorial_part2", "true"],
-    ["InfSQ_Tutorial_Active", "true"], ["InfSQ_Tutorial_part1", "true"], ["InfSQ_Tutorial_part2", "true"],
-    ["InfSideQuest_Tutorial", "true"], ["SideQuestHUD_Tutorial", "true"],
-    ["SideQuestInfiniteWindow_Tutorial", "true"], ["SideQuestNotif_Tutorial", "true"],
-    ["SideQuest_Tutorial", "true"], ["FirstShowSideQuestInfinite_Tutorial", "true"],
-    ["ShouldShowEnergyShortageTutorial", "false"], ["ShouldShowEnergyUnder100Tutorial", "false"],
-    ["ShowEnergyShortageTutor", "true"], ["SideQuestHUD_Tutorial", "true"],
-    // Tablet tutorial vars
-    ["Tablet_TutorialComplete", "true"], ["Tablet_Tutorial_Active", "false"],
-    ["Tablet_Tutorial_part1", "true"], ["Tablet_Tutorial_part2", "true"],
-    ["Tablet_Tutorial_part3", "true"], ["Tablet_Tutorial_part4", "true"],
-    // Craft/Cluster/Blocker/Chest/Gate tutorial vars
-    ["Craft_TutorialComplete", "true"], ["Craft_Tutorial_Active", "false"],
-    ["Craft_Tutorial_part1", "true"], ["Craft_Tutorial_part2", "true"],
-    ["ClusterBlocker_Tutorial", "true"], ["ClusterBlocker_Tutorial_part1", "true"],
-    ["ClusterBlocker_Tutorial_part2", "true"], ["ClusterObject_Tutorial", "true"],
-    ["Chest_Tutorial", "true"], ["Gate_Tutorial", "true"],
-    ["InfChest_Tutorial", "true"], ["Blocker_Tutorial_part1", "true"],
-    ["Blocker_Tutorial_part2", "true"],
-    // TUTM3 Cascade vars
-    ["TUTM3_CascadeEvent", "4"], ["TUTM3_CascadeEvent_2", "4"],
-    // Completed/finished tracking
-    ["completedTutorials", "[\"all\"]"], ["finishedTutorials", "[\"all\"]"],
-    ["completedChapters", "[]"], ["completedLevel", "0"], ["completedQuests", "[]"],
-    ["completedQuestsCount", "0"], ["completedQuestsId", "[]"],
-    ["completedInfiniteChapters", "[]"], ["completedSets", "[]"],
-    ["isAllQuestsFinished", "true"], ["isMainQuestsFinished", "true"],
-    ["isPostStoryQuestsFinished", "true"], ["isSideQuestsFinished", "true"],
-    ["isFeatureCompleted", "true"], ["isLastStage", "true"],
-    ["isRepeatingStage", "false"], ["isRepeatingStageForRewardWindow", "false"],
-    ["levelsCompleted", "0"], ["levelsCompletedFirstTry", "0"],
-    ["stagesCompleted", "0"], ["stagesCompletedFirstTry", "0"],
-    ["currentStage", "99"], ["currentStep", "99"], ["previousStep", "99"],
-    ["lastCompletedChapterId", ""], ["lastCompletedQuestId", ""],
-    ["lastCompletedQuestChapterType", ""], ["lastContiniouslyCompletedQuest", ""],
-    ["lastStageCompletedTime", "0"], ["lastStageFinished", "true"],
-    ["lastStageWon", "true"], ["lastPassStageWithTimedEntity", "true"],
-    ["lastTrackedPromoStage", "0"], ["lastTrackedStage", "0"],
-    ["lastTrackedStartedStage", "0"], ["lastSeenStage", "0"],
-    ["lastShowedStep", "0"],
-    // Tutorial manager component
-    ["tutorialManager", "{\"enabled\":false,\"finishedTutorials\":[\"all\"],\"vars\":[]}"],
-    // Mining/digging/cascade tutorial control vars (critical for preventing mining tutorial)
-    ["DiggingVisited", "1"], ["diggingFullCompleted", "1"], ["ExpedLockRewardCascadeWindow", "1"],
-    ["GenerateDiggingBeautys", "0"], ["LastLaunchId_CascadeEventExpedition", "0"],
-    ["LastLaunchId_CascadeEventMerge", "0"], ["OnEventStop_CascadeEventExpedition", "0"],
-    ["OnEventStop_CascadeEventMerge", "0"], ["cascadeRewardsToShow", "[]"],
-    ["diggingChunk", "0"], ["diggingToolsCount", "[]"],
-    ["m3_cascade_points_for_moves", "0"], ["m3_cascade_points_total", "0"],
-    ["DiggingReady", "1"], ["DiggingRegeneratedForMuseum", "1"],
-    ["NeedShowDiggingFirecracker", "0"], ["NeedShowDiggingMissTools", "0"],
-    ["NeedShowHandOnDigging", "0"], ["NeedArrowOnDigging", "0"],
-    ["FirstDiggingClayShowed", "1"], ["FirstDiggingStoneShowed", "1"],
-    ["FirstDiggingHardstoneShowed", "1"], ["FirstDiggingRoomShowed", "1"],
-    ["OldPlayersDiggingTutShowed", "1"], ["RepairDiggingTutShowed", "1"],
-    ["DiggingTutorShowed", "1"], ["Tutorial_SP_DiggingPremium", "1"],
-    ["FirstShowCascadePromoWindowForExpeditionStatus", "0"],
+  // [name, intent]: off = hidden/inactive (false/0), shown = already
+  // shown/finished (true/1), done18 = finished state machine ("18").
+  // Every entry is an exact tutorial flag from real saves. Generic engine
+  // names (score, state, enabled, currentState, ...) are deliberately
+  // absent: each occurs dozens of times in unrelated event, race and
+  // score structures and must never be rewritten globally. Array/dataStore
+  // elements (finishedTutorials, requests, ...) carry children rather than
+  // scalar values, so the writer leaves them untouched.
+  const FORCED_TUTORIALS: Array<[string, TutorialIntent]> = [
+    // --- main tutorial state machines: 10/15 = in progress, 18 = done ---
+    ["tutorial_state", "done18"],
+    ["SellTutorial_state", "done18"],
+    ["OrderBreadTutorial_state", "done18"],
+    ["OrderMilkTutorial_state", "done18"],
+    ["PreOrderBreadTutorial_state", "done18"],
+    ["AfterCloudShopArrowTutorial_state", "done18"],
+    ["AfterCloudShopArrowHouseTutorial_state", "done18"],
+    ["AfterCloudShopArrowFactoryTutorial_state", "done18"],
+    ["AfterCloudShopArrowCommunityTutorial_state", "done18"],
+    ["LabTutor1_state", "done18"],
+    ["LabTutor2_state", "done18"],
+    ["LabTutor3_state", "done18"],
+    ["LabTutor4_state", "done18"],
+    ["FirstDiggingClayTutorial_state", "done18"],
+    ["FirstDiggingStoneTutorial_state", "done18"],
+    ["FirstDiggingHardstoneTutorial_state", "done18"],
+    ["DiggingTutorial_state", "done18"],
+    ["BarnUpgradeTutorial_state", "done18"],
+    ["FactoryTutorial_state", "done18"],
+    ["HandTutorial_state", "done18"],
+    ["GuideTutorial_state", "done18"],
+    ["HintTutorial_state", "done18"],
+    ["ArrowTutorial_state", "done18"],
+    ["AppearFirstTrain_state", "done18"],
+    ["OpenTrains_state", "done18"],
+    ["SendTheTrain_state", "done18"],
+    ["HurryUpTrain_state", "done18"],
+    ["GetMaterials_state", "done18"],
+    ["OpenFullFirstTime_state", "done18"],
+    ["OpenFullSecondTime_state", "done18"],
+    ["HarborFirstLook_state", "done18"],
+    ["HarborFirstLook2_state", "done18"],
+    ["HarborBoatSend_state", "done18"],
+    ["VisitAirTop_state", "done18"],
+    ["AirFirstLook_state", "done18"],
+    ["AirFirstLoadTrain_state", "done18"],
+    ["AirFirstLoadAllTrains_state", "done18"],
+    ["IslandsDailyChestStep1_state", "done18"],
+    ["IslandsDailyChestStep2_state", "done18"],
+    ["AskForHelp_state", "done18"],
+    ["AcceptHelp_state", "done18"],
+    ["HelpErnie2_state", "done18"],
+    ["HelpErnie3_state", "done18"],
+    ["DealerWelcome_state", "done18"],
+    ["BuildHouseTutorial_state", "done18"],
+    ["PreNewFieldTutorial_state", "done18"],
+    ["BuildNewFieldTutorial_state", "done18"],
+    ["PlaceCropfieldTutorial2_state", "done18"],
+    ["PlaceCropfieldsTutorial_state", "done18"],
+    ["PlaceHouseTutorial_state", "done18"],
+    ["SeedFieldTutorial_state", "done18"],
+    ["HurryHouseTutorial_state", "done18"],
+    ["GreenPinAccentTutorial_state", "done18"],
+    ["ShowNeedHouses_state", "done18"],
+    ["FarmFieldTutorial_state", "done18"],
+    ["GrowFieldTutorial_state", "done18"],
+    ["Seed6fieldsTutorial_state", "done18"],
+    ["Crop6fieldsAgainTutorial_state", "done18"],
+    ["OpenCowpastureTutorialNew_state", "done18"],
+    ["SelectMillTutorial_state", "done18"],
+    ["BuildMillTutorial_state", "done18"],
+    ["SelectHouseTutorial_state", "done18"],
+    ["SelectBakeryTutorial_state", "done18"],
+    ["BuildBakeryTutorial_state", "done18"],
+    ["BuildBakery2Tutorial_state", "done18"],
+    ["CreateBreadTutorial_state", "done18"],
+    ["PreOrderBreadTutorial_state", "done18"],
+    ["OrderBreadTutorial_state", "done18"],
+    ["OrderMilkTutorial_state", "done18"],
+    ["CreateMilkTutorial_state", "done18"],
+    ["EndOfTimeBreadTutorial_state", "done18"],
+    ["WaitingForExitLevelUp2_state", "done18"],
+    ["WaitingForExitLevelUp3_state", "done18"],
+    ["SendHeicopter_state", "done18"],
+    ["RenameCity_state", "done18"],
+    ["ValentinesDayStartTutorial_state", "done18"],
+    ["FriendshipDayStartTutorial_state", "done18"],
+    ["SwapProductsTutorial_state", "done18"],
+    ["EventCenterTutorial_state", "done18"],
+    ["AvatarAfterUpdateTutorial_state", "done18"],
+    ["AvatarOpenCondTutorial_state", "done18"],
+    ["AvatarReminderTutorial_state", "done18"],
+    ["BuildCommunityTutorial_state", "done18"],
+    ["TutorialZooGetCompensation_state", "done18"],
+    ["ExtractClayVideoTutorial_state", "done18"],
+    ["DestroyClayTutorial_state", "done18"],
+    ["DestroyClay2Tutorial_state", "done18"],
+    // --- arrows / hands / wait flags: hide ---
+    ["NeedArrowOnMarket", "off"],
+    ["NeedArrowOnZoo", "off"],
+    ["NeedArrowOnYachtPier", "off"],
+    ["NeedArrowOnDigging", "off"],
+    ["NeedArrowOnHarbor", "off"],
+    ["NeedArrowOnTrain", "off"],
+    ["NeedArrowOnAir", "off"],
+    ["NeedArrowOnClan", "off"],
+    ["NeedArrowOnShield", "off"],
+    ["NeedOpenEventCenterPanelAfterRestartGame", "off"],
+    ["warehouse_full_tutorial", "off"],
+    ["warehouse_full_tutorial_second", "off"],
+    ["DealerNeedTutorialArrow", "off"],
+    ["TapDealerAfterTutorial", "off"],
+    ["NeedShowDiggingFirecracker", "off"],
+    ["NeedShowDiggingMissTools", "off"],
+    ["NeedShowHandOnMarket", "off"],
+    ["NeedShowHandOnZoo", "off"],
+    ["NeedShowHandOnTrain", "off"],
+    ["NeedShowHandOnAirport", "off"],
+    ["NeedShowHandOnHarbor", "off"],
+    ["NeedShowHandOnDigging", "off"],
+    ["NeedShowHandOnClan", "off"],
+    ["NeedShowHandOnIsland", "off"],
+    ["ShowHandOnFactory", "off"],
+    ["ShowHandOnBarn", "off"],
+    ["ShowHandOnMarket", "off"],
+    ["FirstGameLoad", "off"],
+    ["WaitForArrowOnCow", "off"],
+    ["WaitForArrowOnReadyField", "off"],
+    ["WaitForFirstHarvest", "off"],
+    ["WaitForFirstFeed", "off"],
+    ["WaitForFirstFactoryOrder", "off"],
+    ["CHT_FactoryArrowMoving_waiting", "off"],
+    ["SeasonTicketShowArrow", "off"],
+    ["FieldHintNeed", "off"],
+    ["showNewOfferSign", "off"],
+    ["GenerateDiggingBeautys", "off"],
+    ["FirstShowCascadePromoWindowForExpeditionStatus", "off"],
+    ["WaitTutorialEnd", "off"],
+    // --- expedition / quest / sidequest / tablet step flags: false = idle ---
+    // A finished step set reads all-false in real saves (e.g. Craft_Tutorial_*).
+    ["Tablet_Tutorial_Active", "off"],
+    ["Tablet_Tutorial_part1", "off"],
+    ["Tablet_Tutorial_part2", "off"],
+    ["Tablet_Tutorial_part3", "off"],
+    ["Tablet_Tutorial_part4", "off"],
+    ["SQ_Tutorial_Active", "off"],
+    ["SQ_Tutorial_part1", "off"],
+    ["SQ_Tutorial_part2", "off"],
+    ["InfSQ_Tutorial_Active", "off"],
+    ["InfSQ_Tutorial_part1", "off"],
+    ["InfSQ_Tutorial_part2", "off"],
+    ["InfSideQuest_Tutorial", "off"],
+    ["QuestHUD_Tutorial", "off"],
+    ["QuestInfiniteWindow_Tutorial", "off"],
+    ["QuestNode_Tutorial_Active", "off"],
+    ["QuestWindow_Tutorial", "off"],
+    ["Craft_Tutorial_Active", "off"],
+    ["SideQuestHUD_Tutorial", "off"],
+    ["SideQuestInfiniteWindow_Tutorial", "off"],
+    ["SideQuestNotif_Tutorial", "off"],
+    ["SideQuest_Tutorial", "off"],
+    ["FirstShowSideQuestInfinite_Tutorial", "off"],
+    ["ShouldShowEnergyShortageTutorial", "off"],
+    ["ShouldShowEnergyUnder100Tutorial", "off"],
+    ["EXP_EnergyTutorialStart", "off"],
+    // --- "already shown / finished" markers ---
+    ["TutorialHandShown", "shown"],
+    ["TutorialGuideShown", "shown"],
+    ["TutorialHintShown", "shown"],
+    ["TapToContinueTutorialShown", "shown"],
+    ["SwipeTutorialShown", "shown"],
+    ["TutorialCloudShowedAll", "shown"],
+    ["cascadeEventWindowShowed", "shown"],
+    ["DiggingVisited", "shown"],
+    ["diggingFullCompleted", "shown"],
+    ["DiggingReady", "shown"],
+    ["DiggingRegeneratedForMuseum", "shown"],
+    ["OldPlayersDiggingTutShowed", "shown"],
+    ["DiggingTutorShowed", "shown"],
+    ["Tutorial_SP_DiggingPremium", "shown"],
+    ["FirstDiggingStoneShowed", "shown"],
+    ["FirstDiggingHardstoneShowed", "shown"],
+    ["FirstDiggingRoomShowed", "shown"],
+    ["RepairHarborTutShowed", "shown"],
+    ["DealerFreeOnce", "shown"],
+    ["WasTutorialUnlock", "shown"],
+    ["HelicTutorWas", "shown"],
+    ["IslandsMapShowed", "shown"],
+    ["NewBankShowed", "shown"],
+    ["NewPlayerProfileShowed", "shown"],
+    ["tutorial_finished_step", "shown"],
+    ["tutorial_skip_CreateBread", "shown"],
+    ["tip5TipSO", "shown"],
+    ["tip8TipSO", "shown"],
+    ["tip11TipSO", "shown"],
+    ["tip12TipSO", "shown"],
+    ["tip13TipSO", "shown"],
+    ["tip15TipSO", "shown"],
+    ["tip23TipSO", "shown"],
+    ["tip29TipSO", "shown"],
+    ["tip2TipSO", "shown"],
+    ["tip4TipSO", "shown"],
+    ["exp_tutorial_tablet_rewards_banner_passed", "shown"],
+    ["exp_tutorial_tablet_rewards_passed", "shown"],
+    ["exp_tutorial_tablet_passed", "shown"],
+    ["ExpedCanShowSTPanels", "shown"],
+    ["Tutorial_SuperLightning_PlayBtn_Shown", "shown"],
+    ["Tutorial:IslandsDailyChest:CountVisit", "shown"],
+    ["IslandsTutor_FirstOpen_Step2", "shown"],
+    ["IslandsTutor_FirstOpen_Step3", "shown"],
+    // --- cascade score markers: seen, no remainder ---
+    ["lastSeenScore", "off"],
+    ["scoreRemainder", "off"],
   ];
-  for (const [name, value] of forced) out = writeVar(out, name, value);
+  for (const [name, intent] of FORCED_TUTORIALS) out = setTutorialFlag(out, name, intent);
   return out;
 }
+
 
 function parseAttrs(tag: string): Record<string, string> {
   const attrs: Record<string, string> = {};
