@@ -2764,19 +2764,11 @@ button.premium-button:active:not(:disabled) {
 }
 
 /* RGB light-flow edges: one shared 2px comet ring (cyan → blue → purple →
-   pink → red → orange → green) for the sidebar shell, its cards and the
-   main dashboard, masked to each edge exactly like the login card, so all
-   interior fills and the layout stay untouched. */
-.app-root .device-selector-card,
-.app-root .sidebar-tools,
-.app-root .sidebar-log > div {
-  position: relative;
-}
+   pink → red → orange → green) reserved for the outer shells — sidebar,
+   main dashboard — plus the login card. Inner cards keep their calm gold
+   flow; rings everywhere reads noisy, not premium. */
 .app-root .app-sidebar::after,
-.app-root .app-main::after,
-.app-root .device-selector-card::after,
-.app-root .sidebar-tools::after,
-.app-root .sidebar-log > div::after {
+.app-root .app-main::after {
   position: absolute;
   inset: 0;
   z-index: 2;
@@ -2909,9 +2901,6 @@ button.premium-button:active:not(:disabled) {
   .app-root .app-main,
   .app-root .app-sidebar::after,
   .app-root .app-main::after,
-  .app-root .device-selector-card::after,
-  .app-root .sidebar-tools::after,
-  .app-root .sidebar-log > div::after,
   .app-root .panel,
   .app-root .device-selector-card,
   .app-root .sidebar-log > div,

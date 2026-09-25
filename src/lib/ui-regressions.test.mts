@@ -54,10 +54,13 @@ test("main dashboard wears an animated ultra-thin RGB light-flow border", () => 
   assert.ok(!css.includes("var(--premium-rgb-border)"), "no dead rgb layer vars may remain");
 });
 
-test("sidebar cards and login card share the same rgb comet ring", () => {
+test("sidebar shell and login card share the same rgb comet ring", () => {
   const css = read("../styles.css");
-  for (const sel of [".device-selector-card::after", ".sidebar-tools::after", ".sidebar-log > div::after", ".app-sidebar::after"]) {
+  for (const sel of [".app-sidebar::after", ".app-main::after"]) {
     assert.ok(css.includes(sel), `rgb ring must exist on ${sel}`);
+  }
+  for (const sel of [".device-selector-card::after", ".sidebar-tools::after", ".sidebar-log > div::after"]) {
+    assert.ok(!css.includes(sel), `inner ${sel} must stay calm (gold flow, no rgb ring)`);
   }
   const logins = css.match(/\.login-card::after\s*\{[^}]*\}/g) ?? [];
   assert.equal(logins.length, 2, "both login-card border rules must exist");
