@@ -1,4 +1,4 @@
-# IGG VIP Studio
+# IGG VIP TOOL
 
 Server (GitHub → Render) + Windows client EXE. A Township save editor: the server owns all game logic and the save algorithms; the desktop client only drives ADB and hosts the UI. The UI ships in 20 languages.
 
