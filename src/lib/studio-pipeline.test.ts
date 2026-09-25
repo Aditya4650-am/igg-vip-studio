@@ -12,8 +12,9 @@ const { avatarEmoji, avatarIconPath, AVATAR_EMOJIS, AVATAR_ICON_MAX, AVATAR_MAX 
   await import("./catalogs.ts");
 const { iconForBarn } = await import("./game-icon-map.ts");
 const { iconForZoo } = await import("./game-icon-map.ts");
+const { iconForUpgradeLabel } = await import("./game-icon-map.ts");
 const { ZOO_REQUIREMENTS } = await import("./server/township/zoo.server.ts");
-const { readdirSync, existsSync } = await import("node:fs");
+const { readdirSync, existsSync, readFileSync } = await import("node:fs");
 
 const { token } = verifyLicenseKey("VIP-DEMO", "TEST-DEVICE-0001");
 
@@ -529,6 +530,24 @@ test("barn: every mapped product icon resolves to a file on disk", () => {  let 
     assert.ok(existsSync(`public${src}`), `${p.id} -> ${src} is missing on disk`);
   }
   assert.ok(mapped >= 100, `expected 100+ mapped barn icons, got ${mapped}`);
+});
+
+test("upgrades: every factory/train/island button resolves its webp on disk", () => {
+  const groups = [...studio.catalogs().factories, ...studio.catalogs().trains, ...studio.catalogs().islands];
+  let mapped = 0;
+  for (const g of groups) {
+    for (const it of g.items) {
+      const src = iconForUpgradeLabel(it.label);
+      assert.ok(src, `${it.label} has no upgrade icon`);
+      mapped += 1;
+      assert.ok(existsSync(`public${src}`), `${it.label} -> ${src} is missing on disk`);
+    }
+  }
+  assert.equal(mapped, 50, `expected 50 upgrade buttons with icons, got ${mapped}`);
+  // The single Train art applies to all three train buttons.
+  const t1 = readFileSync("public/upgrades/train_1.webp");
+  assert.ok(t1.equals(readFileSync("public/upgrades/train_2.webp")), "train_2 must share the Train art");
+  assert.ok(t1.equals(readFileSync("public/upgrades/train_3.webp")), "train_3 must share the Train art");
 });
 
 test("zoo: every mapped paddock icon resolves to a file on disk", () => {

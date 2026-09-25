@@ -14,7 +14,7 @@ import { isDeviceId, mintDeviceId } from "@/lib/device-id";
 import { AVATAR_MAX, avatarEmoji, avatarGroupId, avatarIconPath, avatarsInRange, type Group, type Item } from "@/lib/catalogs";
 import { MUSEUM_IDS, artifactEmoji, artifactIconPath, museumLabel } from "@/lib/museum";
 import { CARD_GROUPS } from "@/lib/cards";
-import { iconForBarn, iconForDecorLabel, iconForGem, iconForGroup, iconForItemLabel, iconForProfileLabel, iconForSkin, iconForStat, iconForSticker, iconForZoo } from "@/lib/game-icon-map";
+import { iconForBarn, iconForDecorLabel, iconForGem, iconForGroup, iconForItemLabel, iconForProfileLabel, iconForSkin, iconForStat, iconForSticker, iconForUpgradeLabel, iconForZoo } from "@/lib/game-icon-map";
 import {
   connectLoad,
   fetchCity,
@@ -2624,6 +2624,7 @@ export function StudioApp() {
                             allLabel={tr("allShort")}
                             noneLabel={tr("noneShort")}
                             toneClass={groupTone(g.id, i)}
+                            iconFor={(_, label) => iconForUpgradeLabel(label)}
                           />
                         ))}
                       </section>
@@ -2670,6 +2671,7 @@ export function StudioApp() {
                             allLabel={tr("allShort")}
                             noneLabel={tr("noneShort")}
                             toneClass={groupTone(g.id, i)}
+                            iconFor={(_, label) => iconForUpgradeLabel(label)}
                           />
                         ))}
                       </section>
@@ -2716,6 +2718,7 @@ export function StudioApp() {
                             allLabel={tr("allShort")}
                             noneLabel={tr("noneShort")}
                             toneClass={groupTone(g.id, i)}
+                            iconFor={(_, label) => iconForUpgradeLabel(label)}
                           />
                         ))}
                       </section>

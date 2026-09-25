@@ -660,6 +660,58 @@ export const GAME_ICON_MAP = {
     "vegancafe": "/upgrades/vegancafe.webp",
     "wheelfactory": "/upgrades/wheelfactory.webp",
   },
+  "upgradesByLabel": {
+    "Bag": "/upgrades/bagfactory.webp",
+    "Bakery": "/upgrades/bakery.webp",
+    "Bouquet": "/upgrades/bouquetfactory.webp",
+    "Cake": "/upgrades/cakefactory.webp",
+    "Candy": "/upgrades/candyfactory.webp",
+    "Chips": "/upgrades/chipsfactory.webp",
+    "Chocolate": "/upgrades/chocolatefactory.webp",
+    "Clothing": "/upgrades/clothingfactory.webp",
+    "Coffee": "/upgrades/coffeefactory.webp",
+    "Cotton": "/upgrades/cottonfactory.webp",
+    "Doll": "/upgrades/dollfactory.webp",
+    "Drinks": "/upgrades/drinksfactory.webp",
+    "Music Instruments": "/upgrades/factory_music_instruments.webp",
+    "Fastfood": "/upgrades/fastfoodfactory.webp",
+    "Feather": "/upgrades/featherfactory.webp",
+    "Frenchrestaurant": "/upgrades/frenchrestaurant.webp",
+    "Furniture": "/upgrades/furniturefactory.webp",
+    "Gardening": "/upgrades/gardeningfactory.webp",
+    "Holiday": "/upgrades/holidayfactory.webp",
+    "Hotdog": "/upgrades/hotdogfactory.webp",
+    "Housewares": "/upgrades/housewaresfactory.webp",
+    "Icecream": "/upgrades/icecreamfactory.webp",
+    "Italyfood": "/upgrades/italyfoodfactory.webp",
+    "Jam": "/upgrades/jamfactory.webp",
+    "Jewelry": "/upgrades/jewelryfactory.webp",
+    "Kitchenware": "/upgrades/kitchenwarefactory.webp",
+    "Mexfood": "/upgrades/mexfoodfactory.webp",
+    "Milk": "/upgrades/milkfactory.webp",
+    "Mill": "/upgrades/mill.webp",
+    "Paper": "/upgrades/paperfactory.webp",
+    "Pet": "/upgrades/petfactory.webp",
+    "Roaster": "/upgrades/roasterfactory.webp",
+    "Scent": "/upgrades/scentfactory.webp",
+    "Semifinished": "/upgrades/semifinishedfactory.webp",
+    "Shoe": "/upgrades/shoefactory.webp",
+    "Sponge": "/upgrades/spongefactory.webp",
+    "Stationery": "/upgrades/stationeryfactory.webp",
+    "Sugar": "/upgrades/sugarfactory.webp",
+    "Sushi": "/upgrades/sushifactory.webp",
+    "Tea": "/upgrades/tea_factory.webp",
+    "Vegancafe": "/upgrades/vegancafe.webp",
+    "Wheel": "/upgrades/wheelfactory.webp",
+    "Train 1": "/upgrades/train_1.webp",
+    "Train 2": "/upgrades/train_2.webp",
+    "Train 3": "/upgrades/train_3.webp",
+    "Island 1": "/upgrades/i1.webp",
+    "Island 2": "/upgrades/i2.webp",
+    "Island 3": "/upgrades/i3.webp",
+    "Island 4": "/upgrades/i4.webp",
+    "Island 5": "/upgrades/i5.webp",
+  },
   "stickerById": {
     "sp1": "/game-icons/Sticker_001.png",
     "sp4": "/game-icons/Sticker_002.png",
@@ -763,4 +815,10 @@ export function iconForZoo(paddockId: string): string | null {
 
 export function iconForUpgrade(id: string): string | null {
   return (GAME_ICON_MAP.upgradesById as Record<string, string>)[id] ?? null;
+}
+
+// Upgrade item ids are HMAC-cloaked on the client, so buttons resolve art
+// by picker label (same pattern as skins/profiles).
+export function iconForUpgradeLabel(label: string): string | null {
+  return (GAME_ICON_MAP.upgradesByLabel as Record<string, string>)[label] ?? null;
 }
