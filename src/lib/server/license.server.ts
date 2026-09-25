@@ -152,38 +152,6 @@ function seed() {
       note: "Owner",
     }),
   );
-  put(
-    makeLic({
-      key: "VIP-DEMO",
-      plan: "week",
-      createdAt: t0,
-      expiresAt: t0 + MS.week,
-      durationMs: MS.week,
-      group: true,
-      maxDevices: 8,
-      devices: [],
-      boundDevice: null,
-      active: true,
-      admin: false,
-      note: "Client demo",
-    }),
-  );
-  put(
-    makeLic({
-      key: "VIP-TRIAL",
-      plan: "trial",
-      createdAt: t0,
-      expiresAt: t0 + MS.trial,
-      durationMs: MS.trial,
-      group: false,
-      maxDevices: 1,
-      devices: [],
-      boundDevice: null,
-      active: true,
-      admin: false,
-      note: "30-minute trial",
-    }),
-  );
 }
 seed();
 
@@ -335,18 +303,6 @@ export function listLicenses(token: string) {
   const { license: actor } = requireToken(token);
   if (!actor.admin) throw new Error("Admin key required");
   return [...byFp.values()].map(adminSnap).sort((a, b) => b.createdAt - a.createdAt);
-}
-
-export function deleteLicense(token: string, key: string) {
-  const { license: actor } = requireToken(token);
-  if (!actor.admin) throw new Error("Admin key required");
-  const lic = findLicense(key);
-  if (!lic) throw new Error("Unknown key");
-  if (lic.admin) throw new Error("Cannot remove the owner key");
-  if (lic.fp === actor.fp) throw new Error("Cannot remove your own key");
-  byFp.delete(lic.fp);
-  byKey.delete(lic.key.toLowerCase());
-  return { ok: true as const, key: lic.key };
 }
 
 export function submitFeedback(token: string, message: string) {

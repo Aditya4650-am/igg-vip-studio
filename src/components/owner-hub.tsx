@@ -15,14 +15,13 @@ import {
   Server,
   ShieldCheck,
   Sparkles,
-  Trash2,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Dict, Lang } from "@/lib/i18n";
-import { deleteKey, issueKey, listInbox, listKeys, publishUpdate, restoreKey } from "@/lib/admin-api";
+import { issueKey, listInbox, listKeys, publishUpdate, restoreKey } from "@/lib/admin-api";
 import { getRelease } from "@/lib/studio-api";
 
 type HubTab = "arch" | "keys" | "update" | "mail";
@@ -191,20 +190,6 @@ export function OwnerHub({
       const r = await publishUpdate({ data: { token, version: nextVer.trim(), notes: nextNotes, downloadUrl: nextDownloadUrl.trim(), sha256: nextSha256.trim() } });
       setRelease(r);
       toast.success(`${tr("updatePublished")} · ${r.version}`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Fail");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onDeleteKey = async (key: string) => {
-    if (!window.confirm(tr("licenseDeleteConfirm"))) return;
-    setBusy(true);
-    try {
-      const r = await deleteKey({ data: { token, key } });
-      await refresh();
-      toast.success(`${tr("licenseDeleted")} · ${r.key}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Fail");
     } finally {
@@ -490,18 +475,6 @@ export function OwnerHub({
                       <span className="ml-auto text-xs font-semibold text-amber tabular-nums">
                         {remain(k.remainingMs, k.lifetime, lang)}
                       </span>
-                      {k.admin ? null : (
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          disabled={busy}
-                          onClick={() => void onDeleteKey(k.key)}
-                          aria-label={`${tr("licenseDelete")} ${k.key}`}
-                        >
-                          <Trash2 className="size-3.5" />
-                          {tr("licenseDelete")}
-                        </Button>
-                      )}
                       {k.note ? <p className="w-full text-xs text-muted">{k.note}</p> : null}
                       {k.devices.length ? (
                         <p className="w-full font-mono text-xs text-muted">{k.devices.join(" · ")}</p>

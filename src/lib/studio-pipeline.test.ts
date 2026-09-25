@@ -16,7 +16,7 @@ const { iconForUpgradeLabel } = await import("./game-icon-map.ts");
 const { ZOO_REQUIREMENTS } = await import("./server/township/zoo.server.ts");
 const { readdirSync, existsSync, readFileSync } = await import("node:fs");
 
-const { token } = verifyLicenseKey("VIP-DEMO", "TEST-DEVICE-0001");
+const { token } = verifyLicenseKey("IGG-OWNER-TESTKEY", "TEST-DEVICE-0001");
 
 const ownSave = [
   '<?xml version="1.0" encoding="utf-8"?>',
