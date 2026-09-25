@@ -54,6 +54,19 @@ test("main dashboard wears an animated ultra-thin RGB light-flow border", () => 
   assert.ok(!css.includes("var(--premium-rgb-border)"), "no dead rgb layer vars may remain");
 });
 
+test("sidebar cards and login card share the same rgb comet ring", () => {
+  const css = read("../styles.css");
+  for (const sel of [".device-selector-card::after", ".sidebar-tools::after", ".sidebar-log > div::after"]) {
+    assert.ok(css.includes(sel), `rgb ring must exist on ${sel}`);
+  }
+  const logins = css.match(/\.login-card::after\s*\{[^}]*\}/g) ?? [];
+  assert.equal(logins.length, 2, "both login-card border rules must exist");
+  for (const block of logins) {
+    assert.ok(block.includes("#22d3ee"), "login border must flow rgb cyan");
+    assert.ok(!block.includes("#f59e0b") && !block.includes("#f0c76a"), "login border gold comet must be gone");
+  }
+});
+
 test("tab bar renders two premium rows: 8 primaries plus 5 below, never 13 squeezed slots", () => {
   const tsx = read("../components/studio-app.tsx");
   assert.ok(tsx.includes("PRIMARY_TABS: Tab[] = TABS.slice(0, 8)"), "8 primary tabs must derive from TABS");

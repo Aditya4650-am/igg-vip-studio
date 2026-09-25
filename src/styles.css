@@ -837,20 +837,24 @@
     pointer-events: none;
     background: conic-gradient(
       from var(--login-card-border-angle),
-      #8c6828 0deg,
-      #8c6828 316deg,
-      #c99c4f 328deg,
-      #f0c76a 338deg,
-      #fff1b8 346deg,
-      #f0c76a 354deg,
-      #c99c4f 360deg
+      rgba(99, 102, 241, 0.16) 0deg,
+      rgba(99, 102, 241, 0.16) 268deg,
+      #22d3ee 290deg,
+      #3b82f6 300deg,
+      #8b5cf6 310deg,
+      #ec4899 320deg,
+      #ef4444 329deg,
+      #f97316 338deg,
+      #22c55e 347deg,
+      #a5f3fc 355deg,
+      rgba(99, 102, 241, 0.16) 360deg
     );
     -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     -webkit-mask-composite: xor;
     mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     mask-composite: exclude;
     opacity: 0.92;
-    filter: drop-shadow(0 0 3px rgba(240, 199, 106, 0.24));
+    filter: drop-shadow(0 0 3px rgba(56, 189, 248, 0.3));
     animation: login-card-border-run 4.5s linear infinite;
   }
   .login-card-heading {
@@ -1465,15 +1469,19 @@ textarea {
 .login-card::after {
   background: conic-gradient(
     from var(--login-card-border-angle),
-    #7c5610 0deg,
-    #7c5610 316deg,
-    #c27a08 328deg,
-    #f59e0b 338deg,
-    #fde68a 346deg,
-    #f59e0b 354deg,
-    #c27a08 360deg
+    rgba(99, 102, 241, 0.16) 0deg,
+    rgba(99, 102, 241, 0.16) 268deg,
+    #22d3ee 290deg,
+    #3b82f6 300deg,
+    #8b5cf6 310deg,
+    #ec4899 320deg,
+    #ef4444 329deg,
+    #f97316 338deg,
+    #22c55e 347deg,
+    #a5f3fc 355deg,
+    rgba(99, 102, 241, 0.16) 360deg
   ) !important;
-  filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.3)) !important;
+  filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.3)) !important;
 }
 
 .login-divider {
@@ -2755,6 +2763,47 @@ button.premium-button:active:not(:disabled) {
   --premium-card-fill: linear-gradient(145deg, rgba(18, 27, 46, 0.99), rgba(10, 15, 28, 0.99));
 }
 
+/* Sidebar cards RGB light-flow edge: the same comet ring as the main
+   dashboard, so device / tools / console cards share one signature.
+   Interior fills and layout stay untouched. */
+.app-root .device-selector-card,
+.app-root .sidebar-tools,
+.app-root .sidebar-log > div {
+  position: relative;
+}
+.app-root .device-selector-card::after,
+.app-root .sidebar-tools::after,
+.app-root .sidebar-log > div::after {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  padding: 2px;
+  border-radius: inherit;
+  content: "";
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--premium-rgb-angle),
+    rgba(99, 102, 241, 0.16) 0deg,
+    rgba(99, 102, 241, 0.16) 268deg,
+    #22d3ee 290deg,
+    #3b82f6 300deg,
+    #8b5cf6 310deg,
+    #ec4899 320deg,
+    #ef4444 329deg,
+    #f97316 338deg,
+    #22c55e 347deg,
+    #a5f3fc 355deg,
+    rgba(99, 102, 241, 0.16) 360deg
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  opacity: 0.95;
+  filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.35));
+  animation: premium-rgb-flow 9s linear infinite;
+}
+
 /* Main dashboard RGB light-flow edge: a 2px comet ring flowing cyan →
    blue → purple → pink → red → orange → green around all four edges,
    masked to the edge exactly like the login card, so the interior fill,
@@ -2891,6 +2940,9 @@ button.premium-button:active:not(:disabled) {
   .app-root .app-sidebar,
   .app-root .app-main,
   .app-root .app-main::after,
+  .app-root .device-selector-card::after,
+  .app-root .sidebar-tools::after,
+  .app-root .sidebar-log > div::after,
   .app-root .panel,
   .app-root .device-selector-card,
   .app-root .sidebar-log > div,
