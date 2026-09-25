@@ -22,7 +22,6 @@ import {
   parseOwnMeta,
   decodeLocalInfoBase64,
   unlockEmoji,
-  skipTutorials,
 } from "./township/desban.server";
 import {
   BARN_CAPACITY,
@@ -252,7 +251,6 @@ export type SavePayload = {
   regatta?: boolean;
   season?: boolean;
   unbanMode?: "inicial" | "completo" | "novo";
-  tutorialSkip?: boolean;
   decorFragments?: boolean;
   decorClone?: boolean;
   decorMaxAll?: boolean;
@@ -296,10 +294,6 @@ export function applySave(p: SavePayload) {
     s.rawXml = injectSeason(s.rawXml, "1", "1002");
     s.season = { premium: true, score: 1002 };
     parts.push("season-pass");
-  }
-  if (p.tutorialSkip) {
-    s.rawXml = skipTutorials(s.rawXml);
-    parts.push("tutorials-skip");
   }
 
   if (Object.keys(revealed.stats).length) {
