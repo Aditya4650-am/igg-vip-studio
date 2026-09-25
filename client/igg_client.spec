@@ -44,7 +44,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="IGG-VIP-Studio",
+    name="IGG VIP TOOL",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

@@ -21,5 +21,5 @@ if errorlevel 1 (
 )
 
 echo.
-echo Done. The EXE is at:  dist\IGG-VIP-Studio.exe
+echo Done. The EXE is at:  dist\IGG VIP TOOL.exe
 pause

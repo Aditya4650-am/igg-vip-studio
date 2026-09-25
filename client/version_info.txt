@@ -18,11 +18,11 @@ VSVersionInfo(
           "040904B0",
           [
             StringStruct("CompanyName", "IGG VIP"),
-            StringStruct("FileDescription", "IGG VIP Studio - Desktop Client"),
+            StringStruct("FileDescription", "IGG VIP TOOL - Desktop Client"),
             StringStruct("FileVersion", "1.1.4.0"),
-            StringStruct("InternalName", "IGG-VIP-Studio"),
-            StringStruct("OriginalFilename", "IGG-VIP-Studio.exe"),
-            StringStruct("ProductName", "IGG VIP Studio"),
+            StringStruct("InternalName", "IGG VIP TOOL"),
+            StringStruct("OriginalFilename", "IGG VIP TOOL.exe"),
+            StringStruct("ProductName", "IGG VIP TOOL"),
             StringStruct("ProductVersion", "1.1.4.0"),
           ],
         )

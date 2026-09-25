@@ -17,7 +17,7 @@ game logic stays on the server.
 
 ## Download the prebuilt EXE
 
-Grab `IGG-VIP-Studio.exe` from the latest release:
+Grab `IGG VIP TOOL.exe` from the latest release:
 **https://github.com/Aditya4650-am/igg-vip-studio/releases/latest**
 
 It is a windowed build, so no console window appears behind the app. Runs on
@@ -29,7 +29,7 @@ It is a windowed build, so no console window appears behind the app. Runs on
 
 ## Run it
 ```
-IGG-VIP-Studio.exe
+IGG VIP TOOL.exe
 ```
 
 ## Build it yourself
@@ -37,7 +37,7 @@ IGG-VIP-Studio.exe
 cd client
 build_exe.bat
 ```
-The EXE is produced at `client\dist\IGG-VIP-Studio.exe`.
+The EXE is produced at `client\dist\IGG VIP TOOL.exe`.
 
 `build_exe.bat` builds with whatever Python is on PATH. If that interpreter is
 brand new, PyInstaller may not yet ship a bootloader for it, and the build can

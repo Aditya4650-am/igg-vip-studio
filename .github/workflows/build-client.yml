@@ -46,7 +46,7 @@ jobs:
         run: |
           # A console-subsystem EXE is what produces the stray cmd window, so
           # fail the build rather than ship one.
-          $exe = "dist/IGG-VIP-Studio.exe"
+          $exe = "dist/IGG VIP TOOL.exe"
           if (-not (Test-Path $exe)) { throw "EXE was not produced" }
           $bytes = [System.IO.File]::ReadAllBytes($exe)
           $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
@@ -59,19 +59,19 @@ jobs:
         shell: pwsh
         working-directory: client
         run: |
-          $h = (Get-FileHash dist/IGG-VIP-Studio.exe -Algorithm SHA256).Hash.ToLower()
+          $h = (Get-FileHash "dist/IGG VIP TOOL.exe" -Algorithm SHA256).Hash.ToLower()
           "sha256=$h" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - uses: actions/upload-artifact@v4
         with:
-          name: IGG-VIP-Studio-exe
-          path: client/dist/IGG-VIP-Studio.exe
+          name: IGG-VIP-TOOL-exe
+          path: client/dist/IGG VIP TOOL.exe
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: client/dist/IGG-VIP-Studio.exe
+          files: client/dist/IGG VIP TOOL.exe
           body: |
             SHA-256: `${{ steps.hash.outputs.sha256 }}`
 
