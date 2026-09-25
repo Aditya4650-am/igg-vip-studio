@@ -56,7 +56,7 @@ test("main dashboard wears an animated ultra-thin RGB light-flow border", () => 
 
 test("sidebar cards and login card share the same rgb comet ring", () => {
   const css = read("../styles.css");
-  for (const sel of [".device-selector-card::after", ".sidebar-tools::after", ".sidebar-log > div::after"]) {
+  for (const sel of [".device-selector-card::after", ".sidebar-tools::after", ".sidebar-log > div::after", ".app-sidebar::after"]) {
     assert.ok(css.includes(sel), `rgb ring must exist on ${sel}`);
   }
   const logins = css.match(/\.login-card::after\s*\{[^}]*\}/g) ?? [];

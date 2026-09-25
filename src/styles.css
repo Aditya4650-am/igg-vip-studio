@@ -2763,52 +2763,20 @@ button.premium-button:active:not(:disabled) {
   --premium-card-fill: linear-gradient(145deg, rgba(18, 27, 46, 0.99), rgba(10, 15, 28, 0.99));
 }
 
-/* Sidebar cards RGB light-flow edge: the same comet ring as the main
-   dashboard, so device / tools / console cards share one signature.
-   Interior fills and layout stay untouched. */
+/* RGB light-flow edges: one shared 2px comet ring (cyan → blue → purple →
+   pink → red → orange → green) for the sidebar shell, its cards and the
+   main dashboard, masked to each edge exactly like the login card, so all
+   interior fills and the layout stay untouched. */
 .app-root .device-selector-card,
 .app-root .sidebar-tools,
 .app-root .sidebar-log > div {
   position: relative;
 }
+.app-root .app-sidebar::after,
+.app-root .app-main::after,
 .app-root .device-selector-card::after,
 .app-root .sidebar-tools::after,
 .app-root .sidebar-log > div::after {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  padding: 2px;
-  border-radius: inherit;
-  content: "";
-  pointer-events: none;
-  background: conic-gradient(
-    from var(--premium-rgb-angle),
-    rgba(99, 102, 241, 0.16) 0deg,
-    rgba(99, 102, 241, 0.16) 268deg,
-    #22d3ee 290deg,
-    #3b82f6 300deg,
-    #8b5cf6 310deg,
-    #ec4899 320deg,
-    #ef4444 329deg,
-    #f97316 338deg,
-    #22c55e 347deg,
-    #a5f3fc 355deg,
-    rgba(99, 102, 241, 0.16) 360deg
-  );
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask-composite: exclude;
-  opacity: 0.95;
-  filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.35));
-  animation: premium-rgb-flow 9s linear infinite;
-}
-
-/* Main dashboard RGB light-flow edge: a 2px comet ring flowing cyan →
-   blue → purple → pink → red → orange → green around all four edges,
-   masked to the edge exactly like the login card, so the interior fill,
-   the gold card system and the layout stay untouched. */
-.app-root .app-main::after {
   position: absolute;
   inset: 0;
   z-index: 2;
@@ -2939,6 +2907,7 @@ button.premium-button:active:not(:disabled) {
 @media (prefers-reduced-motion: reduce) {
   .app-root .app-sidebar,
   .app-root .app-main,
+  .app-root .app-sidebar::after,
   .app-root .app-main::after,
   .app-root .device-selector-card::after,
   .app-root .sidebar-tools::after,
