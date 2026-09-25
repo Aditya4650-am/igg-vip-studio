@@ -41,6 +41,24 @@ test("data center cards show the real PNG and drop the decorative glyph", () => 
   assert.ok(!/statIcon\(/.test(card), "no decorative stat icon resolver in the data center");
 });
 
+test("tab bar shows 8 primaries plus a More overflow, never 13 squeezed slots", () => {
+  const tsx = read("../components/studio-app.tsx");
+  assert.ok(tsx.includes("PRIMARY_TABS: Tab[] = TABS.slice(0, 8)"), "8 primary tabs must derive from TABS");
+  assert.ok(tsx.includes("OVERFLOW_TABS: Tab[] = TABS.slice(8)"), "the rest must derive from TABS");
+  assert.ok(tsx.includes("{PRIMARY_TABS.map((id) => {"), "only primaries render as bar slots");
+  assert.ok(!tsx.includes("{TABS.map((id) => {"), "the raw 13-tab row must be gone");
+  assert.ok(tsx.includes('sm:grid-cols-9'), "the bar grid must fit 8 tabs plus More");
+  assert.ok(tsx.includes('role="menu"'), "the overflow must render as a menu");
+  assert.ok(tsx.includes("OVERFLOW_TABS.includes(tab)"), "the active overflow tab must surface in the bar");
+  for (const lang of LANGS) {
+    if ((DICT[lang.id] as Record<string, unknown>)["moreTabs"] !== undefined) {
+      assert.equal(typeof (DICT[lang.id] as Record<string, unknown>)["moreTabs"], "string", `${lang.id}.moreTabs must be a string`);
+    }
+  }
+  assert.equal(typeof (DICT.vi as Record<string, unknown>)["moreTabs"], "string", "vi.moreTabs must exist");
+  assert.equal(typeof (DICT.en as Record<string, unknown>)["moreTabs"], "string", "en.moreTabs must exist");
+});
+
 test("factory and train/island tabs are gone", () => {
   const tsx = read("../components/studio-app.tsx");
   for (const tab of ['"upgrades"']) {
