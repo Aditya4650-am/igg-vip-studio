@@ -425,9 +425,13 @@ export function applySave(p: SavePayload) {
     if (up.factory && Object.keys(up.factory).length) {
       const ids = Object.keys(revealed.upgrades?.factory ?? {});
       const target = Math.max(...Object.values(up.factory), 0);
-      if (ids.length && target > 0) {
+      if (!ids.length) throw new Error("Phiên ánh xạ đã hết hạn — hãy Kết nối lại rồi thử lại");
+      if (target > 0) {
         const r = injectUpgradeLevels(s.rawXml, "Factory", ids, target);
-        if (!r.changed) throw new Error("Không có xưởng nào thay đổi");
+        if (!r.changed) {
+          if (r.reason === "missing" || r.reason === "empty") throw new Error("Academy chưa có dữ liệu xưởng trong save — mở Academy trong game, nâng cấp 1 xưởng rồi pull lại");
+          throw new Error("Không có xưởng nào thay đổi");
+        }
         s.rawXml = r.xml;
         parts.push(`factory(${r.changed})`);
       }
@@ -435,9 +439,13 @@ export function applySave(p: SavePayload) {
     if (up.train && Object.keys(up.train).length) {
       const ids = Object.keys(revealed.upgrades?.train ?? {});
       const target = Math.max(...Object.values(up.train), 0);
-      if (ids.length && target > 0) {
+      if (!ids.length) throw new Error("Phiên ánh xạ đã hết hạn — hãy Kết nối lại rồi thử lại");
+      if (target > 0) {
         const r = injectUpgradeLevels(s.rawXml, "Train", ids, target);
-        if (!r.changed) throw new Error("Không có tàu hỏa nào thay đổi");
+        if (!r.changed) {
+          if (r.reason === "missing" || r.reason === "empty") throw new Error("Academy chưa có dữ liệu tàu hỏa trong save — mở Academy trong game, nâng cấp 1 lần rồi pull lại");
+          throw new Error("Không có tàu hỏa nào thay đổi");
+        }
         s.rawXml = r.xml;
         parts.push(`train(${r.changed})`);
       }
@@ -445,9 +453,13 @@ export function applySave(p: SavePayload) {
     if (up.island && Object.keys(up.island).length) {
       const ids = Object.keys(revealed.upgrades?.island ?? {});
       const target = Math.max(...Object.values(up.island), 0);
-      if (ids.length && target > 0) {
+      if (!ids.length) throw new Error("Phiên ánh xạ đã hết hạn — hãy Kết nối lại rồi thử lại");
+      if (target > 0) {
         const r = injectUpgradeLevels(s.rawXml, "Island", ids, target);
-        if (!r.changed) throw new Error("Không có đảo nào thay đổi");
+        if (!r.changed) {
+          if (r.reason === "missing" || r.reason === "empty") throw new Error("Academy chưa có dữ liệu đảo trong save — mở Academy trong game, nâng cấp 1 lần rồi pull lại");
+          throw new Error("Không có đảo nào thay đổi");
+        }
         s.rawXml = r.xml;
         parts.push(`island(${r.changed})`);
       }

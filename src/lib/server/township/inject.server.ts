@@ -336,12 +336,19 @@ function slxFor(level: number): number {
 
 function parseUpgradeBlock(xml: string) {
   const m = xml.match(/<Upgrade\b[^>]*version="4"[^>]*>([\s\S]*?)<\/Upgrade>/i);
-  if (!m) return { factories: [], trains: [], islands: [], raw: "", index: -1, length: 0 };
-  const inner = m[1];
-  const factories = [...inner.matchAll(/<Factory\b([^>]*?)\/?>/gi)].map(m => parseAttrs(m[1]));
-  const trains = [...inner.matchAll(/<Train\b([^>]*?)\/?>/gi)].map(m => parseAttrs(m[1]));
-  const islands = [...inner.matchAll(/<Island\b([^>]*?)\/?>/gi)].map(m => parseAttrs(m[1]));
-  return { factories, trains, islands, raw: m[0], index: m.index!, length: m[0].length };
+  if (m) {
+    const inner = m[1]!;
+    const factories = [...inner.matchAll(/<Factory\b([^>]*?)\/?>/gi)].map(m => parseAttrs(m[1]));
+    const trains = [...inner.matchAll(/<Train\b([^>]*?)\/?>/gi)].map(m => parseAttrs(m[1]));
+    const islands = [...inner.matchAll(/<Island\b([^>]*?)\/?>/gi)].map(m => parseAttrs(m[1]));
+    return { factories, trains, islands, raw: m[0], index: m.index!, length: m[0].length };
+  }
+  // A fresh/untouched city ships a self-closing <Upgrade version="4"/> with
+  // no rows. Match it too so callers can tell "empty block" apart from
+  // "no block at all" instead of failing both the same silent way.
+  const s = xml.match(/<Upgrade\b[^>]*version="4"[^>]*\/>/i);
+  if (s) return { factories: [], trains: [], islands: [], raw: s[0], index: s.index!, length: s[0].length };
+  return { factories: [], trains: [], islands: [], raw: "", index: -1, length: 0 };
 }
 
 function parseAttrs(attrStr: string): Record<string, string> {
@@ -376,21 +383,28 @@ export function upgradeMaxLevel(xml: string, kind: "Factory" | "Train" | "Island
 
 /**
  * Upgrade selected rows to targetLevel (clamped to save's own max).
- * `ids` are real game IDs. Returns { xml, changed }.
- * Throws no-op error via caller if changed === 0.
+ * `ids` are real game IDs. Returns { xml, changed, reason }.
+ * reason is "missing" when the save has no Upgrade block at all, "empty"
+ * when the block (or that kind's rows) holds nothing to raise, and "noop"
+ * when rows exist but already sit at/above the clamped target. Callers turn
+ * each into a distinct error so a no-op is never reported as success and an
+ * empty Academy never looks like a silent no-op.
  */
 export function injectUpgradeLevels(
   xml: string,
   kind: "Factory" | "Train" | "Island",
   ids: string[],
   targetLevel: number
-): { xml: string; changed: number } {
+): { xml: string; changed: number; reason: "ok" | "missing" | "empty" | "noop" } {
   const parsed = parseUpgradeBlock(xml);
-  if (!parsed.raw) return { xml, changed: 0 };
+  if (!parsed.raw) return { xml, changed: 0, reason: "missing" };
+
+  const rows = kind === "Factory" ? parsed.factories : kind === "Train" ? parsed.trains : parsed.islands;
+  if (!rows.length) return { xml, changed: 0, reason: "empty" };
 
   const maxAllowed = upgradeMaxLevel(xml, kind);
   const clamped = Math.min(targetLevel, maxAllowed);
-  if (clamped <= 0) return { xml, changed: 0 };
+  if (clamped <= 0) return { xml, changed: 0, reason: "empty" };
 
   let changed = 0;
   const want = new Set(ids);
@@ -430,10 +444,10 @@ export function injectUpgradeLevels(
     }
   }
 
-  if (!changed) return { xml, changed: 0 };
+  if (!changed) return { xml, changed: 0, reason: "noop" };
 
   const newBlock = rebuildUpgradeBlock(parsed);
   const newXml = xml.slice(0, parsed.index) + newBlock + xml.slice(parsed.index + parsed.length);
-  return { xml: newXml, changed };
+  return { xml: newXml, changed, reason: "ok" };
 }
 

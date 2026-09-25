@@ -1221,6 +1221,7 @@ export function StudioApp() {
   const upgradeTrainSel = useSetMap();
   const upgradeIslandSel = useSetMap();
   const [upgradeTargetLevel, setUpgradeTargetLevel] = useState(1);
+  const upgradeTargetSessionRef = useRef<string | null>(null);
   const [pendingUpgradeFactory, setPendingUpgradeFactory] = useState(false);
   const [pendingUpgradeTrain, setPendingUpgradeTrain] = useState(false);
   const [pendingUpgradeIsland, setPendingUpgradeIsland] = useState(false);
@@ -1309,6 +1310,13 @@ export function StudioApp() {
     initialStatsRef.current = { ...s.stats };
     setBarnUpgrades(s.barn.upgrades);
     setBarnItems({ ...s.barn.items });
+    // Default the upgrade target to the save's own max on each new session.
+    // The old hardcoded 1 meant "apply" with an untouched dropdown raised
+    // every selected row toward level 1 — a guaranteed no-op error.
+    if (s.sessionId !== upgradeTargetSessionRef.current) {
+      upgradeTargetSessionRef.current = s.sessionId;
+      if (s.factoryMax) setUpgradeTargetLevel(s.factoryMax);
+    }
 
     // Only keep profile IDs that actually exist in the current catalog.
     // The save can contain legacy/unknown profile IDs; keeping those in the
@@ -2575,6 +2583,9 @@ export function StudioApp() {
                 {tab === "upgrades" && catalogs && session && (
                   <div className="space-y-3">
                     <p className="rounded-md bg-input px-3 py-2 text-sm text-amber">{tr("upgradesHint")}</p>
+                    {!session.factoryMax && !session.trainMax && !session.islandMax ? (
+                      <p className="rounded-md bg-input px-3 py-2 text-sm text-amber">{tr("upgradesEmpty")}</p>
+                    ) : null}
                     <div className="space-y-4">
                       {/* Factories Section */}
                       <section className="panel">

@@ -83,9 +83,18 @@ touched.
   `injectUpgradeLevels(xml, kind, ids, target)` live in `inject.server.ts`.
 - The target is clamped to the save's own maximum (`factoryMax` in the
   snapshot): a level the save never contained cannot be shown to be valid.
-- `injectUpgradeLevels` reports `changed: 0` when nothing would move, and
-  `applySave` turns that into a thrown "không có xưởng nào thay đổi" so a no-op
-  is never reported as success — the failure mode that got the card tab removed.
+- `injectUpgradeLevels` reports `changed: 0` with a `reason` (`missing` = no
+  Upgrade block at all, `empty` = self-closing `<Upgrade version="4"/>` or no
+  rows of that kind, `noop` = rows already at/above target), and `applySave`
+  turns each into a distinct thrown error: the Academy-empty guidance for
+  `missing`/`empty`, the "không có xưởng nào thay đổi" guard for `noop` so a
+  no-op is never reported as success — the failure mode that got the card tab
+  removed. An empty Academy block is never filled with invented rows: bonus
+  values scale per level and the save carries no template for them.
+- The upgrades tab defaults its target to the save's own max on each new
+  session (a hardcoded `1` used to guarantee either a mass downgrade or a
+  no-op error) and shows an `upgradesEmpty` hint when the save carries no
+  upgrade data at all.
 - Factory ids are cloaked like every other real game id, via `cloakFactories` /
   the `factories` entry in `catalogs.server.ts`.
 - The **backup** button calls `exportOriginal`, which returns the save exactly as
