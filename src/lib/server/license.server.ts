@@ -337,6 +337,18 @@ export function listLicenses(token: string) {
   return [...byFp.values()].map(adminSnap).sort((a, b) => b.createdAt - a.createdAt);
 }
 
+export function deleteLicense(token: string, key: string) {
+  const { license: actor } = requireToken(token);
+  if (!actor.admin) throw new Error("Admin key required");
+  const lic = findLicense(key);
+  if (!lic) throw new Error("Unknown key");
+  if (lic.admin) throw new Error("Cannot remove the owner key");
+  if (lic.fp === actor.fp) throw new Error("Cannot remove your own key");
+  byFp.delete(lic.fp);
+  byKey.delete(lic.key.toLowerCase());
+  return { ok: true as const, key: lic.key };
+}
+
 export function submitFeedback(token: string, message: string) {
   const { token: tkn, snap: s } = requireToken(token);
   const text = message.trim();
