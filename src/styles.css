@@ -1862,6 +1862,31 @@ textarea {
   background: rgba(167, 139, 250, 0.38) !important;
 }
 
+/* Two-row tab bar (8 primaries + 5 below): the base .feature-tabs rule is
+   a horizontal flex strip, so stack the row containers vertically here.
+   Rows carry their own grid rhythm (4 cols mobile, 8 cols sm+). */
+.app-root .feature-tabs {
+  flex-direction: column !important;
+  align-items: stretch !important;
+}
+.feature-tabs-row {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.25rem;
+  width: 100%;
+}
+@media (min-width: 640px) {
+  .feature-tabs-row {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
+}
+
+/* Second tab row: same pill family as the primary row, set apart by a
+   hairline so the 8 + 5 split reads as one intentional toolbar. */
+.feature-tabs-overflow {
+  border-top: 1px solid rgba(148, 163, 184, 0.14) !important;
+}
+
 .state-badge {
   border-radius: 999px !important;
   font-weight: 700 !important;

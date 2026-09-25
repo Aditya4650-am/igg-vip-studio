@@ -1196,8 +1196,6 @@ export function StudioApp() {
   const [cityManual, setCityManual] = useState("");
   const [friendSel, setFriendSel] = useState<string | null>(null);
   const [tabReady, setTabReady] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
-  const moreRef = useRef<HTMLDivElement | null>(null);
   const [avaFrom, setAvaFrom] = useState(1);
   const [avaTo, setAvaTo] = useState(50);
   const [barnUpgrades, setBarnUpgrades] = useState<number | null>(null);
@@ -1739,23 +1737,6 @@ export function StudioApp() {
     return () => window.removeEventListener("keydown", onKey);
   }, [save]);
 
-  // "More" overflow menu: close on outside pointer or Escape.
-  useEffect(() => {
-    if (!moreOpen) return;
-    const onDown = (e: PointerEvent) => {
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMoreOpen(false);
-    };
-    window.addEventListener("pointerdown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("pointerdown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [moreOpen]);
-
   const tool = (kind: "regatta" | "season") => {
     if (kind === "regatta") {
       setPendingRegatta(true);
@@ -2183,105 +2164,44 @@ export function StudioApp() {
 
         <section className="app-main flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg shadow-hairline">
           <nav
-            className="feature-tabs relative grid grid-cols-5 border-b border-border px-3 pt-3 sm:grid-cols-9"
+            className="feature-tabs relative border-b border-border px-3 pt-3 pb-2"
           >
             <span aria-hidden className={cn("tab-pill", tabReady && "ready")} />
-            {PRIMARY_TABS.map((id) => {
-              const on = tab === id;
-              const tabLabel = tr(TAB_KEY[id] as keyof Dict);
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setTab(id)}
-                  aria-current={on ? "page" : undefined}
-                  aria-label={id !== "profile" && tabCount[id] > 0 ? `${tabLabel} ${tabCount[id]}` : tabLabel}
-                  className={cn(
-                    "feature-tab relative z-10 flex min-h-11 items-center justify-center gap-1 rounded-t-lg px-0.5 text-center text-xs font-semibold leading-tight transition-[color] duration-200 ease-smooth sm:text-sm",
-                    on ? "feature-tab--active text-primary-fg" : "text-muted hover:text-fg",
-                  )}
-                >
-                  <GameIcon name={TAB_ICON[id]} className="feature-tab-icon" />
-                  <span>{tabLabel}</span>
-                  {id !== "profile" && tabCount[id] > 0 ? (
-                    <span className={cn("tabular-nums", on ? "text-primary-fg/70" : "text-primary")}>
-                      {tabCount[id]}
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-            {OVERFLOW_TABS.includes(tab) ? (
-              <button
-                key={tab}
-                type="button"
-                aria-current="page"
-                aria-label={tr(TAB_KEY[tab] as keyof Dict)}
-                onClick={() => setMoreOpen((v) => !v)}
-                className={cn(
-                  "feature-tab relative z-10 flex min-h-11 items-center justify-center gap-1 rounded-t-lg px-0.5 text-center text-xs font-semibold leading-tight transition-[color] duration-200 ease-smooth sm:text-sm",
-                  "feature-tab--active text-primary-fg",
-                )}
-              >
-                <GameIcon name={TAB_ICON[tab]} className="feature-tab-icon" />
-                <span>{tr(TAB_KEY[tab] as keyof Dict)}</span>
-                {tab !== "profile" && tabCount[tab] > 0 ? (
-                  <span className="tabular-nums text-primary-fg/70">{tabCount[tab]}</span>
-                ) : null}
-                <ChevronDown className="size-3.5 opacity-70" />
-              </button>
-            ) : (
-              <button
-                key="__more"
-                type="button"
-                onClick={() => setMoreOpen((v) => !v)}
-                aria-haspopup="menu"
-                aria-expanded={moreOpen}
-                aria-label={tr("moreTabs")}
-                className={cn(
-                  "feature-tab relative z-10 flex min-h-11 items-center justify-center gap-1 rounded-t-lg px-0.5 text-center text-xs font-semibold leading-tight transition-[color] duration-200 ease-smooth sm:text-sm",
-                  moreOpen ? "feature-tab--active text-primary-fg" : "text-muted hover:text-fg",
-                )}
-              >
-                <ChevronDown className="size-4" />
-                <span>{tr("moreTabs")}</span>
-              </button>
-            )}
-            {moreOpen ? (
+            {[PRIMARY_TABS, OVERFLOW_TABS].map((row, ri) => (
               <div
-                ref={moreRef}
-                role="menu"
-                aria-label={tr("moreTabs")}
-                className="absolute top-full right-3 z-40 min-w-56 rounded-xl border border-border bg-input p-1.5 shadow-xl"
+                key={ri}
+                className={cn(
+                  "feature-tabs-row grid grid-cols-4 gap-1 sm:grid-cols-8",
+                  ri === 1 && "feature-tabs-overflow mt-1 border-t border-border/60 pt-2",
+                )}
               >
-                {OVERFLOW_TABS.map((id) => {
+                {row.map((id) => {
                   const on = tab === id;
                   const tabLabel = tr(TAB_KEY[id] as keyof Dict);
                   return (
                     <button
                       key={id}
                       type="button"
-                      role="menuitem"
+                      onClick={() => setTab(id)}
                       aria-current={on ? "page" : undefined}
-                      onClick={() => {
-                        setTab(id);
-                        setMoreOpen(false);
-                      }}
+                      aria-label={id !== "profile" && tabCount[id] > 0 ? `${tabLabel} ${tabCount[id]}` : tabLabel}
                       className={cn(
-                        "flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm font-semibold transition-colors",
-                        on ? "bg-primary/15 text-fg" : "text-muted hover:bg-primary/10 hover:text-fg",
+                        "feature-tab relative z-10 flex min-h-11 items-center justify-center gap-1 rounded-t-lg px-0.5 text-center text-xs font-semibold leading-tight transition-[color] duration-200 ease-smooth sm:text-sm",
+                        on ? "feature-tab--active text-primary-fg" : "text-muted hover:text-fg",
                       )}
                     >
-                      <GameIcon name={TAB_ICON[id]} className="size-4 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate">{tabLabel}</span>
+                      <GameIcon name={TAB_ICON[id]} className="feature-tab-icon" />
+                      <span className="whitespace-nowrap">{tabLabel}</span>
                       {id !== "profile" && tabCount[id] > 0 ? (
-                        <span className="tabular-nums text-xs text-primary">{tabCount[id]}</span>
+                        <span className={cn("tabular-nums", on ? "text-primary-fg/70" : "text-primary")}>
+                          {tabCount[id]}
+                        </span>
                       ) : null}
                     </button>
                   );
                 })}
               </div>
-            ) : null}
+            ))}
           </nav>
 
           <div className="dashboard-content min-h-0 flex-1 overflow-auto p-4 sm:p-5">
