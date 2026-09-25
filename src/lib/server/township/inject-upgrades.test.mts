@@ -98,18 +98,69 @@ test("inject reports noop for unknown ids without touching the save", () => {
   assert.equal(r.xml, PAIRED);
 });
 
-test("inject reports empty for a self-closing Upgrade block", () => {
-  const r = injectUpgradeLevels(EMPTY_SELF_CLOSING, "Factory", ["bakery"], 20);
+test("inject ignores ids of another kind instead of creating them", () => {
+  const r = injectUpgradeLevels(PAIRED, "Train", ["bakery"], 31);
   assert.equal(r.changed, 0);
-  assert.equal(r.reason, "empty");
-  assert.equal(r.xml, EMPTY_SELF_CLOSING);
+  assert.equal(r.reason, "noop");
+  assert.equal(r.xml, PAIRED);
 });
 
-test("inject reports missing when no Upgrade block exists", () => {
-  const r = injectUpgradeLevels(NO_BLOCK, "Factory", ["bakery"], 20);
+test("inject creates a missing row with the exact reference encoding", () => {
+  // mGameInfo_decoded.xml carries this exact bakery row: a created row at
+  // the same level must be byte-identical to game-accepted data.
+  const r = injectUpgradeLevels(EMPTY_SELF_CLOSING, "Factory", ["bakery"], 53);
+  wellFormed(r.xml);
+  assert.equal(r.changed, 1);
+  assert.equal(r.reason, "ok");
+  assert.match(
+    r.xml,
+    /<Upgrade version="4"><Factory id="bakery" level="53" slx="32162008" xpBonus="100" moneyBonus="100" timeBonus="100" shelfBonus="2"\/><\/Upgrade>/,
+  );
+});
+
+test("inject builds a missing block inside the root with kind templates", () => {
+  const t = injectUpgradeLevels(NO_BLOCK, "Train", ["1"], 31);
+  wellFormed(t.xml);
+  assert.equal(t.changed, 1);
+  assert.equal(t.reason, "ok");
+  assert.match(
+    t.xml,
+    /<Upgrade version="4"><Train id="1" level="31" slx="32162034" xpBonus="100" timeBonus="100"\/><\/Upgrade>/,
+  );
+  assert.ok(t.xml.indexOf("<Upgrade") < t.xml.indexOf("</Global>"), "block must be inside the root");
+  const isl = injectUpgradeLevels(NO_BLOCK, "Island", ["i3"], 31);
+  wellFormed(isl.xml);
+  assert.match(
+    isl.xml,
+    /<Island id="i3" level="31" slx="32162034" timeBonus="101" probability2="100" probability3="100"\/>/,
+  );
+});
+
+test("inject caps creation at the reference ceiling when the save has no max", () => {
+  const r = injectUpgradeLevels(EMPTY_SELF_CLOSING, "Factory", ["bakery"], 999);
+  wellFormed(r.xml);
+  assert.equal(r.changed, 1);
+  assert.match(r.xml, /<Factory id="bakery" level="53" slx="32162008"/);
+});
+
+test("inject fills gaps in a partial block without touching current rows", () => {
+  const r = injectUpgradeLevels(PAIRED, "Factory", ["bakery", "wheelfactory"], 53);
+  wellFormed(r.xml);
+  assert.equal(r.changed, 1);
+  assert.equal(r.reason, "ok");
+  // bakery already at 53 stays exactly as it was.
+  assert.match(r.xml, /<Factory id="bakery" level="53" slx="32162008" xpBonus="100" moneyBonus="100" timeBonus="100" shelfBonus="2"\/>/);
+  assert.match(
+    r.xml,
+    /<Factory id="wheelfactory" level="53" slx="32162008" xpBonus="100" moneyBonus="100" timeBonus="100" shelfBonus="2"\/>/,
+  );
+});
+
+test("inject with a non-positive target changes nothing", () => {
+  const r = injectUpgradeLevels(PAIRED, "Factory", ["bagfactory"], 0);
   assert.equal(r.changed, 0);
-  assert.equal(r.reason, "missing");
-  assert.equal(r.xml, NO_BLOCK);
+  assert.equal(r.reason, "empty");
+  assert.equal(r.xml, PAIRED);
 });
 
 test("inject handles train and island rows independently", () => {
@@ -119,8 +170,11 @@ test("inject handles train and island rows independently", () => {
   assert.match(t.xml, new RegExp(`<Train id="1" level="5" slx="${5 ^ SLX}"`));
   // Factory rows are never touched by a train run.
   assert.match(t.xml, /<Factory id="bagfactory" level="39"/);
-  const noTrain = injectUpgradeLevels(EMPTY_SELF_CLOSING, "Train", ["1"], 5);
-  assert.equal(noTrain.reason, "empty");
+  const newTrain = injectUpgradeLevels(EMPTY_SELF_CLOSING, "Train", ["1"], 5);
+  wellFormed(newTrain.xml);
+  assert.equal(newTrain.changed, 1);
+  assert.equal(newTrain.reason, "ok");
+  assert.match(newTrain.xml, new RegExp(`<Train id="1" level="5" slx="${5 ^ SLX}" xpBonus="100" timeBonus="100"`));
   const isl = injectUpgradeLevels(PAIRED, "Island", ["i1"], 31);
   assert.equal(isl.changed, 0);
   assert.equal(isl.reason, "noop");

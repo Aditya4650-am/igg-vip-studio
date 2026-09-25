@@ -1315,7 +1315,7 @@ export function StudioApp() {
     // every selected row toward level 1 — a guaranteed no-op error.
     if (s.sessionId !== upgradeTargetSessionRef.current) {
       upgradeTargetSessionRef.current = s.sessionId;
-      if (s.factoryMax) setUpgradeTargetLevel(s.factoryMax);
+      setUpgradeTargetLevel(s.factoryMax ?? s.upgradeCaps.factory);
     }
 
     // Only keep profile IDs that actually exist in the current catalog.
@@ -2608,7 +2608,7 @@ export function StudioApp() {
                                 value={upgradeTargetLevel}
                                 onChange={(e) => setUpgradeTargetLevel(Number(e.target.value))}
                               >
-                                {Array.from({ length: session.factoryMax ?? 20 }, (_, i) => i + 1).map(n => (
+                                {Array.from({ length: session.factoryMax ?? session.upgradeCaps.factory }, (_, i) => i + 1).map(n => (
                                   <option key={n} value={n}>{n}</option>
                                 ))}
                               </select>
@@ -2654,7 +2654,7 @@ export function StudioApp() {
                                 value={upgradeTargetLevel}
                                 onChange={(e) => setUpgradeTargetLevel(Number(e.target.value))}
                               >
-                                {Array.from({ length: session.trainMax ?? 10 }, (_, i) => i + 1).map(n => (
+                                {Array.from({ length: session.trainMax ?? session.upgradeCaps.train }, (_, i) => i + 1).map(n => (
                                   <option key={n} value={n}>{n}</option>
                                 ))}
                               </select>
@@ -2700,7 +2700,7 @@ export function StudioApp() {
                                 value={upgradeTargetLevel}
                                 onChange={(e) => setUpgradeTargetLevel(Number(e.target.value))}
                               >
-                                {Array.from({ length: session.islandMax ?? 10 }, (_, i) => i + 1).map(n => (
+                                {Array.from({ length: session.islandMax ?? session.upgradeCaps.island }, (_, i) => i + 1).map(n => (
                                   <option key={n} value={n}>{n}</option>
                                 ))}
                               </select>

@@ -83,14 +83,23 @@ touched.
   `injectUpgradeLevels(xml, kind, ids, target)` live in `inject.server.ts`.
 - The target is clamped to the save's own maximum (`factoryMax` in the
   snapshot): a level the save never contained cannot be shown to be valid.
-- `injectUpgradeLevels` reports `changed: 0` with a `reason` (`missing` = no
-  Upgrade block at all, `empty` = self-closing `<Upgrade version="4"/>` or no
-  rows of that kind, `noop` = rows already at/above target), and `applySave`
-  turns each into a distinct thrown error: the Academy-empty guidance for
-  `missing`/`empty`, the "không có xưởng nào thay đổi" guard for `noop` so a
-  no-op is never reported as success — the failure mode that got the card tab
-  removed. An empty Academy block is never filled with invented rows: bonus
-  values scale per level and the save carries no template for them.
+- `injectUpgradeLevels` upserts: rows below target are raised with the exact
+  `level`/`slx` pair; requested ids the save never had are created with the
+  uniform maxed bonus templates measured from `mGameInfo_decoded.xml`
+  (factories `xp/money/timeBonus=100 shelfBonus=2`, trains `xp/timeBonus=100`,
+  islands `timeBonus=101 probability2/3=100` — every L38+ row in that real
+  save carries these verbatim, and a created max row is byte-identical to its
+  reference twin). Unknown ids can neither match nor be created; cross-kind
+  ids are ignored. It reports `changed: 0` with reason `noop` only when every
+  requested row already sits at the clamped target, and `applySave` turns
+  that into the thrown "không có xưởng nào thay đổi" guard so a no-op is
+  never reported as success — the failure mode that got the card tab removed.
+- The ceiling is the save's own max when it has rows, else the reference caps
+  (`UPGRADE_REF_CAP`: factories 53, trains/islands 31 — highest levels
+  observed in `mGameInfo_decoded.xml`), exposed to the UI as `upgradeCaps`
+  for the target dropdowns. A self-closing `<Upgrade version="4"/>` is
+  expanded in place; a missing block is inserted via `insertInsideRoot()` —
+  never appended at EOF.
 - The upgrades tab defaults its target to the save's own max on each new
   session (a hardcoded `1` used to guarantee either a mass downgrade or a
   no-op error) and shows an `upgradesEmpty` hint when the save carries no

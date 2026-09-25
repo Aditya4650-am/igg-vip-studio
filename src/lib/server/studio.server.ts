@@ -7,7 +7,7 @@ import { applyStatChanges, parseStats, readAnyVar, STAT_ALIASES } from "./townsh
 import { shellErrorMessage } from "./township/save-decode.server";
 import { findUnbalancedTag } from "./township/xml-edit.server";
 import { applyBarnCapacity, applyBarnItems, barnInfo, ensureBarnCapacity } from "./township/barn.server";
-import { injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, injectUpgradeLevels, parseProfileUnlocked, upgradeMaxLevel, discoverUpgrades } from "./township/inject.server";
+import { injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, injectUpgradeLevels, parseProfileUnlocked, upgradeMaxLevel, discoverUpgrades, UPGRADE_REF_CAP } from "./township/inject.server";
 import { grantArtifacts } from "./township/museum.server";
 import { grantCards, countOwnedCards } from "./township/cards.server";
 import { completeZoo, discoverZoo, type ZooPaddock } from "./township/zoo.server";
@@ -428,10 +428,7 @@ export function applySave(p: SavePayload) {
       if (!ids.length) throw new Error("Phiên ánh xạ đã hết hạn — hãy Kết nối lại rồi thử lại");
       if (target > 0) {
         const r = injectUpgradeLevels(s.rawXml, "Factory", ids, target);
-        if (!r.changed) {
-          if (r.reason === "missing" || r.reason === "empty") throw new Error("Academy chưa có dữ liệu xưởng trong save — mở Academy trong game, nâng cấp 1 xưởng rồi pull lại");
-          throw new Error("Không có xưởng nào thay đổi");
-        }
+        if (!r.changed) throw new Error("Không có xưởng nào thay đổi");
         s.rawXml = r.xml;
         parts.push(`factory(${r.changed})`);
       }
@@ -442,10 +439,7 @@ export function applySave(p: SavePayload) {
       if (!ids.length) throw new Error("Phiên ánh xạ đã hết hạn — hãy Kết nối lại rồi thử lại");
       if (target > 0) {
         const r = injectUpgradeLevels(s.rawXml, "Train", ids, target);
-        if (!r.changed) {
-          if (r.reason === "missing" || r.reason === "empty") throw new Error("Academy chưa có dữ liệu tàu hỏa trong save — mở Academy trong game, nâng cấp 1 lần rồi pull lại");
-          throw new Error("Không có tàu hỏa nào thay đổi");
-        }
+        if (!r.changed) throw new Error("Không có tàu hỏa nào thay đổi");
         s.rawXml = r.xml;
         parts.push(`train(${r.changed})`);
       }
@@ -456,10 +450,7 @@ export function applySave(p: SavePayload) {
       if (!ids.length) throw new Error("Phiên ánh xạ đã hết hạn — hãy Kết nối lại rồi thử lại");
       if (target > 0) {
         const r = injectUpgradeLevels(s.rawXml, "Island", ids, target);
-        if (!r.changed) {
-          if (r.reason === "missing" || r.reason === "empty") throw new Error("Academy chưa có dữ liệu đảo trong save — mở Academy trong game, nâng cấp 1 lần rồi pull lại");
-          throw new Error("Không có đảo nào thay đổi");
-        }
+        if (!r.changed) throw new Error("Không có đảo nào thay đổi");
         s.rawXml = r.xml;
         parts.push(`island(${r.changed})`);
       }
@@ -632,6 +623,7 @@ export function snapshot(s: Session) {
     factoryMax: factoryMax || undefined,
     trainMax: trainMax || undefined,
     islandMax: islandMax || undefined,
+    upgradeCaps: { factory: UPGRADE_REF_CAP.Factory, train: UPGRADE_REF_CAP.Train, island: UPGRADE_REF_CAP.Island },
     log: s.log.slice(-12).map(safeLogLine),
   };
 }

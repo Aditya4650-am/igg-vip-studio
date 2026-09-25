@@ -1,6 +1,7 @@
 import { writeVar } from "./vars.server";
 import { SKINS_CATALOG } from "./skins-catalog.server";
 import { insertInsideRoot } from "./xml-edit.server";
+import { RAW_FACTORIES, RAW_ISLANDS, RAW_TRAINS } from "../catalogs.data.server";
 
 function asText(xml: string | Buffer) {
   return typeof xml === "string" ? xml : xml.toString("utf8");
@@ -334,6 +335,34 @@ function slxFor(level: number): number {
   return level ^ UPGRADE_KEY;
 }
 
+/**
+ * Reference ceilings measured from mGameInfo_decoded.xml (a real, working
+ * save in this repo): the highest level observed per kind. Used ONLY when
+ * the save carries no rows of that kind yet — saves with rows keep their
+ * own max as the ceiling, so a level the save never reached is never
+ * invented for it.
+ */
+export const UPGRADE_REF_CAP = { Factory: 53, Train: 31, Island: 31 } as const;
+
+// Uniform maxed bonus templates measured from the same reference save:
+// every L38+ factory row carries xp/money/timeBonus=100 + shelfBonus=2,
+// every train row xp/timeBonus=100, every island row timeBonus=101 +
+// probability2/3=100. Created rows reuse these verbatim, so every value
+// written already appears in game-accepted data.
+const UPGRADE_BONUS: Record<"Factory" | "Train" | "Island", Record<string, string>> = {
+  Factory: { xpBonus: "100", moneyBonus: "100", timeBonus: "100", shelfBonus: "2" },
+  Train: { xpBonus: "100", timeBonus: "100" },
+  Island: { timeBonus: "101", probability2: "100", probability3: "100" },
+};
+
+// Real game ids per kind. Creation only ever uses these — an unknown id
+// can neither match nor be created.
+const KNOWN_UPGRADE_IDS: Record<"Factory" | "Train" | "Island", ReadonlySet<string>> = {
+  Factory: new Set(RAW_FACTORIES.flatMap((g) => g.items.map((i) => i.id))),
+  Train: new Set(RAW_TRAINS.flatMap((g) => g.items.map((i) => i.id))),
+  Island: new Set(RAW_ISLANDS.flatMap((g) => g.items.map((i) => i.id))),
+};
+
 function parseUpgradeBlock(xml: string) {
   const m = xml.match(/<Upgrade\b[^>]*version="4"[^>]*>([\s\S]*?)<\/Upgrade>/i);
   if (m) {
@@ -382,13 +411,15 @@ export function upgradeMaxLevel(xml: string, kind: "Factory" | "Train" | "Island
 }
 
 /**
- * Upgrade selected rows to targetLevel (clamped to save's own max).
- * `ids` are real game IDs. Returns { xml, changed, reason }.
- * reason is "missing" when the save has no Upgrade block at all, "empty"
- * when the block (or that kind's rows) holds nothing to raise, and "noop"
- * when rows exist but already sit at/above the clamped target. Callers turn
- * each into a distinct error so a no-op is never reported as success and an
- * empty Academy never looks like a silent no-op.
+ * Raise selected rows to targetLevel (clamped to the save's own max when it
+ * has rows, else to the reference cap). `ids` are real game IDs; unknown ids
+ * are ignored entirely. Rows the save never had are created with the
+ * reference bonus template and an exact level/slx pair, then counted in
+ * `changed`. Returns { xml, changed, reason }: "missing" only when there is
+ * no Upgrade block to work with is now handled by creation, so in practice
+ * callers see "ok", "empty" (non-positive target) or "noop" (rows already
+ * at/above the clamped target). The no-op case must still surface as an
+ * error, never as success.
  */
 export function injectUpgradeLevels(
   xml: string,
@@ -396,57 +427,44 @@ export function injectUpgradeLevels(
   ids: string[],
   targetLevel: number
 ): { xml: string; changed: number; reason: "ok" | "missing" | "empty" | "noop" } {
+  const known = KNOWN_UPGRADE_IDS[kind];
+  const want = new Set(ids.filter((id) => known.has(id)));
+  if (!want.size) return { xml, changed: 0, reason: "noop" };
+
   const parsed = parseUpgradeBlock(xml);
-  if (!parsed.raw) return { xml, changed: 0, reason: "missing" };
-
+  const hasBlock = parsed.raw !== "";
   const rows = kind === "Factory" ? parsed.factories : kind === "Train" ? parsed.trains : parsed.islands;
-  if (!rows.length) return { xml, changed: 0, reason: "empty" };
 
-  const maxAllowed = upgradeMaxLevel(xml, kind);
-  const clamped = Math.min(targetLevel, maxAllowed);
+  const saveMax = upgradeMaxLevel(xml, kind);
+  const cap = saveMax > 0 ? saveMax : UPGRADE_REF_CAP[kind];
+  const clamped = Math.min(targetLevel, cap);
   if (clamped <= 0) return { xml, changed: 0, reason: "empty" };
 
   let changed = 0;
-  const want = new Set(ids);
 
-  if (kind === "Factory") {
-    for (const row of parsed.factories) {
-      if (want.has(row.id)) {
-        const newLevel = Math.min(clamped, maxAllowed);
-        if (Number(row.level) !== newLevel) {
-          row.level = String(newLevel);
-          row.slx = String(slxFor(newLevel));
-          changed++;
-        }
-      }
+  for (const row of rows) {
+    if (!want.has(row.id)) continue;
+    if (Number(row.level) !== clamped) {
+      row.level = String(clamped);
+      row.slx = String(slxFor(clamped));
+      changed++;
     }
-  } else if (kind === "Train") {
-    for (const row of parsed.trains) {
-      if (want.has(row.id)) {
-        const newLevel = Math.min(clamped, maxAllowed);
-        if (Number(row.level) !== newLevel) {
-          row.level = String(newLevel);
-          row.slx = String(slxFor(newLevel));
-          changed++;
-        }
-      }
-    }
-  } else {
-    for (const row of parsed.islands) {
-      if (want.has(row.id)) {
-        const newLevel = Math.min(clamped, maxAllowed);
-        if (Number(row.level) !== newLevel) {
-          row.level = String(newLevel);
-          row.slx = String(slxFor(newLevel));
-          changed++;
-        }
-      }
-    }
+  }
+
+  // Create rows the save never had. Attribute order (id, level, slx, then
+  // bonuses) mirrors the reference save exactly.
+  const have = new Set(rows.map((r) => r.id));
+  for (const id of want) {
+    if (!id || have.has(id)) continue;
+    rows.push({ id, level: String(clamped), slx: String(slxFor(clamped)), ...UPGRADE_BONUS[kind] });
+    have.add(id);
+    changed++;
   }
 
   if (!changed) return { xml, changed: 0, reason: "noop" };
 
   const newBlock = rebuildUpgradeBlock(parsed);
+  if (!hasBlock) return { xml: insertInsideRoot(xml, newBlock), changed, reason: "ok" };
   const newXml = xml.slice(0, parsed.index) + newBlock + xml.slice(parsed.index + parsed.length);
   return { xml: newXml, changed, reason: "ok" };
 }
