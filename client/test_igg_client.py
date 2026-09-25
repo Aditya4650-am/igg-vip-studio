@@ -116,6 +116,36 @@ class ChooseWindowUrl(unittest.TestCase):
         self.assertEqual(c.choose_window_url(BASE), BASE)
 
 
+class DeviceId(unittest.TestCase):
+    """The license device id must survive EXE restarts on one PC."""
+
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self._app_data = os.environ.get("APPDATA")
+        os.environ["APPDATA"] = self._tmp.name
+
+    def tearDown(self):
+        if self._app_data is None:
+            os.environ.pop("APPDATA", None)
+        else:
+            os.environ["APPDATA"] = self._app_data
+        self._tmp.cleanup()
+
+    def test_back_to_back_launches_return_the_same_id(self):
+        first = c.get_device_id()
+        self.assertRegex(first, r"^VIP(?:-[A-Z0-9]{4}){5}$")
+        self.assertEqual(c.get_device_id(), first)
+        self.assertEqual(c.NativeBridge().deviceId(), first)
+
+    def test_a_foreign_file_is_replaced_not_reused(self):
+        (c._app_data_dir() / "device.id").write_text("junk", encoding="utf-8")
+        fresh = c.get_device_id()
+        self.assertRegex(fresh, r"^VIP(?:-[A-Z0-9]{4}){5}$")
+        self.assertEqual(c.get_device_id(), fresh)
+
+
 class OriginIp(unittest.TestCase):
     def test_os_resolver_is_preferred(self):
         def fake(host, *a, **k):

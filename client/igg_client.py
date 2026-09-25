@@ -387,6 +387,12 @@ class NativeBridge:
     def version(self) -> str:
         return APP_VERSION
 
+    # Stable machine id for license binding: minted once, persisted under
+    # %APPDATA%/IGG-VIP-Studio/device.id, so reopening the EXE back to back
+    # returns the same id on one PC and different ids on different PCs.
+    def deviceId(self) -> str:
+        return get_device_id()
+
     # license key storage
     def loadSavedKey(self) -> str:
         try:

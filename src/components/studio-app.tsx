@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { OwnerHub } from "@/components/owner-hub";
 import { cn } from "@/lib/utils";
 import { LANGS, isLang, t, type Lang, type Dict } from "@/lib/i18n";
-import { isDeviceId, mintDeviceId } from "@/lib/device-id";
+import { isDeviceId, mintDeviceId, normalizeDeviceId } from "@/lib/device-id";
 import { AVATAR_MAX, avatarEmoji, avatarGroupId, avatarIconPath, avatarsInRange, type Group, type Item } from "@/lib/catalogs";
 import { MUSEUM_IDS, artifactEmoji, artifactIconPath, museumLabel } from "@/lib/museum";
 import { CARD_GROUPS } from "@/lib/cards";
@@ -47,6 +47,7 @@ type NativeBridge = {
   push: (serial: string, b64: string, options?: { alreadyStopped?: boolean; restart?: boolean }) => Promise<{ ok: boolean }>;
   version: () => Promise<string>;
   installUpdate: (release: { version: string; notes?: string; downloadUrl: string; sha256: string }) => Promise<{ ok: boolean; version?: string; reason?: string }>;
+  deviceId?: () => Promise<string>;
   loadSavedKey: () => Promise<string>;
   saveKey: (key: string) => Promise<{ ok: boolean }>;
   clearSavedKey: () => Promise<{ ok: boolean }>;
@@ -1233,19 +1234,42 @@ export function StudioApp() {
   const autoLoginStartedRef = useRef(false);
 
   useEffect(() => {
+    let stop = false;
     try {
       const stored = localStorage.getItem("igg-vip-lang");
       if (stored && isLang(stored)) setLang(stored);
-      let id = localStorage.getItem("igg-vip-hwid");
-      if (!id || !isDeviceId(id)) {
-        id = mintDeviceId();
-        localStorage.setItem("igg-vip-hwid", id);
-      }
-      setDeviceId(id);
     } catch {
-      /* private mode */
+      /* ignore */
     }
+    void (async () => {
+      // Inside the EXE the id comes from %APPDATA%/device.id via the native
+      // bridge, so reopening back to back keeps one id per PC. Browsers keep
+      // the localStorage id; a missing/invalid one is minted once and kept.
+      // deviceId is optional: old EXE builds simply lack it.
+      let id: string | null = null;
+      try {
+        const nid = await nativeBridge()?.deviceId?.();
+        if (nid && isDeviceId(nid)) id = normalizeDeviceId(nid);
+      } catch {
+        /* fall through to the stored id */
+      }
+      try {
+        if (!id) {
+          const hwid = localStorage.getItem("igg-vip-hwid");
+          if (hwid && isDeviceId(hwid)) id = normalizeDeviceId(hwid);
+        }
+        if (!id) id = mintDeviceId();
+        localStorage.setItem("igg-vip-hwid", id);
+      } catch {
+        /* private mode */
+        id ??= mintDeviceId();
+      }
+      if (!stop) setDeviceId(id);
+    })();
     setTabReady(true);
+    return () => {
+      stop = true;
+    };
   }, []);
 
   useEffect(() => {
