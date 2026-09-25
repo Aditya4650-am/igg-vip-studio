@@ -2730,18 +2730,6 @@ button.premium-button:active:not(:disabled) {
     #4b3308 360deg
   );
   --premium-gold-shadow: 0 0 0 1px rgba(245, 158, 11, 0.12), 0 0 18px rgba(245, 158, 11, 0.1);
-  --premium-rgb-border: conic-gradient(
-    from var(--premium-rgb-angle),
-    rgba(34, 211, 238, 0.62) 0deg,
-    rgba(59, 130, 246, 0.62) 52deg,
-    rgba(139, 92, 246, 0.6) 104deg,
-    rgba(236, 72, 153, 0.55) 156deg,
-    rgba(239, 68, 68, 0.52) 208deg,
-    rgba(249, 115, 22, 0.52) 260deg,
-    rgba(34, 197, 94, 0.58) 312deg,
-    rgba(34, 211, 238, 0.62) 360deg
-  );
-  --premium-rgb-shadow: 0 0 0 1px rgba(139, 92, 246, 0.1), 0 0 18px rgba(56, 189, 248, 0.1), 0 0 44px rgba(139, 92, 246, 0.07);
 }
 
 .app-root .app-sidebar,
@@ -2767,18 +2755,39 @@ button.premium-button:active:not(:disabled) {
   --premium-card-fill: linear-gradient(145deg, rgba(18, 27, 46, 0.99), rgba(10, 15, 28, 0.99));
 }
 
-/* Main dashboard signature edge: 2px ultra-thin animated RGB light-flow
-   (cyan → blue → purple → pink → red → orange → green) around all four
-   edges. Same border-box technique as the gold system, so the interior
-   fill is untouched; muted stops plus a slow 14s loop keep it elegant
-   and futuristic, never gaming-bright. Sidebar, panels and cards keep
-   their gold flow. */
-.app-root .app-main {
-  background-image:
-    var(--premium-card-fill, linear-gradient(145deg, rgba(18, 27, 46, 0.99), rgba(10, 15, 28, 0.99))) padding-box,
-    var(--premium-rgb-border) border-box !important;
-  animation: premium-rgb-flow 14s linear infinite;
-  box-shadow: var(--premium-rgb-shadow), 0 24px 58px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+/* Main dashboard RGB light-flow edge: a 2px comet ring flowing cyan →
+   blue → purple → pink → red → orange → green around all four edges,
+   masked to the edge exactly like the login card, so the interior fill,
+   the gold card system and the layout stay untouched. */
+.app-root .app-main::after {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  padding: 2px;
+  border-radius: inherit;
+  content: "";
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--premium-rgb-angle),
+    rgba(99, 102, 241, 0.16) 0deg,
+    rgba(99, 102, 241, 0.16) 268deg,
+    #22d3ee 290deg,
+    #3b82f6 300deg,
+    #8b5cf6 310deg,
+    #ec4899 320deg,
+    #ef4444 329deg,
+    #f97316 338deg,
+    #22c55e 347deg,
+    #a5f3fc 355deg,
+    rgba(99, 102, 241, 0.16) 360deg
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  opacity: 0.95;
+  filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.35));
+  animation: premium-rgb-flow 9s linear infinite;
 }
 
 .app-root .panel {
@@ -2806,7 +2815,7 @@ button.premium-button:active:not(:disabled) {
 
 /* The dashboard keeps its RGB glow on hover instead of the gold flash. */
 .app-root .app-main:hover {
-  box-shadow: var(--premium-rgb-shadow), 0 0 30px rgba(56, 189, 248, 0.14), 0 26px 64px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
+  box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.14), 0 0 30px rgba(56, 189, 248, 0.14), 0 26px 64px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
 }
 
 .app-root .premium-button,
@@ -2881,6 +2890,7 @@ button.premium-button:active:not(:disabled) {
 @media (prefers-reduced-motion: reduce) {
   .app-root .app-sidebar,
   .app-root .app-main,
+  .app-root .app-main::after,
   .app-root .panel,
   .app-root .device-selector-card,
   .app-root .sidebar-log > div,

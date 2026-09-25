@@ -45,12 +45,13 @@ test("main dashboard wears an animated ultra-thin RGB light-flow border", () => 
   const css = read("../styles.css");
   assert.ok(css.includes("@property --premium-rgb-angle"), "rgb angle property must exist");
   assert.ok(css.includes("@keyframes premium-rgb-flow"), "rgb flow keyframes must exist");
-  for (const stop of ["34, 211, 238", "59, 130, 246", "139, 92, 246", "236, 72, 153", "239, 68, 68", "249, 115, 22", "34, 197, 94"]) {
-    assert.ok(css.includes(stop), `rgb gradient must flow through ${stop}`);
+  assert.ok(css.includes(".app-root .app-main::after"), "the rgb edge must ride on app-main::after like the login card");
+  assert.ok(css.includes("mask-composite: exclude"), "the edge must be masked to the border ring");
+  for (const stop of ["#22d3ee", "#3b82f6", "#8b5cf6", "#ec4899", "#ef4444", "#f97316", "#22c55e"]) {
+    assert.ok(css.includes(stop), `rgb edge must flow through ${stop}`);
   }
-  assert.ok(css.includes("var(--premium-rgb-border)"), "the dashboard must use the rgb border layer");
-  assert.ok(css.includes("premium-rgb-flow 14s"), "the rgb flow must run slow and smooth");
-  assert.ok(css.includes("var(--premium-rgb-shadow)"), "the matching glow must exist");
+  assert.ok(css.includes("premium-rgb-flow 9s"), "the rgb flow must run smooth and continuous");
+  assert.ok(!css.includes("var(--premium-rgb-border)"), "no dead rgb layer vars may remain");
 });
 
 test("tab bar renders two premium rows: 8 primaries plus 5 below, never 13 squeezed slots", () => {
