@@ -1173,7 +1173,6 @@ export function StudioApp() {
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [view, setView] = useState<"client" | "control">("client");
   const [deviceId, setDeviceId] = useState("VIP-LOCAL");
-  const [deviceReady, setDeviceReady] = useState(false);
   const [copied, setCopied] = useState(false);
   const [sheet, setSheet] = useState<Sheet>("none");
   const [freshRelease, setFreshRelease] = useState<{ version: string; notes: string; downloadUrl: string; sha256: string } | null>(null);
@@ -1232,7 +1231,6 @@ export function StudioApp() {
   const [pendingUpgradeIsland, setPendingUpgradeIsland] = useState(false);
   const initialStatsRef = useRef<Record<string, string>>({});
   const localInfoAtRef = useRef(0);
-  const autoLoginStartedRef = useRef(false);
 
   useEffect(() => {
     let stop = false;
@@ -1328,7 +1326,6 @@ export function StudioApp() {
         }
         setDeviceId(nid);
       }
-      if (!stop) setDeviceReady(true);
     })();
     setTabReady(true);
     return () => {
@@ -1509,26 +1506,6 @@ export function StudioApp() {
       setBusy(false);
     }
   };
-
-  useEffect(() => {
-    if (!tabReady || !deviceReady || token || autoLoginStartedRef.current) return;
-    autoLoginStartedRef.current = true;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const native = nativeBridge();
-        const saved = native
-          ? await native.loadSavedKey()
-          : localStorage.getItem("igg-vip-license-key") || "";
-        if (cancelled || !saved.trim()) return;
-        setKey(saved.trim());
-        await unlock(saved.trim());
-      } catch {
-        // Keep the manual login form available when auto-login cannot run.
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [tabReady, deviceReady, token]);
 
   const refreshLocalInfoCached = useCallback(async (force = false) => {
     if (!token || !session || !device) return;

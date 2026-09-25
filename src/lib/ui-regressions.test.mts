@@ -75,10 +75,14 @@ test("device id waits for the native bridge instead of minting per launch", () =
   // The shell injects window.iggNative ~100ms after boot; a one-shot read
   // here would miss it every launch and mint a fresh random id instead.
   assert.ok(tsx.includes("igg-native-ready"), "boot must listen for bridge injection");
-  assert.ok(tsx.includes("deviceReady"), "auto-login must wait for the settled id");
-  assert.ok(tsx.includes("!deviceReady || token"), "auto-login gate must include readiness");
   // Old EXE builds without deviceId must resolve immediately, never hang.
   assert.ok(tsx.includes('typeof bridge.deviceId !== "function"'), "old bridge must short-circuit");
+});
+
+test("every launch stops at the login screen, never auto-unlocks", () => {
+  const tsx = read("../components/studio-app.tsx");
+  assert.ok(!tsx.includes("autoLogin"), "no auto-login path may remain");
+  assert.ok(!tsx.includes("loadSavedKey()"), "boot must not read the saved key");
 });
 
 test("tab bar renders two premium rows: 8 primaries plus 5 below, never 13 squeezed slots", () => {
