@@ -1,5 +1,3 @@
-import { insertInsideRoot } from "./xml-edit.server";
-
 /** All igg-vip-tool Data fields (same Var names as the original Python tool). */
 export const FIELD_MAP: Record<string, string> = {
   tca: "moneyCash",
@@ -9,16 +7,13 @@ export const FIELD_MAP: Record<string, string> = {
   m3l: "FirstAttemptM3Levels",
   liv: "LivesSent",
   hlp: "Achievement_Teamwork",
+  crd: "FullCardCollections",
   reg: "RegataTasksCompleted",
   dat: "gameStartDate",
   exp: "expeditionEnergy",
   residents: "residents",
   match3Life: "match3Life",
   key: "key",
-  crd: "FullCardCollections",
-  xpr: "experience",
-  xpl: "ExpandLevel",
-  zxl: "ZooExpandLevel",
   spentCash: "spentCash",
   earnedCash: "earnedCash",
   EarnedCoins: "EarnedCoins",
@@ -30,6 +25,9 @@ export const FIELD_MAP: Record<string, string> = {
   WareHouseCashUpgrade: "WareHouseCashUpgrade",
   WHUdup: "WHUdup",
   Match3Lives_infTime: "Match3Lives_infTime",
+  xpr: "experience",
+  xpl: "ExpandLevel",
+  zxl: "ZooExpandLevel",
 };
 
 // Match-3 progress is mirrored across these three Vars in the legacy/TWN tool.
@@ -78,40 +76,19 @@ export function readAnyVar(xml: string, names: readonly string[]): string | null
 export function writeVar(xml: string, varName: string, value: string): string {
   const n = varName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const v = String(value);
-  let text = xml;
-  let changed = false;
-  
-  // Var with v="..." (name before v) - replace ALL occurrences, preserve rest of tag (t="b" etc.)
-  const a = new RegExp(`(<Var\\b[^>]*?\\bname="${n}"[^>]*?\\bv=")([^"]*)(")([^>]*)`, "gi");
-  if (a.test(text)) { text = text.replace(a, `$1${v}$3$4`); changed = true; }
-  // Var with v="..." (v before name) - replace ALL occurrences, preserve rest of tag
-  const b = new RegExp(`(<Var\\b[^>]*?\\bv=")([^"]*)(")([^>]*?\\bname="${n}"[^>]*)`, "gi");
-  if (b.test(text)) { text = text.replace(b, `$1${v}$3$4`); changed = true; }
-  // DataElem with value="..." (name before value) - replace ALL occurrences, preserve rest
-  const c = new RegExp(`(<DataElem\\b[^>]*?\\bname="${n}"[^>]*?\\bvalue=")([^"]*)(")([^>]*)`, "gi");
-  if (c.test(text)) { text = text.replace(c, `$1${v}$3$4`); changed = true; }
-  // DataElem with value="..." (value before name) - replace ALL occurrences, preserve rest
-  const d = new RegExp(`(<DataElem\\b[^>]*?\\bvalue=")([^"]*)(")([^>]*?\\bname="${n}"[^>]*)`, "gi");
-  if (d.test(text)) { text = text.replace(d, `$1${v}$3$4`); changed = true; }
-  // DataElem with type="..." value="..." (name before type before value) - replace ALL, preserve rest
-  const e = new RegExp(`(<DataElem\\b[^>]*?\\bname="${n}"[^>]*?\\btype="[^"]*"[^>]*?\\bvalue=")([^"]*)(")([^>]*)`, "gi");
-  if (e.test(text)) { text = text.replace(e, `$1${v}$3$4`); changed = true; }
-  const f = new RegExp(`(<DataElem\\b[^>]*?\\btype="[^"]*"[^>]*?\\bvalue=")([^"]*)(")([^>]*?\\bname="${n}"[^>]*)`, "gi");
-  if (f.test(text)) { text = text.replace(f, `$1${v}$3$4`); changed = true; }
-  const g = new RegExp(`(<DataElem\\b[^>]*?\\bname="${n}"[^>]*?\\bvalue=")([^"]*)(")([^>]*?\\btype="[^"]*"[^>]*)`, "gi");
-  if (g.test(text)) { text = text.replace(g, `$1${v}$3$4`); changed = true; }
-  const h = new RegExp(`(<DataElem\\b[^>]*?\\bvalue=")([^"]*)(")([^>]*?\\btype="[^"]*"[^>]*?\\bname="${n}"[^>]*)`, "gi");
-  if (h.test(text)) { text = text.replace(h, `$1${v}$3$4`); changed = true; }
-  
-  // A value typed as `i` but holding something non-numeric makes the game's
-  // loader reject the whole save, so only claim a numeric type when the value
-  // really is an integer.
-  if (!changed) {
-    const type = /^-?\d+$/.test(v) ? "i" : "s";
-    const insert = `<Var name="${varName}" v="${v}" t="${type}"/>`;
-    return insertInsideRoot(xml, insert);
+  const a = new RegExp(`(<Var\\b[^>]*?\\bname="${n}"[^>]*?\\bv=")([^"]*)(")`, "i");
+  if (a.test(xml)) return xml.replace(a, `$1${v}$3`);
+  const b = new RegExp(`(<Var\\b[^>]*?\\bv=")([^"]*)("[^>]*?\\bname="${n}")`, "i");
+  if (b.test(xml)) return xml.replace(b, `$1${v}$3`);
+  const c = new RegExp(`(<DataElem\\b[^>]*?\\bname="${n}"[^>]*?\\bvalue=")([^"]*)(")`, "i");
+  if (c.test(xml)) return xml.replace(c, `$1${v}$3`);
+  const d = new RegExp(`(<DataElem\\b[^>]*?\\bvalue=")([^"]*)("[^>]*?\\bname="${n}")`, "i");
+  if (d.test(xml)) return xml.replace(d, `$1${v}$3`);
+  const insert = `<Var name="${varName}" v="${v}" t="i"/>`;
+  for (const closer of ["</Global>", "</root>", "</Root>", "</ROOT>"]) {
+    if (xml.includes(closer)) return xml.replace(closer, insert + closer);
   }
-  return text;
+  return xml + insert;
 }
 
 export function formatDat(raw: string | null): string {

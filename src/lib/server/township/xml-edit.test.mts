@@ -8,10 +8,10 @@ import { findUnbalancedTag, insertInsideRoot, replaceElement } from "./xml-edit.
 
 const wellFormed = (xml: string) => assert.equal(findUnbalancedTag(xml), null, `expected balanced XML, got: ${xml}`);
 
-test("writeVar inserts inside the root and types non-numeric values as s", () => {
+test("writeVar inserts inside the root and uses t=i for new inserts (reference behavior)", () => {
   const out = writeVar("<Global><Var name='a' v='1'/></Global>", "NewVar", "hello");
   wellFormed(out);
-  assert.match(out, /<Var name="NewVar" v="hello" t="s"\/>/);
+  assert.match(out, /<Var name="NewVar" v="hello" t="i"\/>/);
   assert.ok(out.indexOf("NewVar") < out.indexOf("</Global>"), "insert must be inside the root");
 
   const numeric = writeVar("<Global/>", "N", "42");
