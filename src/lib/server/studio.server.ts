@@ -11,12 +11,7 @@ import { injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, 
 import { grantArtifacts } from "./township/museum.server";
 import { grantCards, countOwnedCards } from "./township/cards.server";
 import { completeZoo, discoverZoo, type ZooPaddock } from "./township/zoo.server";
-import {
-  backupFreshStartState,
-  restoreFreshStartState,
-  verifyFreshStartState,
-  wipeFreshStartPlan,
-} from "./township/freshstart.server";
+
 import {
   applyDesban,
   cloneDecorOnly,
@@ -73,16 +68,6 @@ export type Session = {
   friends: Friend[];
   friendCity: string | null;
   unban: { mode: string | null; applied: boolean };
-  freshBackupCity?: string | null;
-  freshBackupLocal?: string | null;
-  freshBackupMeta?: {
-    serial: string;
-    cityPath: string;
-    localPath: string | null;
-    oldCityId: string;
-    oldLevel: number;
-    hasLoginBackup: boolean;
-  } | null;
   log: string[];
 };
 
@@ -598,36 +583,6 @@ export function applyDecorActions(
   }
   s.profileUnlocked = cloakProfileUnlocked(parseProfileUnlocked(s.rawXml));
   return { ...snapshot(s), fileB64: encodeSave(s) };
-}
-
-/**
- * Fresh-start ("New Game") wrappers. Device file traffic stays in the UI
- * via the native bridge; these only validate, track the backup on the
- * session, and verify the fresh city. applySave and snapshot are untouched.
- */
-export function backupFreshStart(
-  sessionId: string,
-  token: string,
-  input: { serial: string; cityPath: string; localPath?: string | null; cityB64: string; localB64?: string | null },
-) {
-  const s = requireSession(sessionId, token);
-  return backupFreshStartState(s, input);
-}
-
-export function wipeFreshStart(sessionId: string, token: string) {
-  const s = requireSession(sessionId, token);
-  return wipeFreshStartPlan(s);
-}
-
-export function verifyFreshStart(sessionId: string, token: string, cityB64: string) {
-  const s = requireSession(sessionId, token);
-  return verifyFreshStartState(s, cityB64);
-}
-
-export function restoreFreshStart(sessionId: string, token: string) {
-  const s = requireSession(sessionId, token);
-  const backup = restoreFreshStartState(s);
-  return { ...snapshot(s), backup };
 }
 
 function safeLogLine(line: string) {

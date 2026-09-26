@@ -30,13 +30,9 @@ import {
   verifyLicense,
   attachFriendCity,
   attachLocal,
-  backupFreshStart,
-  wipeFreshStart,
-  verifyFreshStart,
-  restoreFreshStart,
 } from "@/lib/studio-api";
 
-type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "barn" | "museum" | "cards" | "zoo" | "upgrades" | "newgame";
+type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "barn" | "museum" | "cards" | "zoo" | "upgrades";
 type SessionSnap = Awaited<ReturnType<typeof connectLoad>>;
 type Catalogs = Awaited<ReturnType<typeof getCatalogs>>;
 type UnbanMode = "inicial" | "completo" | "novo";
@@ -94,7 +90,7 @@ function downloadText(name: string, text: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "barn", "museum", "cards", "zoo", "upgrades", "newgame"];
+const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "barn", "museum", "cards", "zoo", "upgrades"];
 // Premium tab bar: 8 primary slots + a "More" overflow for the rest, so
 // labels never compress or wrap. Derived from TABS — one source of truth.
 const PRIMARY_TABS: Tab[] = TABS.slice(0, 8);
@@ -113,7 +109,6 @@ const TAB_KEY: Record<Tab, keyof Dict> = {
   cards: "tabCards",
   zoo: "tabZoo",
   upgrades: "tabUpgrades",
-  newgame: "tabNewGame",
 };
 const TAB_EMOJI: Record<Tab, string> = {
   data: "📊",
@@ -129,7 +124,6 @@ const TAB_EMOJI: Record<Tab, string> = {
   cards: "🃏",
   zoo: "🐾",
   upgrades: "⚙️",
-  newgame: "🎮",
 };
 
 
@@ -1236,12 +1230,6 @@ export function StudioApp() {
   const [pendingUpgradeFactory, setPendingUpgradeFactory] = useState(false);
   const [pendingUpgradeTrain, setPendingUpgradeTrain] = useState(false);
   const [pendingUpgradeIsland, setPendingUpgradeIsland] = useState(false);
-  // Fresh-start ("New Game") phase machine. Fully isolated: nothing from
-  // other tabs' state is read or written here.
-  const [freshPhase, setFreshPhase] = useState<"idle" | "backedup" | "wiped" | "verified">("idle");
-  const [freshBackup, setFreshBackup] = useState<{ oldCityId: string; oldLevel: number } | null>(null);
-  const [freshCheck, setFreshCheck] = useState<{ newCityId: string; level: number } | null>(null);
-  const [freshConfirm, setFreshConfirm] = useState("");
   const initialStatsRef = useRef<Record<string, string>>({});
   const localInfoAtRef = useRef(0);
 
@@ -1820,156 +1808,6 @@ export function StudioApp() {
     }
   };
 
-  // Fresh-start ("New Game") flow. Phase machine only: idle -> backed up ->
-  // wiped -> verified. Device file traffic goes through the native bridge;
-  // the server only validates, tracks the backup, and verifies the result.
-  const onFreshBackup = async () => {
-    if (!token || !session || !device) {
-      toast.error(tr("actionFailed"));
-      return;
-    }
-    const native = nativeBridge();
-    if (!native) {
-      toast.error(tr("actionFailed"));
-      return;
-    }
-    setBusy(true);
-    try {
-      const city = await native.pull(device);
-      // mLocalInfo is optional — some installs never create it. Backup
-      // proceeds on the city file alone instead of blocking the whole flow.
-      let local: { file: string; b64: string } | null = null;
-      try {
-        local = await native.pullLocalInfo(device);
-      } catch {
-        local = null;
-      }
-      const r = await backupFreshStart({
-        data: {
-          token,
-          sessionId: session.sessionId,
-          serial: device,
-          cityPath: city.file,
-          localPath: local?.file ?? null,
-          cityB64: city.b64,
-          localB64: local?.b64 ?? null,
-        },
-      });
-      setFreshBackup({ oldCityId: r.oldCityId, oldLevel: r.oldLevel });
-      setFreshCheck(null);
-      setFreshConfirm("");
-      setFreshPhase("backedup");
-      toast.success(tr("saved"));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : tr("nothing"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onFreshWipe = async () => {
-    if (!token || !session || !device) {
-      toast.error(tr("actionFailed"));
-      return;
-    }
-    const native = nativeBridge();
-    if (!native || typeof native.wipeFiles !== "function") {
-      toast.error(tr("fsNeedUpdate"));
-      return;
-    }
-    setBusy(true);
-    try {
-      const plan = await wipeFreshStart({ data: { token, sessionId: session.sessionId } });
-      const r = await native.wipeFiles(plan.serial, plan.paths);
-      if (!r.ok || (r.wiped ?? []).length !== plan.paths.length) {
-        throw new Error(r.error || tr("actionFailed"));
-      }
-      setFreshPhase("wiped");
-      setFreshConfirm("");
-      toast.success(tr("saved"));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : tr("nothing"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onFreshVerify = async () => {
-    if (!token || !session || !device) {
-      toast.error(tr("actionFailed"));
-      return;
-    }
-    const native = nativeBridge();
-    if (!native) {
-      toast.error(tr("actionFailed"));
-      return;
-    }
-    setBusy(true);
-    try {
-      // Two sequential fresh pulls: the game needs a restart between the
-      // wipe and a trustworthy read, and the check must hold twice on the
-      // same new city.
-      const first = await native.pull(device);
-      const r1 = await verifyFreshStart({ data: { token, sessionId: session.sessionId, cityB64: first.b64 } });
-      const second = await native.pull(device);
-      const r2 = await verifyFreshStart({ data: { token, sessionId: session.sessionId, cityB64: second.b64 } });
-      
-      if (!r2.newCityId || !r2.level) {
-        throw new Error(tr("fsVerifyIncomplete") || "Fresh city read incomplete — play tutorial, reach Level 1, restart game twice");
-      }
-      if (r2.level !== 1) {
-        throw new Error(`${tr("fsVerifyLevel") || "Fresh city is level"} ${r2.level} — ${tr("fsVerifyNeedLevel1") || "must be Level 1 (play tutorial, restart game twice)"}`);
-      }
-      if (!freshBackup?.oldCityId) {
-        throw new Error(tr("fsNeedBackup") || "Backup first");
-      }
-      if (r2.newCityId === freshBackup.oldCityId) {
-        throw new Error(tr("fsVerifySameCity") || "Same city ID as backup — wipe did not work. Ensure game was force-stopped and tutorial completed.");
-      }
-      if (r1.newCityId !== r2.newCityId) {
-        throw new Error(tr("fsVerifyMismatch") || "City ID changed between reads — game not stable yet. Restart game once more and retry.");
-      }
-      setFreshCheck({ newCityId: r2.newCityId, level: r2.level });
-      setFreshPhase("verified");
-      toast.success(tr("saved"));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : tr("nothing"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onFreshRestore = async () => {
-    if (!token || !session || !device) {
-      toast.error(tr("actionFailed"));
-      return;
-    }
-    const native = nativeBridge();
-    if (!native || typeof native.wipeFiles !== "function") {
-      toast.error(tr("fsNeedUpdate"));
-      return;
-    }
-    setBusy(true);
-    try {
-      const r = await restoreFreshStart({ data: { token, sessionId: session.sessionId } });
-      await native.push(r.backup.serial, r.backup.cityB64);
-      // Login backup may not exist — only drop the fresh login when we know
-      // the original path. City restore alone is enough to bring the ban back.
-      if (r.backup.localPath) {
-        const w = await native.wipeFiles(r.backup.serial, [r.backup.localPath]);
-        if (!w.ok) throw new Error(w.error || tr("actionFailed"));
-      }
-      setFreshPhase("idle");
-      setFreshCheck(null);
-      setFreshConfirm("");
-      toast.success(tr("saved"));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : tr("nothing"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const applyAvaRange = (on: boolean) => {
     const { byGroup, lo } = avatarsInRange(avaFrom, avaTo);
     if (on) {
@@ -2025,7 +1863,6 @@ export function StudioApp() {
     cards: cardsCount,
     zoo: zooSel.count,
     upgrades: upgradeFactorySel.count + upgradeTrainSel.count + upgradeIslandSel.count,
-    newgame: freshPhase === "verified" ? 1 : 0,
   };
 
   const barnTotal = Object.values(barnItems).reduce((n, v) => n + (Number(v) || 0), 0);
@@ -2952,98 +2789,6 @@ export function StudioApp() {
                         ))}
                       </section>
                     </div>
-                  </div>
-                )}
-
-                {tab === "newgame" && session && (
-                  <div className="space-y-3">
-                    <section className="panel">
-                      <div className="mb-3 flex flex-wrap items-center gap-2">
-                        <h3 className="text-xs font-bold tracking-wider text-amber uppercase">
-                          🎮 {tr("tabNewGame")}
-                        </h3>
-                        <span className="text-xs text-muted">
-                          {freshPhase === "idle"
-                            ? tr("fsPhaseIdle")
-                            : freshPhase === "backedup"
-                              ? tr("fsPhaseBackedUp")
-                              : freshPhase === "wiped"
-                                ? tr("fsPhaseWiped")
-                                : tr("fsPhaseVerified")}
-                        </span>
-                      </div>
-
-                      {freshBackup ? (
-                        <p className="mb-3 rounded-md bg-input px-3 py-2 text-sm">
-                          <span className="text-muted">{tr("fsOldCity")}: </span>
-                          <span className="font-mono">{freshBackup.oldCityId}</span>
-                          <span className="text-muted"> · Lv.{freshBackup.oldLevel}</span>
-                        </p>
-                      ) : (
-                        <p className="mb-3 rounded-md bg-input px-3 py-2 text-sm text-amber">{tr("fsNeedBackup")}</p>
-                      )}
-
-                      {freshPhase === "idle" && (
-                        <Button size="sm" variant="primary" disabled={busy || !device} onClick={() => void onFreshBackup()}>
-                          {tr("fsBackupBtn")}
-                        </Button>
-                      )}
-
-                      {freshPhase === "backedup" && (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <input
-                            className="field field-qty"
-                            placeholder={tr("fsTypeDelete")}
-                            value={freshConfirm}
-                            onChange={(e) => setFreshConfirm(e.target.value)}
-                          />
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            disabled={busy || !device || freshConfirm.trim().toUpperCase() !== "DELETE"}
-                            onClick={() => void onFreshWipe()}
-                          >
-                            {tr("fsWipeBtn")}
-                          </Button>
-                        </div>
-                      )}
-
-                      {(freshPhase === "wiped" || freshPhase === "verified") && (
-                        <Button size="sm" variant="primary" disabled={busy || !device} onClick={() => void onFreshVerify()}>
-                          {tr("fsVerifyBtn")}
-                        </Button>
-                      )}
-
-                      {freshPhase === "verified" && freshCheck && freshBackup && (
-                        <div className="mt-3 space-y-2 rounded-md bg-input px-3 py-2 text-sm">
-                          <p>
-                            <span className="text-muted">{tr("fsOldCity")}: </span>
-                            <span className="font-mono text-err line-through">{freshBackup.oldCityId}</span>
-                            {" → "}
-                            <span className="font-mono text-ok">{freshCheck.newCityId}</span>
-                          </p>
-                          <p>
-                            <span className="text-muted">{tr("fsNewCity")}: </span>
-                            <span className="rounded-full bg-ok/15 px-2 py-0.5 text-xs font-semibold text-ok">
-                              Lv.{freshCheck.level}
-                            </span>
-                          </p>
-                          <Button size="sm" variant="danger" disabled={busy || !device} onClick={() => void onFreshRestore()}>
-                            {tr("fsRestoreBtn")}
-                          </Button>
-                        </div>
-                      )}
-
-                      <ul className="mt-3 space-y-1 text-xs text-muted">
-                        <li>1. {tr("fsRule1")}</li>
-                        <li>2. {tr("fsRule2")}</li>
-                        <li>3. {tr("fsRule3")}</li>
-                        <li>4. {tr("fsRule4")}</li>
-                      </ul>
-                      {(freshPhase === "wiped" || freshPhase === "verified") && (
-                        <p className="mt-2 text-xs font-semibold text-amber">{tr("fsDeviceBanned")}</p>
-                      )}
-                    </section>
                   </div>
                 )}
 
