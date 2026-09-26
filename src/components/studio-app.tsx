@@ -1913,7 +1913,22 @@ export function StudioApp() {
       const r1 = await verifyFreshStart({ data: { token, sessionId: session.sessionId, cityB64: first.b64 } });
       const second = await native.pull(device);
       const r2 = await verifyFreshStart({ data: { token, sessionId: session.sessionId, cityB64: second.b64 } });
-      if (r1.newCityId !== r2.newCityId) throw new Error(tr("actionFailed"));
+      
+      if (!r2.newCityId || !r2.level) {
+        throw new Error(tr("fsVerifyIncomplete") || "Fresh city read incomplete — play tutorial, reach Level 1, restart game twice");
+      }
+      if (r2.level !== 1) {
+        throw new Error(`${tr("fsVerifyLevel") || "Fresh city is level"} ${r2.level} — ${tr("fsVerifyNeedLevel1") || "must be Level 1 (play tutorial, restart game twice)"}`);
+      }
+      if (!freshBackup?.oldCityId) {
+        throw new Error(tr("fsNeedBackup") || "Backup first");
+      }
+      if (r2.newCityId === freshBackup.oldCityId) {
+        throw new Error(tr("fsVerifySameCity") || "Same city ID as backup — wipe did not work. Ensure game was force-stopped and tutorial completed.");
+      }
+      if (r1.newCityId !== r2.newCityId) {
+        throw new Error(tr("fsVerifyMismatch") || "City ID changed between reads — game not stable yet. Restart game once more and retry.");
+      }
       setFreshCheck({ newCityId: r2.newCityId, level: r2.level });
       setFreshPhase("verified");
       toast.success(tr("saved"));
