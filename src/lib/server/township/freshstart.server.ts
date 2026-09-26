@@ -8,7 +8,7 @@
  * validate + track state around those calls.
  */
 
-import { decodeContainer } from "./save-decode.server";
+import { decodeContainer, extractXml } from "./save-decode.server";
 
 export type FreshBackupMeta = {
   serial: string;
@@ -39,28 +39,35 @@ export type FreshBackupInput = {
 
 const B64_MAX = 24_000_000;
 
-function mustCityBytes(label: string, b64: string): Buffer {
+/**
+ * Decode any container wrapper (x79, x54, x53, x7d, gzip, PLXE, or plain XML)
+ * and return the raw XML text. Rejects shell-error text that ADB merges into stdout.
+ */
+function decodeToXml(label: string, b64: string): string {
   if (!b64 || b64.length > B64_MAX) throw new Error(`${label} is invalid`);
   const buf = Buffer.from(String(b64), "base64");
   if (!buf.length) throw new Error(`${label} is empty`);
-  // Same shell-error guard as pull: a failed remote command still exits 0
-  // and puts its stderr on stdout, so error text must never pass as a file.
-  // The city file is always plain XML.
-  const head = buf.subarray(0, 256).toString("utf8").replace(/^\uFEFF/, "").trimStart();
-  if (!head.startsWith("<")) throw new Error(`${label} is not a save file`);
-  return buf;
-}
 
-function mustLoginBytes(label: string, b64: string): Buffer {
-  if (!b64 || b64.length > B64_MAX) throw new Error(`${label} is invalid`);
-  const buf = Buffer.from(String(b64), "base64");
-  if (!buf.length) throw new Error(`${label} is empty`);
-  // mLocalInfo ships wrapped in one of several containers (see
-  // save-decode.server.ts), so plain "<" is sufficient but not required —
-  // anything undecodable that isn't XML is still rejected as shell text.
-  const head = buf.subarray(0, 256).toString("utf8").replace(/^\uFEFF/, "").trimStart();
-  if (head.startsWith("<") || decodeContainer(buf)) return buf;
-  throw new Error(`${label} is not a save file`);
+  // Shell-error guard first (same as save-decode.shellErrorMessage): diagnostics
+  // are plain text; real containers have NUL/control bytes.
+  const head = buf.subarray(0, 512);
+  let isShellText = true;
+  for (const b of head) {
+    if (b === 0) { isShellText = false; break; }
+    if (b < 9 || (b > 13 && b < 32)) { isShellText = false; break; }
+  }
+  if (isShellText) {
+    const text = head.toString("utf8").replace(/^\uFEFF/, "");
+    if (!text.trimStart().startsWith("<")) {
+      throw new Error(`${label} is not a save file (looks like shell output)`);
+    }
+  }
+
+  // Try container decode first (handles x79, x54, x53, x7d, gzip, PLXE).
+  const decoded = decodeContainer(buf);
+  const xml = decoded ? extractXml(decoded) : extractXml(buf);
+  if (!xml) throw new Error(`${label}: could not extract XML from container`);
+  return xml;
 }
 
 function parseCityId(xmlText: string): string {
@@ -109,7 +116,7 @@ function requireDevicePath(label: string, p: string): string {
 export function backupFreshStartState(s: FreshSession, input: FreshBackupInput) {
   const serial = requireSerial(input.serial);
   const cityPath = requireDevicePath("City file", input.cityPath);
-  const cityBuf = mustCityBytes("City file", input.cityB64);
+  const cityXml = decodeToXml("City file", input.cityB64);
   // mLocalInfo is optional — some installs never create it (the app's connect
   // flow already treats it as optional). Backup proceeds on the city file
   // alone; wipe/restore then touch only what was actually backed up.
@@ -119,13 +126,12 @@ export function backupFreshStartState(s: FreshSession, input: FreshBackupInput) 
   const rawLocalB64 = String(input.localB64 ?? "");
   if (rawLocalPath && rawLocalB64) {
     localPath = requireDevicePath("Login file", rawLocalPath);
-    mustLoginBytes("Login file", rawLocalB64);
+    decodeToXml("Login file", rawLocalB64); // validate only
     hasLoginBackup = true;
   }
-  const xmlText = textOf(cityBuf);
-  const oldCityId = parseCityId(xmlText);
+  const oldCityId = parseCityId(cityXml);
   if (!oldCityId) throw new Error("Backup invalid: no city id");
-  const oldLevel = parseLevel(xmlText);
+  const oldLevel = parseLevel(cityXml);
   s.freshBackupCity = input.cityB64;
   s.freshBackupLocal = hasLoginBackup ? rawLocalB64 : null;
   s.freshBackupMeta = { serial, cityPath, localPath, oldCityId, oldLevel, hasLoginBackup };
@@ -140,12 +146,11 @@ export function wipeFreshStartPlan(s: FreshSession) {
 
 export function verifyFreshStartState(s: FreshSession, cityB64: string) {
   const b = requireBackup(s);
-  const buf = mustCityBytes("Fresh city file", cityB64);
-  const xmlText = textOf(buf);
-  const newCityId = parseCityId(xmlText);
+  const cityXml = decodeToXml("Fresh city file", cityB64);
+  const newCityId = parseCityId(cityXml);
   if (!newCityId) throw new Error("Fresh city has no id");
   if (newCityId === b.meta.oldCityId) throw new Error("Same city — wipe did not happen");
-  const level = parseLevel(xmlText);
+  const level = parseLevel(cityXml);
   if (level !== 1) throw new Error("Not level 1");
   return { newCityId, level: 1 as const, clean: true as const };
 }
