@@ -71,14 +71,36 @@ function decodeToXml(label: string, b64: string): string {
 }
 
 function parseCityId(xmlText: string): string {
+  // 1) AWS tag - multiple possible attribute names (game uses different ones across builds)
   const aws = xmlText.match(/<AWS\b([^>]*)>/i)?.[1] ?? "";
-  const fromAws = aws.match(/\bcityId="([^"]*)"/i)?.[1] ?? "";
-  if (fromAws) return fromAws;
-  return (
-    xmlText.match(/<Var\b[^>]*?\bname="cityId"[^>]*?\bv="([^"]*)"/i)?.[1] ??
-    xmlText.match(/<Var\b[^>]*?\bv="([^"]*)"[^>]*?\bname="cityId"/i)?.[1] ??
-    ""
-  );
+  for (const attr of ["cityId", "city_id", "fromId", "id", "SaveId", "userId", "UserId", "PlayerId"]) {
+    const m = aws.match(new RegExp(`\\b${attr}\\s*=\\s*"([^"]*)"`, "i"));
+    if (m?.[1]?.trim()) return m[1].trim();
+  }
+
+  // 2) Version tag (some builds put it here)
+  const ver = xmlText.match(/<Version\b([^>]*?)\/?>/i)?.[1] ?? "";
+  for (const attr of ["cityId", "city_id", "fromId", "id", "SaveId", "userId", "UserId", "PlayerId"]) {
+    const m = ver.match(new RegExp(`\\b${attr}\\s*=\\s*"([^"]*)"`, "i"));
+    if (m?.[1]?.trim()) return m[1].trim();
+  }
+
+  // 3) Var elements - multiple possible variable names the game uses for the city/player id
+  const varNames = ["cityId", "SaveId", "userId", "UserId", "PlayerId", "city_id", "fromId", "id"];
+  for (const name of varNames) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const m1 = xmlText.match(new RegExp(`<Var\\b[^>]*\\bname="${escaped}"[^>]*\\bv="([^"]*)"`, "i"));
+    if (m1?.[1]?.trim()) return m1[1].trim();
+    const m2 = xmlText.match(new RegExp(`<Var\\b[^>]*\\bv="([^"]*)"[^>]*\\bname="${escaped}"`, "i"));
+    if (m2?.[1]?.trim()) return m2[1].trim();
+  }
+
+  // 4) Last resort: any attribute that looks like a city id in the first 2KB (covers weird layouts)
+  const head = xmlText.slice(0, 2048);
+  const loose = head.match(/\b(?:city[_-]?id|save[_-]?id|player[_-]?id|user[_-]?id|from[_-]?id)\s*=\s*"([A-Za-z0-9_-]{4,})"/i);
+  if (loose?.[1]?.trim()) return loose[1].trim();
+
+  return "";
 }
 
 function parseLevel(xmlText: string): number {
