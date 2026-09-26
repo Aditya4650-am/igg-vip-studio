@@ -13,7 +13,7 @@ import { LANGS, isLang, t, type Lang, type Dict } from "@/lib/i18n";
 import { isDeviceId, mintDeviceId, normalizeDeviceId } from "@/lib/device-id";
 import { AVATAR_MAX, avatarEmoji, avatarGroupId, avatarIconPath, avatarsInRange, type Group, type Item } from "@/lib/catalogs";
 import { MUSEUM_IDS, artifactEmoji, artifactIconPath, museumLabel } from "@/lib/museum";
-import { CARD_GROUPS } from "@/lib/cards";
+import { CARD_GROUPS, cardIconPath } from "@/lib/cards";
 import { iconForBarn, iconForDecorLabel, iconForGem, iconForGroup, iconForItemLabel, iconForProfileLabel, iconForSkin, iconForStat, iconForSticker, iconForUpgradeLabel, iconForZoo } from "@/lib/game-icon-map";
 import {
   connectLoad,
@@ -2588,6 +2588,21 @@ export function StudioApp() {
                             <label key={it.id} className="premium-chip flex min-h-11 items-center justify-between gap-3 rounded-lg border border-transparent bg-input px-3 hover:border-primary/25">
                               <span className="flex min-w-0 items-center gap-2.5">
                                 <span className="chip-asset chip-emoji" aria-hidden="true">
+                                  {cardIconPath(it.id) ? (
+                                    <img
+                                      src={cardIconPath(it.id)!}
+                                      alt=""
+                                      className="chip-asset-img"
+                                      draggable={false}
+                                      onLoad={(e) => {
+                                        const glyph = e.currentTarget.nextElementSibling as HTMLElement | null;
+                                        if (glyph) glyph.style.display = "none";
+                                      }}
+                                      onError={(e) => {
+                                        e.currentTarget.style.display = "none";
+                                      }}
+                                    />
+                                  ) : null}
                                   <span className="chip-emoji-glyph">🃏</span>
                                 </span>
                                 <span className="chip-label truncate">{it.label}</span>

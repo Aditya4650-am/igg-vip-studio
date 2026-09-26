@@ -2,6 +2,13 @@
 # Name each file EXACTLY as shown (exact case) and zip them per folder.
 
 
+## cards (5)
+public/cards/pack_1.webp
+public/cards/pack_2.webp
+public/cards/pack_3.webp
+public/cards/pack_4.webp
+public/cards/pack_5.webp
+
 ## skins (104)
 public/game-icons/Ship__Classic_ST1.webp
 public/game-icons/Ship__Special_SP9.webp
