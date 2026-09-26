@@ -69,17 +69,58 @@ def main():
 
         pairs = {}  # stem -> label
 
-        # auto tier
+        # auto tier - aggressive multi-tier matching
         for s in fresh:
             st = set(toks(s))
             if not st:
                 continue
+            # Tier 1: exact token containment (strictest)
             cands = [(d, l) for d, l in open_items
                      if contained(st, set(toks(d)) | set(toks(l)))]
             if len(cands) == 1 and cands[0][1] not in pairs.values():
                 pairs[s] = cands[0][1]
-
-        # manual picks (label must still be open)
+                continue
+            # Tier 2: Jaccard >= 0.4 (related enough)
+            cands = []
+            for d, l in open_items:
+                it = set(toks(d)) | set(toks(l))
+                if not it:
+                    continue
+                inter = len(st & it)
+                union = len(st | it)
+                if union > 0:
+                    j = inter / union
+                    if j >= 0.4:
+                        cands.append((d, l, j))
+            if len(cands) == 1 and cands[0][1] not in pairs.values():
+                pairs[s] = cands[0][1]
+                continue
+            # Tier 3: at least 2 token overlap
+            cands = []
+            for d, l in open_items:
+                it = set(toks(d)) | set(toks(l))
+                if not it:
+                    continue
+                overlap = len(st & it)
+                if overlap >= 2:
+                    cands.append((d, l, len(st & it)))
+            if len(cands) == 1 and cands[0][1] not in pairs.values():
+                pairs[s] = cands[0][1]
+                continue
+            # Tier 4: best Jaccard single match (>= 0.25)
+            cands = []
+            for d, l in open_items:
+                it = set(toks(d)) | set(toks(l))
+                if not it:
+                    continue
+                inter = len(st & it)
+                union = len(st | it)
+                if union > 0:
+                    cands.append((d, l, inter / union))
+            if cands:
+                cands.sort(key=lambda x: x[2], reverse=True)
+                if cands[0][2] >= 0.25 and cands[0][1] not in pairs.values():
+                    pairs[s] = cands[0][1]
         by_label = {l: l for _, l in open_items}
         for stem, label in MANUAL.items():
             assert label in by_label, "manual target already mapped: " + label
