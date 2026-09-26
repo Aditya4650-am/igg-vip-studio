@@ -174,7 +174,6 @@ export const GAME_ICON_MAP = {
     "puffedrice": "/barn-goods/puffedrice.webp",
     "rice_casserole": "/barn-goods/rice_casserole.webp",
     "rice_noodle": "/barn-goods/rice_noodle.webp",
-    "ring": "/barn-goods/ring.webp",
     "roseJam": "/barn-goods/roseJam.webp",
     "roseSeed": "/barn-goods/roseSeed.webp",
     "roseSorbet": "/barn-goods/roseSorbet.webp",

@@ -124,7 +124,7 @@ public/game-icons/group__FactoryUpgrades.webp
 public/game-icons/group__TrainUpgrades.webp
 public/game-icons/group__IslandUpgrades.webp
 
-## barn (113)
+## barn (114)
 public/barn-goods/aromatic_oil.webp
 public/barn-goods/arrabbiata.webp
 public/barn-goods/barbie.webp
@@ -208,6 +208,7 @@ public/barn-goods/quiche.webp
 public/barn-goods/ragdoll.webp
 public/barn-goods/ratatouille.webp
 public/barn-goods/readylunch.webp
+public/barn-goods/ring.webp
 public/barn-goods/saltedpeanut.webp
 public/barn-goods/sauce.webp
 public/barn-goods/seafood_salad.webp
