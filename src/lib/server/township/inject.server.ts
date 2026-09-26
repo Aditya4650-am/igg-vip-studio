@@ -11,6 +11,84 @@ function insertBeforeRoot(xml: string, insert: string) {
   return insertInsideRoot(xml, insert);
 }
 
+function insertBeforeGlobal(xml: string, insert: string): string {
+  const globalRegex = /<\/Global\s*>/i;
+  if (globalRegex.test(xml)) {
+    return xml.replace(globalRegex, `${insert}\n$&`);
+  }
+  return xml + insert;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getExistingAvatars(xml: string, maxAva = 398): number[] {
+  const text = asText(xml);
+  const result = new Set<number>();
+  const regex = /<Var\s+name="(Unlocked_ava\d+)"[^/]*\/>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    const m = match[1].match(/^Unlocked_ava(\d+)$/i);
+    if (!m) continue;
+    const id = Number(m[1]);
+    if (Number.isInteger(id) && id >= 1 && id <= maxAva) {
+      result.add(id);
+    }
+  }
+  return [...result].sort((a, b) => a - b);
+}
+
+export function unlockAllAvatars(
+  xml: string,
+  maxAva = 398
+): { xml: string; created: number[]; updated: number[] } {
+  let text = asText(xml);
+  const created: number[] = [];
+  const updated: number[] = [];
+
+  maxAva = Math.max(1, Math.floor(maxAva));
+  const existing = getExistingAvatars(text, maxAva);
+  const existingSet = new Set(existing);
+
+  for (const id of existing) {
+    const name = `Unlocked_ava${id}`;
+    const regex = new RegExp(`<Var\\s+name="${escapeRegExp(name)}"[^/]*\\/\\s*>`, "i");
+    if (regex.test(text)) {
+      text = text.replace(regex, `<Var name="${name}" v="1" t="b"/>`);
+      updated.push(id);
+      continue;
+    }
+    const reverseRegex = new RegExp(`<Var\\b(?=[^>]*\\bname="${escapeRegExp(name)}")(?=[^>]*\\bv=")[^>]*\\/\\s*>`, "i");
+    if (reverseRegex.test(text)) {
+      text = text.replace(reverseRegex, `<Var name="${name}" v="1" t="b"/>`);
+      updated.push(id);
+    }
+  }
+
+  const missing: number[] = [];
+  for (let id = 1; id <= maxAva; id++) {
+    if (!existingSet.has(id)) {
+      missing.push(id);
+    }
+  }
+
+  if (missing.length > 0) {
+    const insert = missing
+      .map((id) => `<Var name="Unlocked_ava${id}" v="1" t="b"/>`)
+      .join("\n");
+    const globalRegex = /<\/Global\s*>/i;
+    if (globalRegex.test(text)) {
+      text = text.replace(globalRegex, `${insert}\n$&`);
+    } else {
+      text = text + "\n" + insert;
+    }
+    created.push(...missing);
+  }
+
+  return { xml: text, created, updated };
+}
+
 /** Set an attribute on an open-tag attribute string, preserving all others. */
 function putAttr(attrs: string, name: string, value: string) {
   const re = new RegExp(`(\\s${name}\\s*=\\s*)("[^"]*"|'[^']*'|[^\\s/>]+)`, "i");
