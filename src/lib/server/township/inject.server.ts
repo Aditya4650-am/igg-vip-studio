@@ -87,6 +87,11 @@ export function unlockAllAvatars(
     created.push(...missing);
   }
 
+  // Also populate UnlockedAvatars with comma-separated list of all unlocked avatars
+  const allAvatars = [...Array(maxAva).keys()].map(i => i + 1).join(",");
+  text = writeVar(text, "UnlockedAvatars", allAvatars);
+  // Ensure AvaUnlocked flag is set
+  text = writeVar(text, "AvaUnlocked", "1");
   return { xml: text, created, updated };
 }
 
@@ -161,6 +166,9 @@ export function injectAvatars(xml: string, selection: string[], maxAva = 500) {
   }
   // Ensure AvaUnlocked flag is set so game shows unlocked avatars in UI
   text = writeVar(text, "AvaUnlocked", "1");
+  // Also populate UnlockedAvatars with comma-separated list (game may require this)
+  const unlockedList = list.join(",");
+  text = writeVar(text, "UnlockedAvatars", unlockedList);
   return text;
 }
 
