@@ -76,15 +76,23 @@ export function readAnyVar(xml: string, names: readonly string[]): string | null
 export function writeVar(xml: string, varName: string, value: string): string {
   const n = varName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const v = String(value);
-  const a = new RegExp(`(<Var\\b[^>]*?\\bname="${n}"[^>]*?\\bv=")([^"]*)(")`, "i");
-  if (a.test(xml)) return xml.replace(a, `$1${v}$3`);
-  const b = new RegExp(`(<Var\\b[^>]*?\\bv=")([^"]*)("[^>]*?\\bname="${n}")`, "i");
-  if (b.test(xml)) return xml.replace(b, `$1${v}$3`);
+  const isAvatar = /^Unlocked_ava\d+$/.test(varName);
+  const tailCapture = isAvatar ? "([^>]*)" : "";
+  const tailRef = isAvatar ? "$4" : "";
+  
+  // Var with v="..." (name before v) - replace ALL, preserve rest of tag for avatars
+  const a = new RegExp(`(<Var\\b[^>]*?\\bname="${n}"[^>]*?\\bv=")([^"]*)(")${tailCapture}`, "i");
+  if (a.test(xml)) return xml.replace(a, `$1${v}$3${tailRef}`);
+  // Var with v="..." (v before name) - replace ALL, preserve rest for avatars
+  const b = new RegExp(`(<Var\\b[^>]*?\\bv=")([^"]*)(")([^>]*?\\bname="${n}"[^>]*)`, "i");
+  if (b.test(xml)) return xml.replace(b, `$1${v}$3$4`);
+  // DataElem with value="..." (name before value)
   const c = new RegExp(`(<DataElem\\b[^>]*?\\bname="${n}"[^>]*?\\bvalue=")([^"]*)(")`, "i");
   if (c.test(xml)) return xml.replace(c, `$1${v}$3`);
+  // DataElem with value="..." (value before name)
   const d = new RegExp(`(<DataElem\\b[^>]*?\\bvalue=")([^"]*)("[^>]*?\\bname="${n}")`, "i");
   if (d.test(xml)) return xml.replace(d, `$1${v}$3`);
-  const insert = `<Var name="${varName}" v="${v}" t="i"/>`;
+  const insert = `<Var name="${varName}" v="${v}" t="${isAvatar ? "b" : /^-?\d+$/.test(v) ? "i" : "s"}"/>`;
   for (const closer of ["</Global>", "</root>", "</Root>", "</ROOT>"]) {
     if (xml.includes(closer)) return xml.replace(closer, insert + closer);
   }
