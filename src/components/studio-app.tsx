@@ -1836,16 +1836,23 @@ export function StudioApp() {
     setBusy(true);
     try {
       const city = await native.pull(device);
-      const local = await native.pullLocalInfo(device);
+      // mLocalInfo is optional — some installs never create it. Backup
+      // proceeds on the city file alone instead of blocking the whole flow.
+      let local: { file: string; b64: string } | null = null;
+      try {
+        local = await native.pullLocalInfo(device);
+      } catch {
+        local = null;
+      }
       const r = await backupFreshStart({
         data: {
           token,
           sessionId: session.sessionId,
           serial: device,
           cityPath: city.file,
-          localPath: local.file,
+          localPath: local?.file ?? null,
           cityB64: city.b64,
-          localB64: local.b64,
+          localB64: local?.b64 ?? null,
         },
       });
       setFreshBackup({ oldCityId: r.oldCityId, oldLevel: r.oldLevel });
@@ -1931,8 +1938,12 @@ export function StudioApp() {
     try {
       const r = await restoreFreshStart({ data: { token, sessionId: session.sessionId } });
       await native.push(r.backup.serial, r.backup.cityB64);
-      const w = await native.wipeFiles(r.backup.serial, [r.backup.localPath]);
-      if (!w.ok) throw new Error(w.error || tr("actionFailed"));
+      // Login backup may not exist — only drop the fresh login when we know
+      // the original path. City restore alone is enough to bring the ban back.
+      if (r.backup.localPath) {
+        const w = await native.wipeFiles(r.backup.serial, [r.backup.localPath]);
+        if (!w.ok) throw new Error(w.error || tr("actionFailed"));
+      }
       setFreshPhase("idle");
       setFreshCheck(null);
       setFreshConfirm("");

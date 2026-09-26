@@ -146,6 +146,17 @@ class DeviceId(unittest.TestCase):
         self.assertEqual(c.get_device_id(), fresh)
 
 
+class LocalInfoPaths(unittest.TestCase):
+    """mLocalInfo discovery must prioritize files/ over saves/."""
+
+    def test_files_comes_before_saves(self):
+        paths = c.localinfo_candidate_paths_for_package("com.playrix.township")
+        files_idx = next(i for i, p in enumerate(paths) if "/files/mLocalInfo.xml" in p)
+        saves_idx = next(i for i, p in enumerate(paths) if "/saves/mLocalInfo.xml" in p)
+        self.assertLess(files_idx, saves_idx)
+        self.assertIn("shared_prefs", " ".join(paths))
+
+
 class WipeFiles(unittest.TestCase):
     """Fresh-start wipe deletes exactly the given absolute paths, then stops."""
 

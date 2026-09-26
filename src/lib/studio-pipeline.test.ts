@@ -692,3 +692,22 @@ test("fresh-start: restore returns the exact backup bytes", () => {
   assert.equal(r.localPath, "/a/mLocalInfo.xml");
   assert.equal(r.serial, "emulator-5554");
 });
+
+test("fresh-start: backup works without a login file (installs that never create it)", () => {
+  const s = { id: "fs1", freshBackupCity: null, freshBackupLocal: null, freshBackupMeta: null };
+  const r = fresh.backupFreshStartState(s, {
+    serial: "emulator-5554",
+    cityPath: "/a/mGameInfo.xml",
+    cityB64: b64(bannedCityXml),
+  });
+  assert.equal(r.oldCityId, "BAN123");
+  assert.equal(r.hasLoginBackup, false);
+  const plan = fresh.wipeFreshStartPlan(s);
+  assert.deepEqual(plan.paths, ["/a/mGameInfo.xml"]);
+  const restored = fresh.restoreFreshStartState(s);
+  assert.equal(restored.localB64, null);
+  assert.equal(restored.localPath, null);
+  // verify still enforces a different id + level 1 on the city file alone
+  const v = fresh.verifyFreshStartState(s, b64(freshCityXml));
+  assert.equal(v.clean, true);
+});

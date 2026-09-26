@@ -206,9 +206,9 @@ export const backupFreshStart = createServerFn({ method: "POST" })
       sessionId: z.string(),
       serial: z.string(),
       cityPath: z.string(),
-      localPath: z.string(),
+      localPath: z.string().optional().nullable(),
       cityB64: z.string().max(24_000_000),
-      localB64: z.string().max(24_000_000),
+      localB64: z.string().max(24_000_000).optional().nullable(),
     }),
   )
   .handler(async ({ data }) => {
@@ -216,9 +216,9 @@ export const backupFreshStart = createServerFn({ method: "POST" })
     return run(data.sessionId, data.token, {
       serial: data.serial,
       cityPath: data.cityPath,
-      localPath: data.localPath,
+      localPath: data.localPath ?? null,
       cityB64: data.cityB64,
-      localB64: data.localB64,
+      localB64: data.localB64 ?? null,
     });
   });
 

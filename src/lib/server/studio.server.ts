@@ -78,9 +78,10 @@ export type Session = {
   freshBackupMeta?: {
     serial: string;
     cityPath: string;
-    localPath: string;
+    localPath: string | null;
     oldCityId: string;
     oldLevel: number;
+    hasLoginBackup: boolean;
   } | null;
   log: string[];
 };
@@ -607,7 +608,7 @@ export function applyDecorActions(
 export function backupFreshStart(
   sessionId: string,
   token: string,
-  input: { serial: string; cityPath: string; localPath: string; cityB64: string; localB64: string },
+  input: { serial: string; cityPath: string; localPath?: string | null; cityB64: string; localB64?: string | null },
 ) {
   const s = requireSession(sessionId, token);
   return backupFreshStartState(s, input);

@@ -378,22 +378,51 @@ def _find_on_device(adb: str, serial: str, pkg: str, filename: str) -> str | Non
         )
     )
     script = (
-        f"find {roots} -maxdepth 3 -name {filename} -type f 2>/dev/null | head -n 5"
+        f"find {roots} -maxdepth 5 -name {filename} -type f 2>/dev/null | head -n 5"
     )
-    for args in (
-        ["-s", serial, "exec-out", "su", "-c", script],
-        ["-s", serial, "shell", f"su -c '{script}'"],
-    ):
-        code, out, _ = _run_adb(adb, args, timeout=25)
-        if code != 0 or not out:
-            continue
-        if _looks_like_shell_error(out):
-            continue
-        for line in out.decode("utf-8", "replace").splitlines():
-            path = line.strip().lstrip("\ufeff")
-            if path.startswith("/") and path.endswith(filename):
-                return path
+    iname_pat = "*localinfo*" if "localinfo" in filename.lower() else f"*{filename}*"
+    sweep = (
+        f"find {roots} -maxdepth 5 -iname {iname_pat} -type f 2>/dev/null | head -n 10"
+    )
+    for script_each in (script, sweep):
+        for args in (
+            ["-s", serial, "exec-out", "su", "-c", script_each],
+            ["-s", serial, "shell", f"su -c '{script_each}'"],
+        ):
+            code, out, _ = _run_adb(adb, args, timeout=25)
+            if code != 0 or not out:
+                continue
+            if _looks_like_shell_error(out):
+                continue
+            for line in out.decode("utf-8", "replace").splitlines():
+                path = line.strip().lstrip("\ufeff")
+                if not path.startswith("/"):
+                    continue
+                if path.endswith(filename):
+                    return path
+                if "localinfo" in filename.lower() and "localinfo" in path.lower():
+                    return path
     return None
+
+
+def _list_package_dir(adb: str, serial: str, pkg: str) -> str:
+    """Best-effort `ls` of the package data dir for error diagnostics."""
+    for base in (f"/data/data/{pkg}", f"/data/user/0/{pkg}"):
+        for sub in ("", "/files", "/shared_prefs", "/saves"):
+            target = f"{base}{sub}"
+            for args in (
+                ["-s", serial, "exec-out", "su", "-c", f"ls {target} 2>&1 | head -n 20"],
+                ["-s", serial, "shell", f"su -c 'ls {target} 2>&1 | head -n 20'"],
+            ):
+                try:
+                    code, out, _ = _run_adb(adb, args, timeout=15)
+                except Exception:
+                    continue
+                if code == 0 and out:
+                    text = out.decode("utf-8", "replace").strip()
+                    if text and "No such file" not in text and "Permission denied" not in text:
+                        return f"{target}: {text[:300]}"
+    return ""
 
 
 class NativeBridge:
@@ -615,6 +644,9 @@ class NativeBridge:
                     _active_package[serial] = pkg
                     return {"b64": base64.b64encode(buf).decode("ascii"), "file": remote, "package": pkg}
             errs.append(f"{pkg}: {diag[0]}" if diag else f"{pkg}: could not read {LOCAL_INFO_FILE} in any known folder")
+            listing = _list_package_dir(adb, serial, pkg)
+            if listing:
+                errs.append(f"{pkg} dir: {listing}")
         raise RuntimeError(
             "Could not read mLocalInfo from emulator. Tried: " + " | ".join(errs)
             + ". Check Root and open Township at least once."

@@ -13,9 +13,11 @@ import { decodeContainer } from "./save-decode.server";
 export type FreshBackupMeta = {
   serial: string;
   cityPath: string;
-  localPath: string;
+  /** Null when the install never created a login file — backup still works. */
+  localPath: string | null;
   oldCityId: string;
   oldLevel: number;
+  hasLoginBackup: boolean;
 };
 
 /** Minimal session shape: the real Session satisfies this structurally. */
@@ -29,9 +31,10 @@ export type FreshSession = {
 export type FreshBackupInput = {
   serial: string;
   cityPath: string;
-  localPath: string;
+  /** Optional: some installs never create mLocalInfo.xml. */
+  localPath?: string | null;
   cityB64: string;
-  localB64: string;
+  localB64?: string | null;
 };
 
 const B64_MAX = 24_000_000;
@@ -84,11 +87,11 @@ function textOf(buf: Buffer): string {
   return buf.toString("utf8").replace(/^\uFEFF/, "");
 }
 
-function requireBackup(s: FreshSession): { cityB64: string; localB64: string; meta: FreshBackupMeta } {
-  if (!s.freshBackupCity || !s.freshBackupLocal || !s.freshBackupMeta) {
+function requireBackup(s: FreshSession): { cityB64: string; localB64: string | null; meta: FreshBackupMeta } {
+  if (!s.freshBackupCity || !s.freshBackupMeta) {
     throw new Error("Backup first");
   }
-  return { cityB64: s.freshBackupCity, localB64: s.freshBackupLocal, meta: s.freshBackupMeta };
+  return { cityB64: s.freshBackupCity, localB64: s.freshBackupLocal ?? null, meta: s.freshBackupMeta };
 }
 
 function requireSerial(serial: string): string {
@@ -106,22 +109,33 @@ function requireDevicePath(label: string, p: string): string {
 export function backupFreshStartState(s: FreshSession, input: FreshBackupInput) {
   const serial = requireSerial(input.serial);
   const cityPath = requireDevicePath("City file", input.cityPath);
-  const localPath = requireDevicePath("Login file", input.localPath);
   const cityBuf = mustCityBytes("City file", input.cityB64);
-  mustLoginBytes("Login file", input.localB64);
+  // mLocalInfo is optional — some installs never create it (the app's connect
+  // flow already treats it as optional). Backup proceeds on the city file
+  // alone; wipe/restore then touch only what was actually backed up.
+  let localPath: string | null = null;
+  let hasLoginBackup = false;
+  const rawLocalPath = String(input.localPath ?? "").trim();
+  const rawLocalB64 = String(input.localB64 ?? "");
+  if (rawLocalPath && rawLocalB64) {
+    localPath = requireDevicePath("Login file", rawLocalPath);
+    mustLoginBytes("Login file", rawLocalB64);
+    hasLoginBackup = true;
+  }
   const xmlText = textOf(cityBuf);
   const oldCityId = parseCityId(xmlText);
   if (!oldCityId) throw new Error("Backup invalid: no city id");
   const oldLevel = parseLevel(xmlText);
   s.freshBackupCity = input.cityB64;
-  s.freshBackupLocal = input.localB64;
-  s.freshBackupMeta = { serial, cityPath, localPath, oldCityId, oldLevel };
-  return { oldCityId, oldLevel, backedUp: true as const };
+  s.freshBackupLocal = hasLoginBackup ? rawLocalB64 : null;
+  s.freshBackupMeta = { serial, cityPath, localPath, oldCityId, oldLevel, hasLoginBackup };
+  return { oldCityId, oldLevel, backedUp: true as const, hasLoginBackup };
 }
 
 export function wipeFreshStartPlan(s: FreshSession) {
   const b = requireBackup(s);
-  return { serial: b.meta.serial, paths: [b.meta.cityPath, b.meta.localPath], ready: true as const };
+  const paths = b.meta.localPath ? [b.meta.cityPath, b.meta.localPath] : [b.meta.cityPath];
+  return { serial: b.meta.serial, paths, ready: true as const };
 }
 
 export function verifyFreshStartState(s: FreshSession, cityB64: string) {
@@ -144,5 +158,6 @@ export function restoreFreshStartState(s: FreshSession) {
     cityPath: b.meta.cityPath,
     localPath: b.meta.localPath,
     serial: b.meta.serial,
+    hasLoginBackup: b.meta.hasLoginBackup,
   };
 }
