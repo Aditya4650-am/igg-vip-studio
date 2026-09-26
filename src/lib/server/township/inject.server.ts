@@ -80,6 +80,8 @@ export function injectAvatars(xml: string, selection: string[], maxAva = 398) {
     if (new RegExp(`name="${name}"`, "i").test(text)) text = writeVar(text, name, "1");
     else text = insertBeforeRoot(text, `<Var name="${name}" v="1" t="b"/>`);
   }
+  // Ensure AvaUnlocked flag is set so game shows unlocked avatars in UI
+  text = writeVar(text, "AvaUnlocked", "1");
   return text;
 }
 
