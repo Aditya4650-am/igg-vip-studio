@@ -317,6 +317,30 @@ def _run_adb(adb: str, args: list[str], timeout: int = 30) -> tuple[int, bytes, 
         return 1, b"", str(e).encode("utf-8", "replace")
 
 
+def _wrap_gzip_container(xml_bytes: bytes) -> bytes:
+    """Wrap plain XML in a gzip container (0x1f8b magic) that the game accepts.
+    
+    The game expects saves in a container format. This wraps plain XML in a
+    standard gzip container with the proper header/footer.
+    """
+    import gzip
+    import io
+    
+    # Ensure XML has proper declaration
+    if not xml_bytes.lstrip().startswith(b"<?xml"):
+        xml_bytes = b'<?xml version="1.0" encoding="utf-8"?>' + xml_bytes
+    
+    # Create gzip container
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode="wb", mtime=0) as gz:
+        gz.write(xml_bytes)
+    compressed = buf.getvalue()
+    
+    # Gzip header: 0x1f 0x8b 0x08 (magic, magic, DEFLATE)
+    # The gzip module already produces correct format
+    return compressed
+
+
 _PRINTABLE = frozenset(range(0x20, 0x7F)) | {0x09, 0x0A, 0x0D}
 
 
@@ -665,6 +689,8 @@ class NativeBridge:
             raise RuntimeError("Save must be plain XML (v1.15 plaintext mode).")
         if len(data) < 16:
             raise RuntimeError("Save output too short to push.")
+        # Wrap plain XML in gzip container (game expects container format)
+        data = _wrap_gzip_container(data)
         if not options.get("alreadyStopped"):
             _ = self.forceStop(serial)
             time.sleep(0.4)
