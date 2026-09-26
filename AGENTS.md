@@ -40,8 +40,13 @@ which the game's loader rejects).
 - Keep documents tag-balanced. `findUnbalancedTag()` in `xml-edit.server.ts`
   guards the push path; a malformed save makes the game discard progress and
   looks to the user like the feature silently did nothing.
-- Insert new elements with `insertInsideRoot()` so they land before the real
-  document closer. Appending at EOF puts them outside the root.
+- Insert new elements with `insertInsideRoot()` so they land before `</Global>`,
+  the game-data container — never before `</root>`. Real saves wrap everything
+  the game reads (`<Var>`, `<Skins>`, `<SeasonTicket>`, `<Regata>`, `<Upgrade>`)
+  in `<Global>`; the strip between `</Global>` and `</root>` holds only
+  `<GameInfoPatcher/>`, so a fragment inserted there is well-formed XML the game
+  silently ignores (a success report that changes nothing in game). Appending at
+  EOF is worse still — it lands outside the root entirely.
 - Never rewrite only the open tag of a paired element. `<SeasonTicket a/>` in
   front of a pre-existing `</SeasonTicket>` corrupts the document — match the
   self-closing form and its children separately.

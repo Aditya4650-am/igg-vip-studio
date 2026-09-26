@@ -8,23 +8,29 @@
  *
  *  - `replaceElement` swaps a whole element, including its closing tag and
  *    children, so a self-closing rewrite cannot leave a stray `</Tag>`.
- *  - `insertInsideRoot` appends before the real document root closer, falling
- *    back to EOF only when the document is not a single-rooted fragment.
+ *  - `insertInsideRoot` appends inside the game-data container (`<Global>`),
+ *    falling back to the document root closer only when no `<Global>` exists.
  */
 
-const ROOT_CLOSERS = ["</Global>", "</Root>", "</ROOT>", "</root>"];
+const ROOT_CLOSERS = ["</Global>", "</root>", "</Root>", "</ROOT>"];
 
-/** Locate the closing tag that ends the document root. */
+/**
+ * Locate the closing tag that ends the game-data container.
+ *
+ * Real saves nest everything the game reads (`<Var>`, `<Skins>`,
+ * `<SeasonTicket>`, `<Regata>`, `<Upgrade>`, …) inside `<Global>`, which is
+ * itself wrapped by the document root (`<root>…<Global>…</Global><GameInfoPatcher/></root>`).
+ * The strip between `</Global>` and `</root>` holds only `GameInfoPatcher`,
+ * so a fragment inserted there is well-formed XML the game silently ignores.
+ * Priority order therefore puts `</Global>` first — matching the v1.15
+ * reference behavior — instead of picking whichever closer ends last.
+ */
 function rootCloser(xml: string): { index: number; length: number } | null {
-  let best: { index: number; length: number } | null = null;
   for (const closer of ROOT_CLOSERS) {
-    const i = xml.lastIndexOf(closer);
-    if (i < 0) continue;
-    if (!best || i + closer.length > best.index + best.length) {
-      best = { index: i, length: closer.length };
-    }
+    const i = xml.indexOf(closer);
+    if (i >= 0) return { index: i, length: closer.length };
   }
-  return best;
+  return null;
 }
 
 /**
@@ -82,7 +88,7 @@ export function hasElement(xml: string, name: string): boolean {
   return new RegExp(`<${name}\\b`, "i").test(xml);
 }
 
-/** Insert `fragment` immediately before the document root's closing tag. */
+/** Insert `fragment` inside the game-data container (before `</Global>` when present). */
 export function insertInsideRoot(xml: string, fragment: string): string {
   const closer = rootCloser(xml);
   if (closer) {

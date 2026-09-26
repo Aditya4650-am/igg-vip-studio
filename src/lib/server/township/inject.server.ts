@@ -156,8 +156,22 @@ export function injectAvatars(xml: string, selection: string[], maxAva = 398) {
   if (!list.length) return text;
   for (const i of list) {
     const name = `Unlocked_ava${i}`;
-    if (new RegExp(`name="${name}"`, "i").test(text)) text = writeVar(text, name, "1");
-    else text = insertBeforeRoot(text, `<Var name="${name}" v="1" t="b"/>`);
+    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const gClose = text.search(/<\/Global\s*>/i);
+    const insideGlobal = gClose >= 0 ? text.slice(0, gClose) : text;
+    if (new RegExp(`name="${esc}"`, "i").test(insideGlobal)) {
+      text = writeVar(text, name, "1");
+      continue;
+    }
+    if (gClose >= 0) {
+      // Drop stale copies stranded outside <Global> by older builds. The game
+      // never reads that strip (only GameInfoPatcher lives there), and leaving
+      // the stray copy would shadow the fresh var created below.
+      const tail = text.slice(gClose);
+      const cleaned = tail.replace(new RegExp(`<Var\\b[^>]*?\\bname="${esc}"[^>]*?/>`, "gi"), "");
+      if (cleaned.length !== tail.length) text = text.slice(0, gClose) + cleaned;
+    }
+    text = insertBeforeRoot(text, `<Var name="${name}" v="1" t="b"/>`);
   }
   return text;
 }

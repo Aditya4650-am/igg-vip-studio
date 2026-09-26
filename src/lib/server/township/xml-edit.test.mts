@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { injectRegata, injectSeason } from "./inject.server.ts";
+import { injectAvatars, injectRegata, injectSeason } from "./inject.server.ts";
 import { maxBuildingsStash, maxFragments, parseOwnMeta, unlockEmoji } from "./desban.server.ts";
 import { applyStatChanges, parseStats, writeVar } from "./vars.server.ts";
 import { findUnbalancedTag, insertInsideRoot, replaceElement } from "./xml-edit.server.ts";
@@ -111,6 +111,31 @@ test("stat aliases round-trip without duplicating", () => {
 
   const canonical = '<Global><Var name="RegataTasksCompleted" v="3"/></Global>';
   assert.equal(parseStats(applyStatChanges(canonical, { reg: "7" })).reg, "7");
+});
+
+test("insertInsideRoot lands inside <Global>, not in the dead strip before </root>", () => {
+  const doc = "<root><Global><a/></Global><GameInfoPatcher/></root>";
+  const out = insertInsideRoot(doc, "<b/>");
+  wellFormed(out);
+  assert.ok(out.indexOf("<b/>") < out.indexOf("</Global>"), "fragment must sit before </Global>");
+  assert.ok(out.indexOf("</Global>") < out.indexOf("</root>"), "closers must keep their order");
+});
+
+test("injectAvatars creates the var inside <Global> where the game reads it", () => {
+  const doc = '<root><Global><Var name="Unlocked_ava1" v="1" t="b"/></Global><GameInfoPatcher/></root>';
+  const out = injectAvatars(doc, ["2"]);
+  wellFormed(out);
+  assert.match(out, /<Var name="Unlocked_ava2" v="1" t="b"\/>/);
+  assert.ok(out.indexOf("Unlocked_ava2") < out.indexOf("</Global>"), "new avatar var must sit before </Global>");
+});
+
+test("injectAvatars rescues a stale copy stranded outside <Global>", () => {
+  const doc = '<root><Global><a/></Global><Var name="Unlocked_ava2" v="1" t="b"/><GameInfoPatcher/></root>';
+  const out = injectAvatars(doc, ["2"]);
+  wellFormed(out);
+  const at = out.indexOf("Unlocked_ava2");
+  assert.ok(at >= 0 && at < out.indexOf("</Global>"), "avatar var must end up inside <Global>");
+  assert.equal(out.indexOf("Unlocked_ava2", out.indexOf("</Global>")), -1, "no copy may remain past </Global>");
 });
 
 test("findUnbalancedTag flags corruption the old injectors produced", () => {
