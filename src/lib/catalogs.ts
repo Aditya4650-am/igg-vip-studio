@@ -3,7 +3,7 @@ export type Group = { id: string; label: string; emoji?: string; items: Item[] }
 export type StatField = { id: string; key?: string; emoji: string; labelEn: string; labelVi: string };
 
 // The game allows selecting avatars up to 398; only 1..349 ship with artwork.
-export const AVATAR_MAX = 398;
+export const AVATAR_MAX = 500;
 export const AVATAR_ICON_MAX = 349;
 export const AVATAR_CHUNK = 50;
 

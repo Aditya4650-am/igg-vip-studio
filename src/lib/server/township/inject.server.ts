@@ -23,7 +23,7 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function getExistingAvatars(xml: string, maxAva = 398): number[] {
+export function getExistingAvatars(xml: string, maxAva = 500): number[] {
   const text = asText(xml);
   const result = new Set<number>();
   const regex = /<Var\s+name="(Unlocked_ava\d+)"[^/]*\/>/gi;
@@ -41,13 +41,14 @@ function getExistingAvatars(xml: string, maxAva = 398): number[] {
 
 export function unlockAllAvatars(
   xml: string,
-  maxAva = 398
+  maxAva = 500
 ): { xml: string; created: number[]; updated: number[] } {
   let text = asText(xml);
   const created: number[] = [];
   const updated: number[] = [];
 
   maxAva = Math.max(1, Math.floor(maxAva));
+  maxAva = Math.min(maxAva, 500);
   const existing = getExistingAvatars(text, maxAva);
   const existingSet = new Set(existing);
 
@@ -142,7 +143,7 @@ export function injectSeason(xml: string, premium = "1", score = "1002") {
   return insertBeforeRoot(text, `<SeasonTicket premium="${premium}" score="${score}"/>`);
 }
 
-export function injectAvatars(xml: string, selection: string[], maxAva = 398) {
+export function injectAvatars(xml: string, selection: string[], maxAva = 500) {
   let text = asText(xml);
   const indices = new Set<number>();
   for (const raw of selection) {
