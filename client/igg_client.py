@@ -638,6 +638,48 @@ class NativeBridge:
                 errs.append(f"{pkg}: {combined or 'su cp failed'}")
             raise RuntimeError("Push failed — " + " | ".join(errs))
 
+    def wipeFiles(self, serial: str, paths: list[str] | tuple[str, ...]) -> dict:
+        """Delete exact device files (fresh-start wipe), then force-stop.
+
+        Both paths are attempted even if one fails. Every destructive call
+        carries the device serial; blank or relative paths are rejected
+        without touching the device.
+        """
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        cleaned: list[str] = []
+        errs: list[str] = []
+        for remote in paths or []:
+            p = str(remote or "").strip()
+            if not p or not p.startswith("/"):
+                errs.append(f"{p or '(empty)'}: rejected (absolute device path required)")
+                continue
+            ok = False
+            notes: list[str] = []
+            for shell in (f"su -c 'rm -f \"{p}\"'", f"su 0 rm -f \"{p}\""):
+                code, out, err = _run_adb(adb, ["-s", serial, "shell", shell], timeout=30)
+                combined = (out + err).decode("utf-8", "replace").strip()
+                if code == 0 and not re.search(
+                    r"permission denied|not found|no such file|failed|error:|not allowed", combined, re.I
+                ):
+                    ok = True
+                    break
+                notes.append(combined or f"exit {code}")
+            if ok:
+                code, out, _ = _run_adb(adb, ["-s", serial, "shell", f"su -c 'ls \"{p}\"'"], timeout=30)
+                if code == 0 and out.strip():
+                    ok = False
+                    notes.append("file still present after rm")
+            if ok:
+                cleaned.append(p)
+            else:
+                errs.append(f"{p}: " + (" | ".join(n for n in notes if n) or "delete failed"))
+        stop = self.forceStop(serial)
+        if not stop.get("ok"):
+            errs.append(str(stop.get("error") or "force-stop failed"))
+        return {"ok": not errs, "wiped": cleaned, "error": " | ".join(errs)}
+
     # self-update
     def installUpdate(self, release: dict) -> dict:
         try:

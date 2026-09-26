@@ -146,6 +146,66 @@ class DeviceId(unittest.TestCase):
         self.assertEqual(c.get_device_id(), fresh)
 
 
+class WipeFiles(unittest.TestCase):
+    """Fresh-start wipe deletes exactly the given absolute paths, then stops."""
+
+    def setUp(self):
+        self._adb = c._find_adb
+        self._run = c._run_adb
+        self.calls: list[list[str]] = []
+        c._find_adb = lambda: "/fake/adb"  # type: ignore[assignment]
+
+    def tearDown(self):
+        c._find_adb = self._adb  # type: ignore[assignment]
+        c._run_adb = self._run  # type: ignore[assignment]
+
+    def _ok_rm(self, adb, args, timeout=30):
+        self.calls.append(args)
+        cmd = " ".join(args)
+        if " force-stop " in cmd:
+            return (0, b"", b"")
+        if "'ls \"" in cmd:
+            return (1, b"", b"No such file")  # gone after rm
+        if " rm -f " in cmd:
+            return (0, b"", b"")
+        return (1, b"", b"unexpected")
+
+    def test_deletes_both_files_and_reports_them(self):
+        c._run_adb = self._ok_rm  # type: ignore[assignment]
+        bridge = c.NativeBridge()
+        bridge.forceStop = lambda serial: {"ok": True, "package": "pkg"}  # type: ignore[method-assign]
+        r = bridge.wipeFiles("emulator-5554", ["/a/mGameInfo.xml", "/a/mLocalInfo.xml"])
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["wiped"], ["/a/mGameInfo.xml", "/a/mLocalInfo.xml"])
+        rm_cmds = [" ".join(a) for a in self.calls if " rm -f " in " ".join(a)]
+        self.assertEqual(len(rm_cmds), 2, rm_cmds)
+
+    def test_rejects_relative_paths_without_touching_adb(self):
+        seen: list[list[str]] = []
+        c._run_adb = lambda adb, args, timeout=30: (seen.append(args), (0, b"", b""))[1]  # type: ignore[assignment]
+        bridge = c.NativeBridge()
+        bridge.forceStop = lambda serial: {"ok": True, "package": "pkg"}  # type: ignore[method-assign]
+        r = bridge.wipeFiles("emulator-5554", ["mGameInfo.xml", ""])
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["wiped"], [])
+        self.assertEqual(seen, [])
+
+    def test_surviving_file_is_reported_not_claimed(self):
+        def stubborn(adb, args, timeout=30):
+            cmd = " ".join(args)
+            if "'ls \"" in cmd:
+                return (0, b"/a/mGameInfo.xml\n", b"")  # still there
+            return (0, b"", b"")
+
+        c._run_adb = stubborn  # type: ignore[assignment]
+        bridge = c.NativeBridge()
+        bridge.forceStop = lambda serial: {"ok": True, "package": "pkg"}  # type: ignore[method-assign]
+        r = bridge.wipeFiles("emulator-5554", ["/a/mGameInfo.xml"])
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["wiped"], [])
+        self.assertIn("still present", r["error"])
+
+
 class OriginIp(unittest.TestCase):
     def test_os_resolver_is_preferred(self):
         def fake(host, *a, **k):

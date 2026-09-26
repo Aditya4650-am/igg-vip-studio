@@ -196,3 +196,49 @@ export const runDecor = createServerFn({ method: "POST" })
     const { applyDecorActions } = await import("./server/studio.server");
     return applyDecorActions(data.token, data.sessionId, data.action, data.ids ?? []);
   });
+
+// Fresh-start ("New Game") endpoints. Device traffic stays in the UI via
+// the native bridge; these only validate, track the backup, and verify.
+export const backupFreshStart = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      token: z.string(),
+      sessionId: z.string(),
+      serial: z.string(),
+      cityPath: z.string(),
+      localPath: z.string(),
+      cityB64: z.string().max(24_000_000),
+      localB64: z.string().max(24_000_000),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const { backupFreshStart: run } = await import("./server/studio.server");
+    return run(data.sessionId, data.token, {
+      serial: data.serial,
+      cityPath: data.cityPath,
+      localPath: data.localPath,
+      cityB64: data.cityB64,
+      localB64: data.localB64,
+    });
+  });
+
+export const wipeFreshStart = createServerFn({ method: "POST" })
+  .validator(z.object({ token: z.string(), sessionId: z.string() }))
+  .handler(async ({ data }) => {
+    const { wipeFreshStart: run } = await import("./server/studio.server");
+    return run(data.sessionId, data.token);
+  });
+
+export const verifyFreshStart = createServerFn({ method: "POST" })
+  .validator(z.object({ token: z.string(), sessionId: z.string(), cityB64: z.string().max(24_000_000) }))
+  .handler(async ({ data }) => {
+    const { verifyFreshStart: run } = await import("./server/studio.server");
+    return run(data.sessionId, data.token, data.cityB64);
+  });
+
+export const restoreFreshStart = createServerFn({ method: "POST" })
+  .validator(z.object({ token: z.string(), sessionId: z.string() }))
+  .handler(async ({ data }) => {
+    const { restoreFreshStart: run } = await import("./server/studio.server");
+    return run(data.sessionId, data.token);
+  });
