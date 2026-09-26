@@ -79,7 +79,7 @@ export function writeVar(xml: string, varName: string, value: string): string {
   const isAvatar = /^Unlocked_ava\d+$/.test(varName);
   const tailCapture = isAvatar ? "([^>]*)" : "";
   const tailRef = isAvatar ? "$4" : "";
-  
+
   // Var with v="..." (name before v) - replace ALL, preserve rest of tag for avatars
   const a = new RegExp(`(<Var\\b[^>]*?\\bname="${n}"[^>]*?\\bv=")([^"]*)(")${tailCapture}`, "i");
   if (a.test(xml)) return xml.replace(a, `$1${v}$3${tailRef}`);
