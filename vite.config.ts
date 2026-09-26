@@ -194,6 +194,19 @@ export default defineConfig(({ command, isPreview }) => ({
             // manifest + head-tag middleware). Nitro v3 defaults serverDir to
             // false, so removing this silently unwires /?install=1 on deploys.
             serverDir: "./server",
+            // Image art is served with no cache headers by default, so the EXE
+            // (WebView2) re-downloaded every webp on each launch over a slow
+            // link. Art files are append-only per deploy, and /assets/* names
+            // carry content hashes, so both can be cached aggressively.
+            routeRules: {
+              "/assets/**": { headers: { "cache-control": "public, max-age=31536000, immutable" } },
+              "/avatars/**": { headers: { "cache-control": "public, max-age=604800" } },
+              "/artifacts/**": { headers: { "cache-control": "public, max-age=604800" } },
+              "/game-icons/**": { headers: { "cache-control": "public, max-age=604800" } },
+              "/barn-goods/**": { headers: { "cache-control": "public, max-age=604800" } },
+              "/zoo/**": { headers: { "cache-control": "public, max-age=604800" } },
+              "/upgrades/**": { headers: { "cache-control": "public, max-age=604800" } },
+            },
           }),
         ]
       : []),
