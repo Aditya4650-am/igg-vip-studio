@@ -71,22 +71,47 @@ function decodeToXml(label: string, b64: string): string {
 }
 
 function parseCityId(xmlText: string): string {
-  // 1) AWS tag - multiple possible attribute names (game uses different ones across builds)
+  // Comprehensive search across the ENTIRE XML for any Township city/player ID.
+  // Township uses many different attribute names and locations across builds.
+  // Strategy: try known locations first (fast), then full-XML sweep (thorough).
+
+  // --- Known fast paths ---
+  const knownAttrs = [
+    "cityId", "city_id", "SaveId", "userId", "UserId", "PlayerId",
+    "fromId", "from_id", "id", "UserID", "CityID", "playerId", "player_id",
+    "accountId", "account_id", "uid", "UID", "openId", "open_id",
+    "gameId", "game_id", "charId", "char_id", "avatarId", "avatar_id"
+  ];
+
+  // 1) AWS tag
   const aws = xmlText.match(/<AWS\b([^>]*)>/i)?.[1] ?? "";
-  for (const attr of ["cityId", "city_id", "fromId", "id", "SaveId", "userId", "UserId", "PlayerId"]) {
+  for (const attr of knownAttrs) {
     const m = aws.match(new RegExp(`\\b${attr}\\s*=\\s*"([^"]*)"`, "i"));
     if (m?.[1]?.trim()) return m[1].trim();
   }
 
-  // 2) Version tag (some builds put it here)
+  // 2) Version tag (self-closing or paired)
   const ver = xmlText.match(/<Version\b([^>]*?)\/?>/i)?.[1] ?? "";
-  for (const attr of ["cityId", "city_id", "fromId", "id", "SaveId", "userId", "UserId", "PlayerId"]) {
+  for (const attr of knownAttrs) {
     const m = ver.match(new RegExp(`\\b${attr}\\s*=\\s*"([^"]*)"`, "i"));
     if (m?.[1]?.trim()) return m[1].trim();
   }
 
-  // 3) Var elements - multiple possible variable names the game uses for the city/player id
-  const varNames = ["cityId", "SaveId", "userId", "UserId", "PlayerId", "city_id", "fromId", "id"];
+  // 3) Player/User/Profile tags (some builds use these)
+  for (const tag of ["Player", "User", "Profile", "Account", "Character", "Avatar"]) {
+    const tagAttrs = xmlText.match(new RegExp(`<${tag}\\b([^>]*)>`, "i"))?.[1] ?? "";
+    for (const attr of knownAttrs) {
+      const m = tagAttrs.match(new RegExp(`\\b${attr}\\s*=\\s*"([^"]*)"`, "i"));
+      if (m?.[1]?.trim()) return m[1].trim();
+    }
+  }
+
+  // 4) Var elements - known variable names (both attribute orders)
+  const varNames = [
+    "cityId", "SaveId", "userId", "UserId", "PlayerId", "city_id", "fromId", "from_id", "id",
+    "UserID", "CityID", "playerId", "player_id", "accountId", "account_id", "uid", "UID",
+    "openId", "open_id", "gameId", "game_id", "charId", "char_id", "avatarId", "avatar_id"
+  ];
   for (const name of varNames) {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const m1 = xmlText.match(new RegExp(`<Var\\b[^>]*\\bname="${escaped}"[^>]*\\bv="([^"]*)"`, "i"));
@@ -95,12 +120,52 @@ function parseCityId(xmlText: string): string {
     if (m2?.[1]?.trim()) return m2[1].trim();
   }
 
-  // 4) Last resort: any attribute that looks like a city id in the first 2KB (covers weird layouts)
-  const head = xmlText.slice(0, 2048);
-  const loose = head.match(/\b(?:city[_-]?id|save[_-]?id|player[_-]?id|user[_-]?id|from[_-]?id)\s*=\s*"([A-Za-z0-9_-]{4,})"/i);
-  if (loose?.[1]?.trim()) return loose[1].trim();
+  // --- Aggressive full-XML sweep (covers any unknown layout) ---
+  // 5) Any attribute whose name contains "id" (case-insensitive) with a plausible value
+  // Township city IDs are typically alphanumeric, 8+ chars, often mixed case.
+  const attrIdPattern = /\b([A-Za-z]+[_-]?id)\s*=\s*"([A-Za-z0-9_-]{6,})"/gi;
+  let m: RegExpExecArray | null;
+  while ((m = attrIdPattern.exec(xmlText)) !== null) {
+    const val = m[2]?.trim();
+    if (val && looksLikeCityId(val)) return val;
+  }
+
+  // 6) Any Var element with a plausible city-id value (value-based, not name-based)
+  // Some builds use generic Var names but the value is the city ID.
+  const varPattern = /<Var\b[^>]*\bv="([A-Za-z0-9_-]{8,})"[^>]*>/gi;
+  while ((m = varPattern.exec(xmlText)) !== null) {
+    const val = m[1]?.trim();
+    if (val && looksLikeCityId(val)) return val;
+  }
+
+  // 7) Self-closing Var with v attribute first
+  const varPattern2 = /<Var\b[^>]*\bv="([A-Za-z0-9_-]{8,})"[^>]*\/>/gi;
+  while ((m = varPattern2.exec(xmlText)) !== null) {
+    const val = m[1]?.trim();
+    if (val && looksLikeCityId(val)) return val;
+  }
+
+  // 8) Any JSON-like "cityId":"..." or "city_id":"..." in the XML (some builds embed JSON)
+  const jsonPattern = /"(?:city[_-]?id|save[_-]?id|player[_-]?id|user[_-]?id|account[_-]?id|open[_-]?id|game[_-]?id)"\s*:\s*"([A-Za-z0-9_-]{6,})"/gi;
+  while ((m = jsonPattern.exec(xmlText)) !== null) {
+    const val = m[1]?.trim();
+    if (val && looksLikeCityId(val)) return val;
+  }
 
   return "";
+}
+
+// Heuristic: Township city IDs are typically 8+ alphanumeric chars, often with mixed case,
+// and not purely numeric (those are usually levels/counters).
+function looksLikeCityId(val: string): boolean {
+  if (!val || val.length < 6) return false;
+  if (/^\d+$/.test(val)) return false; // pure numbers = level/counter, not city ID
+  if (/^[A-Fa-f0-9]{32}$/.test(val)) return false; // MD5 hash = not city ID
+  if (/^[A-Fa-f0-9]{40}$/.test(val)) return false; // SHA1 = not city ID
+  if (/^[A-Fa-f0-9]{64}$/.test(val)) return false; // SHA256 = not city ID
+  // Must contain at least one letter (city IDs are not pure numbers)
+  if (!/[A-Za-z]/.test(val)) return false;
+  return true;
 }
 
 function parseLevel(xmlText: string): number {
