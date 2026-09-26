@@ -13,7 +13,7 @@ import { LANGS, isLang, t, type Lang, type Dict } from "@/lib/i18n";
 import { isDeviceId, mintDeviceId, normalizeDeviceId } from "@/lib/device-id";
 import { AVATAR_MAX, avatarEmoji, avatarGroupId, avatarIconPath, avatarsInRange, type Group, type Item } from "@/lib/catalogs";
 import { MUSEUM_IDS, artifactEmoji, artifactIconPath, museumLabel } from "@/lib/museum";
-import { CARD_GROUPS, cardIconPath } from "@/lib/cards";
+import { CARD_GROUPS, cardIconPath, cardNumber } from "@/lib/cards";
 import { iconForBarn, iconForDecorLabel, iconForGem, iconForGroup, iconForItemLabel, iconForProfileLabel, iconForSkin, iconForStat, iconForSticker, iconForUpgradeLabel, iconForZoo } from "@/lib/game-icon-map";
 import {
   connectLoad,
@@ -1213,6 +1213,7 @@ export function StudioApp() {
   const zooSel = useSetMap();
   const [cardsQty, setCardsQty] = useState<Record<string, number>>({});
   const [cardsFill, setCardsFill] = useState("1");
+  const [openPack, setOpenPack] = useState<string | null>("pack-1");
   const [decorSel, setDecorSel] = useState<Set<string>>(new Set());
   const [stickerSel, setStickerSel] = useState<Set<string>>(new Set());
   const [museumSel, setMuseumSel] = useState<Set<string>>(new Set());
@@ -1817,8 +1818,22 @@ export function StudioApp() {
   };
 
   const fields = useMemo(() => catalogs?.fields ?? [], [catalogs]);
-  const zooGroups: Group[] = useMemo(
+  // Cards closeup: 150 cards rotate across 5 pack arts (see cardIconPath), so
+  // the tab shows 5 pack tiles; tapping one expands its 30 cards.
+  const cardPacks = useMemo(
     () =>
+      Array.from({ length: 5 }, (_, p) => {
+        const n = p + 1;
+        const items = CARD_GROUPS.flatMap((g) => g.items).filter((it) => {
+          const c = cardNumber(it.id);
+          return c !== null && ((c - 1) % 5) + 1 === n;
+        });
+        return { id: `pack-${n}`, label: `Pack ${n}`, art: `/cards/pack_${n}.webp`, items };
+      }),
+    [],
+  );
+
+  const zooGroups: Group[] = useMemo(    () =>
       (session?.zoo ?? []).map((p) => ({
         id: p.paddock,
         label: zooPaddockLabel(p.paddock),
@@ -2542,18 +2557,47 @@ export function StudioApp() {
                         </label>
                       }
                     />
-                    {CARD_GROUPS.map((g, i) => (
-                      <section key={g.id} className="panel inventory-group">
-                        <header className="mb-3 flex items-center gap-2">
-                          <span className="group-emoji" aria-hidden="true">🃏</span>
-                          <GameIcon name="cards" className="group-icon" />
-                          <h3 className={cn("truncate text-xs font-bold tracking-wider uppercase", groupTone(g.id, i))}>
-                            {g.label}
+                    {cardPacks.map((pack, i) => {
+                      const open = openPack === pack.id;
+                      const filled = pack.items.filter((it) => (cardsQty[it.id] ?? 0) > 0).length;
+                      return (
+                      <section key={pack.id} className="panel inventory-group">
+                        <div
+                          className="mb-3 flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+                          onClick={() => setOpenPack(open ? null : pack.id)}
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={open}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              setOpenPack(open ? null : pack.id);
+                            }
+                          }}
+                        >
+                          <span className="group-asset" aria-hidden="true">
+                            <img
+                              src={pack.art}
+                              alt=""
+                              className="group-asset-img"
+                              draggable={false}
+                              onLoad={(e) => {
+                                const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
+                                if (fallback) fallback.style.display = "none";
+                              }}
+                              onError={(e) => {
+                                e.currentTarget.style.display = "none";
+                              }}
+                            />
+                            <span className="group-emoji">🃏</span>
+                          </span>
+                          <h3 className={cn("truncate text-xs font-bold tracking-wider uppercase", groupTone(pack.id, i))}>
+                            {pack.label}
                           </h3>
                           <span className="text-xs text-muted tabular-nums">
-                            {g.items.filter((it) => (cardsQty[it.id] ?? 0) > 0).length}/{g.items.length}
+                            {filled}/{pack.items.length}
                           </span>
-                          <div className="ml-auto flex shrink-0 items-center gap-1">
+                          <span className="ml-auto flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
                             <button
                               type="button"
                               className="h-8 px-2 text-xs text-muted hover:text-primary"
@@ -2561,7 +2605,7 @@ export function StudioApp() {
                                 const n = Math.max(1, Number.parseInt(cardsFill, 10) || 1);
                                 setCardsQty((prev) => {
                                   const next = { ...prev };
-                                  for (const it of g.items) next[it.id] = n;
+                                  for (const it of pack.items) next[it.id] = n;
                                   return next;
                                 });
                               }}
@@ -2574,17 +2618,24 @@ export function StudioApp() {
                               onClick={() => {
                                 setCardsQty((prev) => {
                                   const next = { ...prev };
-                                  for (const it of g.items) delete next[it.id];
+                                  for (const it of pack.items) delete next[it.id];
                                   return next;
                                 });
                               }}
                             >
                               {tr("noneShort")}
                             </button>
-                          </div>
-                        </header>
+                          </span>
+                          <ChevronDown
+                            className={cn(
+                              "size-4 shrink-0 text-muted transition-transform duration-200 ease-smooth",
+                              !open && "-rotate-90",
+                            )}
+                          />
+                        </div>
+                        {open ? (
                         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                          {g.items.map((it) => (
+                          {pack.items.map((it) => (
                             <label key={it.id} className="premium-chip flex min-h-11 items-center justify-between gap-3 rounded-lg border border-transparent bg-input px-3 hover:border-primary/25">
                               <span className="flex min-w-0 items-center gap-2.5">
                                 <span className="chip-asset chip-emoji" aria-hidden="true">
@@ -2620,8 +2671,10 @@ export function StudioApp() {
                             </label>
                           ))}
                         </div>
+                        ) : null}
                       </section>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 

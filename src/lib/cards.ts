@@ -25,8 +25,7 @@ const CARD_PACKS = Object.freeze([
   "/cards/pack_5.webp",
 ]);
 
-function cardNumber(id: string): number | null {
-  const m = /^card_0*(\d+)$/.exec(id.trim());
+export function cardNumber(id: string): number | null {  const m = /^card_0*(\d+)$/.exec(id.trim());
   if (!m) return null;
   const n = Number(m[1]);
   return n >= 1 && n <= 150 ? n : null;
