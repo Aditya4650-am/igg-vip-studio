@@ -85,6 +85,7 @@ _SAVE_BASES = (
 
 
 def candidate_paths_for_package(pkg: str, filename: str) -> list[str]:
+    """Candidate paths for mGameInfo.xml (save file)."""
     out: list[str] = []
     for base in _SAVE_BASES:
         root = base.format(pkg=pkg)
@@ -95,12 +96,26 @@ def candidate_paths_for_package(pkg: str, filename: str) -> list[str]:
     return out
 
 
+def localinfo_candidate_paths_for_package(pkg: str) -> list[str]:
+    """Candidate paths for mLocalInfo.xml — prioritizes files/ over saves/."""
+    out: list[str] = []
+    # LocalInfo lives in files/ or package root in most builds; saves/ is wrong.
+    localinfo_subdirs = ("files", "shared_prefs", "", "saves", "app_data")
+    for base in _SAVE_BASES:
+        root = base.format(pkg=pkg)
+        for sub in localinfo_subdirs:
+            path = f"{root}/{sub}/{LOCAL_INFO_FILE}" if sub else f"{root}/{LOCAL_INFO_FILE}"
+            if path not in out:
+                out.append(path)
+    return out
+
+
 def save_path_for_package(pkg: str) -> str:
     return f"/data/data/{pkg}/saves/{SAVE_FILE}"
 
 
 def localinfo_path_for_package(pkg: str) -> str:
-    return f"/data/data/{pkg}/saves/{LOCAL_INFO_FILE}"
+    return f"/data/data/{pkg}/files/{LOCAL_INFO_FILE}"
 
 
 # Real device paths discovered per (serial, package, filename), so push writes
@@ -587,11 +602,18 @@ class NativeBridge:
                 errs.append(f"{pkg}: package not installed")
                 continue
             diag: list[str] = []
-            found = self._read_candidates(adb, serial, pkg, LOCAL_INFO_FILE, diag)
-            if found:
-                remote, buf = found
-                _active_package[serial] = pkg
-                return {"b64": base64.b64encode(buf).decode("ascii"), "file": remote, "package": pkg}
+            known = _PATH_CACHE.get((serial, pkg, LOCAL_INFO_FILE))
+            discovered = _find_on_device(adb, serial, pkg, LOCAL_INFO_FILE)
+            ordered: list[str] = []
+            for path in [discovered, known, *localinfo_candidate_paths_for_package(pkg)]:
+                if path and path not in ordered:
+                    ordered.append(path)
+            for remote in ordered:
+                buf = self._pull_privileged(adb, serial, remote, diag)
+                if buf and len(buf) >= 8:
+                    _PATH_CACHE[(serial, pkg, LOCAL_INFO_FILE)] = remote
+                    _active_package[serial] = pkg
+                    return {"b64": base64.b64encode(buf).decode("ascii"), "file": remote, "package": pkg}
             errs.append(f"{pkg}: {diag[0]}" if diag else f"{pkg}: could not read {LOCAL_INFO_FILE} in any known folder")
         raise RuntimeError(
             "Could not read mLocalInfo from emulator. Tried: " + " | ".join(errs)
