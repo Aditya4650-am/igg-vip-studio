@@ -1,0 +1,131 @@
+╔══════════════════════════════════════════════════════════════════╗
+║  🌟  IGG VIP TOOL — Township Studio  ·  v1.1.6                 ║
+║  Your complete setup & feature guide — from zero to pro 🚀     ║
+╚══════════════════════════════════════════════════════════════════╝
+
+Welcome, VIP! 👑 This guide takes you from installation to mastering
+every feature. Keep it open on your first run. Let's go! 🎮
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅  1. WHAT YOU NEED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  🖥️  Windows 10 / 11 (64-bit)
+  📦  IGG VIP TOOL.exe v1.1.6 (no install needed — just run it!)
+  📱  Android emulator — MEmu / BlueStacks / Nox / LDPlayer
+       👉 Must be ROOTED 🔓 (Root mode ON in emulator settings)
+       👉 Open Township in it at least ONCE 🏘️ (creates your city save)
+  🌐  Internet connection (the tool loads from our secure server ☁️)
+  🔑  Your license key (from your seller / admin)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚀  2. FIRST LAUNCH (2 minutes)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1️⃣  Double-click  IGG VIP TOOL.exe ▶️
+      No console window, no setup wizard — the studio opens directly. ✨
+      ⏳ First open of the day can take ~30–60 sec (server waking up ☁️⏰).
+         Second open is instant. ✅
+
+  2️⃣  Enter your 🔑 license key when asked → it binds to THIS PC 🖥️🔗.
+      One key = one machine. Keep your key private! 🔒
+
+  3️⃣  You land in the studio: tabs on top 🎛️, device panel left 📲,
+      console bottom-left 🖥️. You're ready! 🎉
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔌  3. CONNECT YOUR EMULATOR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1️⃣  Start your emulator ▶️ and wait until Township's city loads 🏘️.
+  2️⃣  In the tool's DEVICE panel 📲, pick your device from the list
+      (e.g.  127.0.0.1:21533  for MEmu 🎯 — ports differ per emulator).
+      Status must show  🟢 ONLINE .
+  3️⃣  Press  🔗 Connect & load  — the tool pulls your live city save 📥.
+      Console shows:  ✅ Save loaded · Stats ready · Friends ready
+
+  ⚠️  "Could not read mGameInfo"? → emulator not rooted 🔓,
+      Township never opened 🏘️, or wrong device selected 📲.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔄  4. THE CORE WORKFLOW (every feature works this way)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ① Connect & load  🔗📥      → load your live city
+  ② Pick a tab & tick  🎛️✅    → choose what to unlock/edit
+  ③ Save  💾                → server applies it to your save
+  ④ Save & push  📤          → writes back to emulator (+ backup .bak)
+  ⑤ Open Township 🎮👀        → game relaunches, changes are live!
+
+  💡 TIP: After every app update, hard-refresh once:  Ctrl + F5  🔄
+  💡 TIP: "Session expired"? Just Connect & load again 🔗 (sessions
+     reset when the server updates — normal, takes 10 seconds).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎛️  5. ALL FEATURES — YOUR VIP ARSENAL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  📊 DATA CENTER ............ T-Cash 💎 · Coins 🪙 · Level ⭐ · Energy ⚡ ·
+                              Match-3 🎯 · orders 📦 · residents 🏡 & more
+  👤 PROFILE STUDIO ......... Badges 🏅 · Frames 🖼️ · Styles ✨ · Titles 👑
+  🎭 AVATAR STUDIO .......... Unlock avatars 1–500 🧑‍🎨 (range picker 📏)
+  🎨 SKIN GALLERY ........... Building & transport skins 🚂✈️🚢
+                              (Station 🚉 · Airport 🛫 · Harbor ⚓ …)
+  🔓 UNBAN CENTER ........... Restore banned cities 🏥 (needs Fetch City first 👇)
+  🖼️ DECOR STUDIO ........... 1000+ decorations 🏰 · clone a friend's city 👯
+  💬 STICKER HUB ............ Chat stickers & emoji 😎 (50+ packs)
+  📦 ITEM MANAGER ........... Tools 🔧 · Materials 🧱 · Boosts ⚡ ·
+                              Coupons 🎟️ · Gems 💎 (bulk quantities 🔢)
+  🌾 BARN INVENTORY ......... 300+ goods 🍞🧀 · capacity upgrades 🏬
+  🏛️ MUSEUM ................. 354 artifacts 🏺 (complete full sets 🏆)
+  🃏 CARDS .................. 150 cards in 5 pack tiles 🟣🟠🟢🔵🩷 —
+                              tap a pack to expand its 30 cards 👆
+  🐾 ZOO .................... 50 paddocks 🦁 · complete animal families 🐼
+  ⚙️ UPGRADES ............... Factories 🏭 · Trains 🚂 · Islands 🏝️ —
+                              raise to YOUR save's max level 📈
+
+  ⚡ QUICK ACTIONS .......... Regatta 105×135 🏁 · Season Pass 🎫 (one tap!)
+  🌍 FETCH CITY ............. Clone any friend city by ID 🧲 (powers Unban)
+  💾 BACKUP ................. Export current XML ⬇️ — undo anything, anytime ↩️
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔓  6. UNBAN — STEP BY STEP (read once!)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1️⃣  🌍 Fetch City → enter a HEALTHY friend's city ID → fetch 🧲
+  2️⃣  🔓 Unban Center → pick mode → Apply 🏥
+  3️⃣  📤 Save & push → open game 🎮 → city restored 🎉
+  ⚠️  Unban ALWAYS needs a friend city first — no friend, no unban. 👯
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🛡️  7. SAFETY FIRST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  💾 Before big edits: Export current XML ⬇️ — your personal undo button ↩️
+  🐢 Big pushes (decor max-all, full unlocks) take longer — let it finish ⏳
+  🎮 Always let the tool relaunch the game after push (don't force-close) 📤
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🆘  8. QUICK FIXES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  😴 First open slow? ......... Server waking up — wait 60 sec ☁️⏰
+  🖼️ Images loading slowly? ... First load fills cache; reopen = instant ⚡
+  🔴 Device offline? .......... Restart emulator, re-pick device 📲
+  📥 Load fails? .............. Root OFF 🔓 or Township never opened 🏘️
+  ⌛ Session expired? ......... Connect & load again (10 sec) 🔗
+  🃏 Cards tab empty? ......... Open the card event in game first 🎮
+  🔓 Unban blocked? ........... Fetch a friend city first 🌍👯
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║  💜 Thank you for choosing IGG VIP TOOL — play like a VIP! 👑🎮  ║
+╚══════════════════════════════════════════════════════════════════╝
