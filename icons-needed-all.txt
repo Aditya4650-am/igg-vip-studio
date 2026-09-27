@@ -2,6 +2,12 @@
 # Name each file EXACTLY as shown (exact case) and zip them per folder.
 
 
+## items (4)
+public/game-icons/Order_Token_1.webp
+public/game-icons/Order_Token_2.webp
+public/game-icons/Order_Token_3.webp
+public/game-icons/Order_Token_4.webp
+
 ## skins (104)
 public/game-icons/Ship__Classic_ST1.webp
 public/game-icons/Ship__Special_SP9.webp
