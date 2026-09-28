@@ -25,6 +25,7 @@ export type FreshBackupMeta = {
   oldCityId: string;
   oldLevel: number;
   oldAndroidId: string;
+  oldGsfId: string;
 };
 
 /** Minimal session shape: the real Session satisfies this structurally. */
@@ -45,11 +46,13 @@ export type FreshBackupInput = {
   localB64: string;
   extraFiles?: { path: string; b64: string }[];
   androidId?: string;
+  gsfId?: string;
 };
 
 export type FreshVerifyInput = {
   cityB64: string;
   androidId?: string;
+  gsfAndroidId?: string;
 };
 
 const B64_MAX = 24_000_000;
@@ -225,6 +228,7 @@ export function backupFreshStartState(s: FreshSession, input: FreshBackupInput) 
     oldCityId,
     oldLevel,
     oldAndroidId: cleanAndroidId(input.androidId),
+    oldGsfId: cleanAndroidId(input.gsfId),
   };
   s.freshVerified = null;
   return { oldCityId, oldLevel, extraCount: extraPaths.length - skippedCount, skippedCount, backedUp: true as const };
@@ -248,11 +252,25 @@ export function verifyFreshStartState(s: FreshSession, input: FreshVerifyInput) 
   const level = parseLevel(xmlText);
   if (level !== 1) throw new Error("Not level 1");
   const newAndroidId = cleanAndroidId(input.androidId);
-  if (b.meta.oldAndroidId && newAndroidId && newAndroidId === b.meta.oldAndroidId) {
-    throw new Error("Same Android ID — device identity did not reset");
+  const newGsfId = cleanAndroidId(input.gsfAndroidId);
+  const androidChanged = Boolean(b.meta.oldAndroidId && newAndroidId && newAndroidId !== b.meta.oldAndroidId);
+  const gsfChanged = Boolean(b.meta.oldGsfId && newGsfId && newGsfId !== b.meta.oldGsfId);
+  // A new city under an unchanged device identity gets re-linked to the ban,
+  // so pass when EITHER hardware id moved. Refuse only when both are known
+  // and neither moved — or when the Android id is known and stuck.
+  const androidStuck = Boolean(b.meta.oldAndroidId && newAndroidId && newAndroidId === b.meta.oldAndroidId);
+  const gsfStuck = Boolean(b.meta.oldGsfId && newGsfId && newGsfId === b.meta.oldGsfId);
+  if (!androidChanged && !gsfChanged && (androidStuck || gsfStuck || b.meta.oldAndroidId)) {
+    throw new Error("Device identity unchanged — the ban will follow the new city");
   }
   s.freshVerified = { newCityId, newAndroidId };
-  return { newCityId, level: 1 as const, androidReset: Boolean(newAndroidId && newAndroidId !== b.meta.oldAndroidId), clean: true as const };
+  return {
+    newCityId,
+    level: 1 as const,
+    androidReset: androidChanged,
+    gsfReset: gsfChanged,
+    clean: true as const,
+  };
 }
 
 export function restoreFreshStartState(s: FreshSession) {

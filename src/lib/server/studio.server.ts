@@ -85,6 +85,7 @@ export type Session = {
     oldCityId: string;
     oldLevel: number;
     oldAndroidId: string;
+    oldGsfId: string;
   } | null;
   freshVerified?: { newCityId: string; newAndroidId: string } | null;
   log: string[];
@@ -620,6 +621,7 @@ export function backupFreshStart(
     localB64: string;
     extraFiles?: { path: string; b64: string }[];
     androidId?: string;
+    gsfId?: string;
   },
 ) {
   const s = requireSession(sessionId, token);
@@ -634,7 +636,7 @@ export function wipeFreshStart(sessionId: string, token: string) {
 export function verifyFreshStart(
   sessionId: string,
   token: string,
-  input: { cityB64: string; androidId?: string },
+  input: { cityB64: string; androidId?: string; gsfAndroidId?: string },
 ) {
   const s = requireSession(sessionId, token);
   return verifyFreshStartState(s, input);

@@ -122,7 +122,50 @@ test("verify rejects same city, wrong level, and unchanged device id", () => {
   );
   assert.throws(
     () => verifyFreshStartState(s, { cityB64: b64(CITY("city-new-9", 1)), androidId: "aaaaaaaaaaaaaaaa" }),
-    /Same Android ID/,
+    /Device identity unchanged/,
+  );
+});
+
+test("verify passes when the GSF id moved even if Settings id is stuck", () => {
+  const s: FreshSession = { id: "s1" };
+  backupFreshStartState(s, {
+    serial: "emulator-5554",
+    cityPath: "/a.xml",
+    localPath: "/b.xml",
+    cityB64: b64(CITY("c-old", 9)),
+    localB64: b64("<x/>"),
+    androidId: "aaaaaaaaaaaaaaaa",
+    gsfId: "1111111111111111",
+  });
+  const r = verifyFreshStartState(s, {
+    cityB64: b64(CITY("c-new", 1)),
+    androidId: "aaaaaaaaaaaaaaaa",
+    gsfAndroidId: "2222222222222222",
+  });
+  assert.equal(r.gsfReset, true);
+  assert.equal(r.androidReset, false);
+  assert.equal(r.clean, true);
+});
+
+test("verify refuses when both known ids are unchanged", () => {
+  const s: FreshSession = { id: "s1" };
+  backupFreshStartState(s, {
+    serial: "emulator-5554",
+    cityPath: "/a.xml",
+    localPath: "/b.xml",
+    cityB64: b64(CITY("c-old", 9)),
+    localB64: b64("<x/>"),
+    androidId: "aaaaaaaaaaaaaaaa",
+    gsfId: "1111111111111111",
+  });
+  assert.throws(
+    () =>
+      verifyFreshStartState(s, {
+        cityB64: b64(CITY("c-new", 1)),
+        androidId: "aaaaaaaaaaaaaaaa",
+        gsfAndroidId: "1111111111111111",
+      }),
+    /Device identity unchanged/,
   );
 });
 

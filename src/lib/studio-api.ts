@@ -213,6 +213,7 @@ export const backupFreshStart = createServerFn({ method: "POST" })
       localB64: z.string().max(24_000_000),
       extraFiles: z.array(freshExtraSchema).max(64).optional(),
       androidId: z.string().max(64).optional(),
+      gsfId: z.string().max(64).optional(),
     }),
   )
   .handler(async ({ data }) => {
@@ -225,6 +226,7 @@ export const backupFreshStart = createServerFn({ method: "POST" })
       localB64: data.localB64,
       extraFiles: data.extraFiles,
       androidId: data.androidId,
+      gsfId: data.gsfId,
     });
   });
 
@@ -242,11 +244,12 @@ export const verifyFreshStart = createServerFn({ method: "POST" })
       sessionId: z.string(),
       cityB64: z.string().max(24_000_000),
       androidId: z.string().max(64).optional(),
+      gsfAndroidId: z.string().max(64).optional(),
     }),
   )
   .handler(async ({ data }) => {
     const { verifyFreshStart: run } = await import("./server/studio.server");
-    return run(data.sessionId, data.token, { cityB64: data.cityB64, androidId: data.androidId });
+    return run(data.sessionId, data.token, { cityB64: data.cityB64, androidId: data.androidId, gsfAndroidId: data.gsfAndroidId });
   });
 
 export const restoreFreshStart = createServerFn({ method: "POST" })

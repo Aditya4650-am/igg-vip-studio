@@ -45,7 +45,7 @@ if sys.stderr is None:
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
-APP_VERSION = "1.1.8"
+APP_VERSION = "1.1.9"
 
 # Where the app UI comes from. Override with env IGG_VIP_URL or
 # %APPDATA%\IGG-VIP-Studio\server.txt
@@ -882,6 +882,123 @@ class NativeBridge:
         if check != new_id:
             raise RuntimeError("Android ID did not change (old and new match)")
         return {"ok": True, "oldAndroidId": old, "androidId": new_id}
+
+    # Fresh-start device identity, part 2: the Google Services (GSF) Android
+    # ID. This is a DIFFERENT 16-hex id from Settings.Secure (gservices.db),
+    # and Play SDKs key on it — resetting only Settings.Secure leaves the
+    # GSF id behind, so the server re-links the "new" city to the ban.
+    # Deleting the databases forces GMS to mint fresh ids on next sync.
+    _GSF_DB_CANDIDATES = (
+        "/data/data/com.google.android.gsf/databases/gservices.db",
+        "/data/user/0/com.google.android.gsf/databases/gservices.db",
+    )
+
+    def _gsf_db_path(self, adb: str, serial: str) -> str | None:
+        for remote in self._GSF_DB_CANDIDATES:
+            code, out, _ = _run_adb(
+                adb, ["-s", serial, "shell", f"su -c 'ls \"{remote}\"'"], timeout=15
+            )
+            if code == 0 and out.strip():
+                return remote
+        return None
+
+    def readGsfId(self, serial: str) -> dict:
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        remote = self._gsf_db_path(adb, serial)
+        if not remote:
+            return {"ok": False, "reason": "gservices.db not found"}
+        buf = self._pull_privileged(adb, serial, remote)
+        if not buf:
+            return {"ok": False, "reason": "could not read " + remote}
+        try:
+            import sqlite3
+
+            with tempfile.TemporaryDirectory() as td:
+                local = Path(td) / "gservices.db"
+                local.write_bytes(buf)
+                con = sqlite3.connect(f"file:{local}?mode=ro", uri=True)
+                try:
+                    row = con.execute(
+                        "SELECT value FROM main WHERE name='android_id' LIMIT 1"
+                    ).fetchone()
+                finally:
+                    con.close()
+            val = str((row or [None])[0] or "").strip().lower()
+            if re.fullmatch(r"[0-9a-f]{16}", val or ""):
+                return {"ok": True, "gsfId": val, "file": remote}
+            return {"ok": False, "reason": "no android_id row in gservices.db"}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "reason": "gservices.db unreadable: " + str(e)[:80]}
+
+    def resetGsfId(self, serial: str) -> dict:
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        deleted: list[str] = []
+        errs: list[str] = []
+        for base in (
+            "/data/data/com.google.android.gsf/databases",
+            "/data/user/0/com.google.android.gsf/databases",
+        ):
+            for name in ("gservices.db", "gservices.db-shm", "gservices.db-wal", "checkin.db", "checkin.db-shm", "checkin.db-wal"):
+                remote = f"{base}/{name}"
+                code, _, _ = _run_adb(
+                    adb, ["-s", serial, "shell", f"su -c 'rm -f \"{remote}\"'"], timeout=15
+                )
+                if code != 0:
+                    continue
+                code2, out2, _ = _run_adb(
+                    adb, ["-s", serial, "shell", f"su -c 'ls \"{remote}\"'"], timeout=15
+                )
+                if code2 == 0 and out2.strip():
+                    errs.append(f"{name}: still present")
+                else:
+                    deleted.append(remote)
+        if not deleted:
+            return {"ok": False, "deleted": [], "error": " | ".join(errs) or "GSF databases not found"}
+        return {"ok": True, "deleted": deleted, "error": " | ".join(errs)}
+
+    def nukeSecureSettings(self, serial: str) -> dict:
+        """Move settings_secure.xml aside so the OS regenerates device ids.
+
+        Last resort for emulators whose settings provider silently drops
+        `settings put` writes (put "succeeds", re-read shows the old id).
+        The file is RENAMED (not deleted) and a reboot is required for the
+        fresh id to mint — call rebootDevice right after.
+        """
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        moved: list[str] = []
+        for base in ("/data/system/users/0", "/data/system/users/10"):
+            src = f"{base}/settings_secure.xml"
+            dst = f"{base}/settings_secure.xml.iggbak"
+            code, out, _ = _run_adb(
+                adb, ["-s", serial, "shell", f"su -c 'ls \"{src}\"'"], timeout=15
+            )
+            if code != 0 or not out.strip():
+                continue
+            code2, out2, err2 = _run_adb(
+                adb, ["-s", serial, "shell", f"su -c 'mv \"{src}\" \"{dst}\"'"], timeout=15
+            )
+            combined = (out2 + err2).decode("utf-8", "replace").strip()
+            if code2 != 0 or re.search(r"permission denied|failed|error:", combined, re.I):
+                return {"ok": False, "error": f"cannot move {src}: {combined or 'su failed'}"}
+            moved.append(src)
+        if not moved:
+            return {"ok": False, "error": "settings_secure.xml not found"}
+        return {"ok": True, "moved": moved}
+
+    def rebootDevice(self, serial: str) -> dict:
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        code, _, err = _run_adb(adb, ["-s", serial, "reboot"], timeout=15)
+        if code != 0:
+            raise RuntimeError("reboot failed: " + err.decode("utf-8", "replace").strip())
+        return {"ok": True}
 
     # self-update
     def installUpdate(self, release: dict) -> dict:

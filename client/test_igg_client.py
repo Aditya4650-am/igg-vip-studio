@@ -7,6 +7,7 @@ including the Windows build runner before the EXE is packaged.
 from __future__ import annotations
 
 import os
+import re
 import socket
 import sys
 import types
@@ -400,6 +401,50 @@ class FreshStartBridge(unittest.TestCase):
         c._run_adb = lambda adb, args, timeout=30: (0, b"aaaaaaaaaaaaaaaa\n", b"") if "get" in " ".join(args) else (1, b"", b"Permission denied")  # type: ignore[assignment]
         with self.assertRaisesRegex(RuntimeError, "emulator's device settings"):
             c.NativeBridge().resetAndroidId("emulator-5554")
+
+    def test_read_gsf_id_from_pulled_database(self):
+        import sqlite3
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            db = os.path.join(td, "gservices.db")
+            con = sqlite3.connect(db)
+            con.execute("CREATE TABLE main (name TEXT, value TEXT)")
+            con.execute("INSERT INTO main VALUES ('android_id', 'ABCDEF0123456789')")
+            con.commit()
+            con.close()
+            with open(db, "rb") as fh:
+                blob = fh.read()
+
+        real_pull = c.NativeBridge._pull_privileged
+
+        def fake_pull(self, adb, serial, remote, diag=None):
+            if "gservices.db" in remote:
+                return blob
+            return None
+
+        c.NativeBridge._pull_privileged = fake_pull  # type: ignore[assignment]
+        c._run_adb = lambda adb, args, timeout=30: (0, b"/x/gservices.db\n", b"") if "ls " in " ".join(args) else (1, b"", b"no")  # type: ignore[assignment]
+        try:
+            r = c.NativeBridge().readGsfId("emulator-5554")
+        finally:
+            c.NativeBridge._pull_privileged = real_pull  # type: ignore[assignment]
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["gsfId"], "abcdef0123456789")
+
+    def test_reset_gsf_id_reports_deleted_files(self):
+        c._run_adb = lambda adb, args, timeout=30: (0, b"", b"") if "rm -f" in " ".join(args) else (1, b"", b"No such file")  # type: ignore[assignment]
+        r = c.NativeBridge().resetGsfId("emulator-5554")
+        self.assertTrue(r["ok"])
+        self.assertTrue(any("gservices.db" in p and not p.endswith(("-shm", "-wal")) for p in r["deleted"]))
+
+    def test_nuke_secure_settings_renames_never_deletes(self):
+        seen: list[str] = []
+        c._run_adb = lambda adb, args, timeout=30: (seen.append(" ".join(args)), (0, b"/data/system/users/0/settings_secure.xml\n", b""))[1]  # type: ignore[assignment]
+        r = c.NativeBridge().nukeSecureSettings("emulator-5554")
+        self.assertTrue(r["ok"])
+        self.assertTrue(any("settings_secure.xml.iggbak" in c for c in seen))
+        self.assertFalse(any(re.search(r"\brm\b", c) for c in seen))
 
 
 class CookieSafety(unittest.TestCase):

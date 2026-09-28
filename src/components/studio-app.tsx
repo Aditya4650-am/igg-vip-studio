@@ -61,6 +61,10 @@ type NativeBridge = {
   writeFile?: (serial: string, path: string, b64: string) => Promise<{ ok: boolean; file?: string }>;
   readAndroidId?: (serial: string) => Promise<{ ok: boolean; androidId: string }>;
   resetAndroidId?: (serial: string) => Promise<{ ok: boolean; androidId: string; oldAndroidId?: string }>;
+  readGsfId?: (serial: string) => Promise<{ ok: boolean; gsfId?: string; reason?: string }>;
+  resetGsfId?: (serial: string) => Promise<{ ok: boolean; deleted?: string[]; error?: string }>;
+  nukeSecureSettings?: (serial: string) => Promise<{ ok: boolean; moved?: string[]; error?: string }>;
+  rebootDevice?: (serial: string) => Promise<{ ok: boolean }>;
   exportFile?: (name: string, b64: string) => Promise<{ ok: boolean; path: string; size?: number }>;
 };
 
@@ -1237,7 +1241,8 @@ export function StudioApp() {
   // other tabs' state is read or written here.
   const [freshPhase, setFreshPhase] = useState<"idle" | "backedup" | "wiped" | "verified">("idle");
   const [freshBackup, setFreshBackup] = useState<{ oldCityId: string; oldLevel: number; extraCount: number; skippedCount: number; androidId: string } | null>(null);
-  const [freshCheck, setFreshCheck] = useState<{ newCityId: string; androidReset: boolean } | null>(null);
+  const [freshCheck, setFreshCheck] = useState<{ newCityId: string; androidReset: boolean; gsfReset: boolean } | null>(null);
+  const [freshIds, setFreshIds] = useState<{ androidFrom: string; androidTo: string; gsfRenewed: boolean } | null>(null);
   const [freshConfirm, setFreshConfirm] = useState("");
   const [pendingDecorMaxAll, setPendingDecorMaxAll] = useState(false);
   const upgradeFactorySel = useSetMap();
@@ -1910,15 +1915,22 @@ export function StudioApp() {
     } catch {
       androidId = "";
     }
+    let gsfId = "";
+    try {
+      gsfId = (await native.readGsfId?.(device))?.gsfId ?? "";
+    } catch {
+      gsfId = "";
+    }
     const r = await backupFreshStart({
       data: {
         token, sessionId: session.sessionId, serial: device,
         cityPath: city.file, localPath: local.file,
-        cityB64: city.b64, localB64: local.b64, extraFiles, androidId,
+        cityB64: city.b64, localB64: local.b64, extraFiles, androidId, gsfId,
       },
     });
     setFreshBackup({ oldCityId: r.oldCityId, oldLevel: r.oldLevel, extraCount: r.extraCount, skippedCount: r.skippedCount ?? 0, androidId });
     setFreshCheck(null);
+    setFreshIds(null);
     setFreshConfirm("");
     setFreshPhase("backedup");
     return true;
@@ -1954,6 +1966,18 @@ export function StudioApp() {
     if (!wiped.ok) throw new Error(wiped.error || tr("nothing"));
     const reset = await native.resetAndroidId(device);
     if (!reset.ok) throw new Error(tr("nothing"));
+    let gsfRenewed = false;
+    try {
+      const gsf = await native.resetGsfId?.(device);
+      gsfRenewed = Boolean(gsf?.ok);
+    } catch {
+      gsfRenewed = false;
+    }
+    setFreshIds({
+      androidFrom: (reset.oldAndroidId ?? "").slice(0, 8),
+      androidTo: (reset.androidId ?? "").slice(0, 8),
+      gsfRenewed,
+    });
     setFreshPhase("wiped");
     setFreshConfirm("");
     return true;
@@ -2001,6 +2025,34 @@ export function StudioApp() {
     }
   };
 
+  const onFreshForce = async () => {
+    if (!token || !session || !device) {
+      toast.error(tr("actionFailed"));
+      return;
+    }
+    if (freshConfirm.trim().toUpperCase() !== "WIPE") {
+      toast.error(tr("freshConfirmPh"));
+      return;
+    }
+    const native = nativeBridge();
+    if (!native?.nukeSecureSettings || !native?.rebootDevice) {
+      toast.error(tr("freshNoBridge"));
+      return;
+    }
+    setBusy(true);
+    try {
+      const nuked = await native.nukeSecureSettings(device);
+      if (!nuked.ok) throw new Error(nuked.error || tr("nothing"));
+      await native.rebootDevice(device);
+      setFreshConfirm("");
+      toast.success(tr("freshRebooting"));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : tr("nothing"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const onFreshVerify = async () => {
     if (!token || !session || !device) {
       toast.error(tr("actionFailed"));
@@ -2020,10 +2072,16 @@ export function StudioApp() {
       } catch {
         androidId = "";
       }
+      let gsfAndroidId = "";
+      try {
+        gsfAndroidId = (await native.readGsfId?.(device))?.gsfId ?? "";
+      } catch {
+        gsfAndroidId = "";
+      }
       const r = await verifyFreshStart({
-        data: { token, sessionId: session.sessionId, cityB64: city.b64, androidId },
+        data: { token, sessionId: session.sessionId, cityB64: city.b64, androidId, gsfAndroidId },
       });
-      setFreshCheck({ newCityId: r.newCityId, androidReset: r.androidReset });
+      setFreshCheck({ newCityId: r.newCityId, androidReset: r.androidReset, gsfReset: r.gsfReset ?? false });
       setFreshPhase("verified");
       toast.success(tr("freshVerified"));
     } catch (e) {
@@ -3103,9 +3161,15 @@ export function StudioApp() {
                         <Button size="sm" variant="primary" disabled={freshPhase === "idle"} onClick={onFreshWipe}>
                           {tr("freshWipeBtn")}
                         </Button>
+                        <Button size="sm" variant="ghost" disabled={freshPhase === "idle"} onClick={onFreshForce}>
+                          {tr("freshForceBtn")}
+                        </Button>
                       </div>
                       {freshPhase === "wiped" && (
-                        <p className="mt-2 text-xs text-muted">✅ {tr("freshWiped")}</p>
+                        <p className="mt-2 text-xs text-muted">
+                          ✅ {tr("freshWiped")}
+                          {freshIds ? ` · 🆔 ${freshIds.androidFrom}…→${freshIds.androidTo}… · GSF ${freshIds.gsfRenewed ? "✓" : "…"}` : ""}
+                        </p>
                       )}
                     </section>
                     <section className="panel">
@@ -3121,7 +3185,7 @@ export function StudioApp() {
                       </div>
                       {freshCheck && (
                         <p className="mt-2 text-xs text-muted">
-                          ✅ {tr("freshVerified")}: {freshCheck.newCityId.slice(0, 12)}…{freshCheck.androidReset ? " · 🆔✓" : ""}
+                          ✅ {tr("freshVerified")}: {freshCheck.newCityId.slice(0, 12)}…{freshCheck.androidReset ? " · 🆔✓" : ""}{freshCheck.gsfReset ? " · GSF✓" : ""}
                         </p>
                       )}
                     </section>
