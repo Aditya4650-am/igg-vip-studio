@@ -14,7 +14,8 @@
  * validate + track state around those calls. Never edits save XML.
  */
 
-import { decodeContainer } from "./save-decode.server";
+import { decodeContainer, shellErrorMessage } from "./save-decode.server";
+import { decryptStream, postProcessDecrypt } from "./crypto.server";
 
 export type FreshBackupMeta = {
   serial: string;
@@ -63,9 +64,32 @@ function mustCityBytes(label: string, b64: string): Buffer {
   if (!buf.length) throw new Error(`${label} is empty`);
   // Same shell-error guard as pull: a failed remote command still exits 0
   // and puts its stderr on stdout, so error text must never pass as a file.
-  // The city file is always plain XML.
-  if (!shellText(buf).startsWith("<")) throw new Error(`${label} is not a save file`);
+  if (shellErrorMessage(buf)) throw new Error(`${label} is not a save file`);
+  if (!buf.length) throw new Error(`${label} is empty`);
   return buf;
+}
+
+/**
+ * Open a pulled city file exactly like a session load does: plain XML passes
+ * through, Township container variants (0x79/0x54/0x53/0x7d/gzip/PLXE) are
+ * unwrapped. The device usually stores the wrapped form while exports are
+ * plain XML — rejecting the wrapped form is what broke backup on real
+ * devices with "City file is not a save file".
+ */
+function openCityXml(label: string, b64: string): string {
+  const buf = mustCityBytes(label, b64);
+  const head = shellText(buf);
+  if (head.startsWith("<")) return textOf(buf);
+  if (buf.length < 64) throw new Error(`${label} is not a save file`);
+  let dec: Buffer;
+  try {
+    dec = decryptStream(buf);
+  } catch {
+    throw new Error(`${label} is not a save file`);
+  }
+  const { xml, kind } = postProcessDecrypt(dec);
+  if (kind === "raw") throw new Error(`${label} is not a save file`);
+  return xml.toString("utf8").replace(/^\uFEFF/, "");
 }
 
 function mustLoginBytes(label: string, b64: string): Buffer {
@@ -153,9 +177,8 @@ export function backupFreshStartState(s: FreshSession, input: FreshBackupInput) 
   const serial = requireSerial(input.serial);
   const cityPath = requireDevicePath("City file", input.cityPath);
   const localPath = requireDevicePath("Login file", input.localPath);
-  const cityBuf = mustCityBytes("City file", input.cityB64);
   mustLoginBytes("Login file", input.localB64);
-  const xmlText = textOf(cityBuf);
+  const xmlText = openCityXml("City file", input.cityB64);
   const oldCityId = parseCityId(xmlText);
   if (!oldCityId) throw new Error("Backup invalid: no city id");
   const oldLevel = parseLevel(xmlText);
@@ -197,8 +220,7 @@ export function wipeFreshStartPlan(s: FreshSession) {
 
 export function verifyFreshStartState(s: FreshSession, input: FreshVerifyInput) {
   const b = requireBackup(s);
-  const buf = mustCityBytes("Fresh city file", input.cityB64);
-  const xmlText = textOf(buf);
+  const xmlText = openCityXml("Fresh city file", input.cityB64);
   const newCityId = parseCityId(xmlText);
   if (!newCityId) throw new Error("Fresh city has no id");
   if (newCityId === b.meta.oldCityId) throw new Error("Same city — wipe did not happen");

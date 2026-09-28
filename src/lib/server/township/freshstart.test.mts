@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import { encryptStream } from "./crypto.server.ts";
 
 import {
   backupFreshStartState,
@@ -134,6 +135,39 @@ test("restore returns every backed-up blob with its path", () => {
   assert.equal(r.localPath, "/data/data/pkg/files/mLocalInfo.xml");
   assert.deepEqual(Object.keys(r.extra), ["/prefs/a.xml"]);
   assert.ok(r.cityB64.length > 0 && r.localB64.length > 0);
+});
+
+test("backup accepts a container-wrapped city like the device stores", () => {
+  const wrapped = encryptStream(
+    Buffer.from(CITY("city-wrap-7", 12), "utf8"),
+    Buffer.from([0x79, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]),
+  ).toString("base64");
+  const s: FreshSession = { id: "s1" };
+  const r = backupFreshStartState(s, {
+    serial: "emulator-5554",
+    cityPath: "/data/data/pkg/saves/mGameInfo.xml",
+    localPath: "/data/data/pkg/files/mLocalInfo.xml",
+    cityB64: wrapped,
+    localB64: b64("<root><Global/></root>"),
+    androidId: "aaaaaaaaaaaaaaaa",
+  });
+  assert.equal(r.oldCityId, "city-wrap-7");
+  assert.equal(r.oldLevel, 12);
+});
+
+test("backup rejects adb shell error text, not just non-XML", () => {
+  const s: FreshSession = { id: "s1" };
+  assert.throws(
+    () =>
+      backupFreshStartState(s, {
+        serial: "emulator-5554",
+        cityPath: "/data/data/pkg/saves/mGameInfo.xml",
+        localPath: "/data/data/pkg/files/mLocalInfo.xml",
+        cityB64: b64("cat: /data/data/pkg/saves/mGameInfo.xml: No such file or directory\n"),
+        localB64: b64("<root><Global/></root>"),
+      }),
+    /not a save file/,
+  );
 });
 
 test("plan and verify require a backup first", () => {
