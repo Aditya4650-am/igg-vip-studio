@@ -446,6 +446,37 @@ class FreshStartBridge(unittest.TestCase):
         self.assertTrue(any("settings_secure.xml.iggbak" in c for c in seen))
         self.assertFalse(any(re.search(r"\brm\b", c) for c in seen))
 
+    def test_pm_clear_stops_then_clears_and_clears_cache(self):
+        seen: list[str] = []
+        c._run_adb = lambda adb, args, timeout=30: (seen.append(" ".join(args)), (0, b"package:/data/app/x.apk\n" if "pm path" in " ".join(args) else (b"Success\n" if "pm clear" in " ".join(args) else b""), b""))[1]  # type: ignore[assignment]
+        r = c.NativeBridge().pmClear("emulator-5554")
+        self.assertTrue(r["ok"])
+        self.assertIn(r["package"], ("com.playrix.township", "com.playrix.township.vn"))
+        joined = "\n".join(seen)
+        self.assertIn("force-stop", joined)
+        self.assertIn("pm clear", joined)
+        self.assertLess(joined.index("force-stop"), joined.index("pm clear"))
+
+    def test_pm_clear_falls_through_to_the_next_package(self):
+        def run(adb, args, timeout=30):
+            cmd = " ".join(args)
+            if "pm path com.playrix.township " in cmd or cmd.endswith("pm path com.playrix.township"):
+                return (1, b"", b"not installed")
+            if "pm path" in cmd:
+                return (0, b"package:/data/app/x.apk\n", b"")
+            if "pm clear" in cmd:
+                return (0, b"Success\n", b"")
+            return (0, b"", b"")
+
+        c._run_adb = run  # type: ignore[assignment]
+        r = c.NativeBridge().pmClear("emulator-5554")
+        self.assertTrue(r["ok"])
+
+    def test_pm_clear_raises_when_nothing_works(self):
+        c._run_adb = lambda adb, args, timeout=30: (1, b"", b"Failure")  # type: ignore[assignment]
+        with self.assertRaises(RuntimeError):
+            c.NativeBridge().pmClear("emulator-5554")
+
 
 class CookieSafety(unittest.TestCase):
     """The proxy only works if the session cookie is host-only.

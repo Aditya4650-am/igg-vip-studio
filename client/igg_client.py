@@ -45,7 +45,7 @@ if sys.stderr is None:
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
-APP_VERSION = "1.1.9"
+APP_VERSION = "1.1.10"
 
 # Where the app UI comes from. Override with env IGG_VIP_URL or
 # %APPDATA%\IGG-VIP-Studio\server.txt
@@ -999,6 +999,53 @@ class NativeBridge:
         if code != 0:
             raise RuntimeError("reboot failed: " + err.decode("utf-8", "replace").strip())
         return {"ok": True}
+
+    # Fresh-start ("New Account") one-shot wipe: force-stop + `pm clear`.
+    # PackageManager deletes the app's ENTIRE internal tree (saves, prefs,
+    # databases, cache) atomically — no per-file enumeration that can miss a
+    # directory or choke on a journal file. External app storage is removed
+    # explicitly afterwards (belt and suspenders).
+    def pmClear(self, serial: str) -> dict:
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        errs: list[str] = []
+        for pkg in self._pkgs_for(serial):
+            if not self._is_pkg_installed(adb, serial, pkg):
+                errs.append(f"{pkg}: package not installed")
+                continue
+            code, _, err = _run_adb(
+                adb, ["-s", serial, "shell", "am", "force-stop", pkg], timeout=10
+            )
+            if code != 0:
+                errs.append(f"{pkg}: force-stop failed: " + err.decode("utf-8", "replace").strip())
+                continue
+            code, out, err = _run_adb(
+                adb, ["-s", serial, "shell", "pm", "clear", pkg], timeout=60
+            )
+            combined = (out + err).decode("utf-8", "replace").strip()
+            if code != 0 or "success" not in combined.lower():
+                errs.append(f"{pkg}: pm clear failed: " + (combined or f"exit {code}"))
+                continue
+            # External app storage can survive `pm clear` on some builds.
+            sdcard: list[str] = []
+            for shell in (
+                f"rm -rf \"/sdcard/Android/data/{pkg}/files\"",
+                f"su -c 'rm -rf \"/sdcard/Android/data/{pkg}/files\"'",
+            ):
+                code3, _, _ = _run_adb(adb, ["-s", serial, "shell", shell], timeout=30)
+                if code3 == 0:
+                    break
+            else:
+                sdcard.append("external storage not confirmed")
+            _active_package[serial] = pkg
+            _PATH_CACHE.pop((serial, pkg, SAVE_FILE), None)
+            _PATH_CACHE.pop((serial, pkg, LOCAL_INFO_FILE), None)
+            out_dict: dict = {"ok": True, "package": pkg, "serial": serial}
+            if sdcard:
+                out_dict["sdcard"] = " | ".join(sdcard)
+            return out_dict
+        raise RuntimeError("pm clear failed — " + (" | ".join(errs) or "no package worked"))
 
     # self-update
     def installUpdate(self, release: dict) -> dict:

@@ -31,7 +31,6 @@ import {
   attachFriendCity,
   attachLocal,
   backupFreshStart,
-  wipeFreshStart,
   verifyFreshStart,
   restoreFreshStart,
 } from "@/lib/studio-api";
@@ -56,6 +55,7 @@ type NativeBridge = {
   saveKey: (key: string) => Promise<{ ok: boolean }>;
   clearSavedKey: () => Promise<{ ok: boolean }>;
   wipeFiles?: (serial: string, paths: string[]) => Promise<{ ok: boolean; wiped?: string[]; error?: string }>;
+  pmClear?: (serial: string) => Promise<{ ok: boolean; package?: string; serial?: string; sdcard?: string }>;
   listStateFiles?: (serial: string) => Promise<{ ok: boolean; package: string; files: string[] }>;
   readFile?: (serial: string, path: string) => Promise<{ b64: string; file: string; size?: number }>;
   writeFile?: (serial: string, path: string, b64: string) => Promise<{ ok: boolean; file?: string }>;
@@ -1895,20 +1895,12 @@ export function StudioApp() {
       return false;
     }
     const native = nativeBridge();
-    if (!native?.listStateFiles || !native?.readFile || !native?.readAndroidId) {
+    if (!native?.readAndroidId) {
       toast.error(tr("freshNoBridge"));
       return false;
     }
     const city = await native.pull(device);
     const local = await native.pullLocalInfo(device);
-    const listed = await native.listStateFiles(device);
-    const extraFiles: { path: string; b64: string }[] = [];
-    for (const p of listed.files ?? []) {
-      if (p === city.file || p === local.file) continue;
-      if (extraFiles.length >= 60) break;
-      const f = await native.readFile(device, p);
-      extraFiles.push({ path: p, b64: f.b64 });
-    }
     let androidId = "";
     try {
       androidId = (await native.readAndroidId(device)).androidId ?? "";
@@ -1925,7 +1917,7 @@ export function StudioApp() {
       data: {
         token, sessionId: session.sessionId, serial: device,
         cityPath: city.file, localPath: local.file,
-        cityB64: city.b64, localB64: local.b64, extraFiles, androidId, gsfId,
+        cityB64: city.b64, localB64: local.b64, extraFiles: [], androidId, gsfId,
       },
     });
     setFreshBackup({ oldCityId: r.oldCityId, oldLevel: r.oldLevel, extraCount: r.extraCount, skippedCount: r.skippedCount ?? 0, androidId });
@@ -1957,13 +1949,14 @@ export function StudioApp() {
       return false;
     }
     const native = nativeBridge();
-    if (!native?.wipeFiles || !native?.resetAndroidId) {
+    if (!native?.pmClear || !native?.resetAndroidId) {
       toast.error(tr("freshNoBridge"));
       return false;
     }
-    const plan = await wipeFreshStart({ data: { token, sessionId: session.sessionId } });
-    const wiped = await native.wipeFiles(device, plan.paths);
-    if (!wiped.ok) throw new Error(wiped.error || tr("nothing"));
+    // One atomic OS-level wipe (force-stop + pm clear + external storage),
+    // then fresh device ids. No per-file plan to go stale.
+    const cleared = await native.pmClear(device);
+    if (!cleared.ok) throw new Error(tr("nothing"));
     const reset = await native.resetAndroidId(device);
     if (!reset.ok) throw new Error(tr("nothing"));
     let gsfRenewed = false;
