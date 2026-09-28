@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import igg_client as c  # noqa: E402
 
-HOST = "igg-vip-studio-07u9.onrender.com"
+HOST = "igg-vip-studio-46.onrender.com"
 BASE = "https://" + HOST
 
 
