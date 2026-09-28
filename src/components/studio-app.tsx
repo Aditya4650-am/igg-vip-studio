@@ -2078,7 +2078,8 @@ export function StudioApp() {
       setFreshPhase("verified");
       toast.success(tr("freshVerified"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : tr("nothing"));
+      const msg = e instanceof Error ? e.message : tr("nothing");
+      toast.error(/could not read mgameinfo/i.test(msg) ? tr("freshOpenGameFirst") : msg);
     } finally {
       setBusy(false);
     }

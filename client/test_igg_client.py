@@ -446,6 +446,19 @@ class FreshStartBridge(unittest.TestCase):
         self.assertTrue(any("settings_secure.xml.iggbak" in c for c in seen))
         self.assertFalse(any(re.search(r"\brm\b", c) for c in seen))
 
+    def test_reboot_timeout_means_rebooting_not_failed(self):
+        # `adb reboot` drops the connection by design; a timeout verdict is
+        # the success signal, not an error.
+        c._run_adb = lambda adb, args, timeout=30: (124, b"", b"adb timed out")  # type: ignore[assignment]
+        r = c.NativeBridge().rebootDevice("emulator-5554")
+        self.assertTrue(r["ok"])
+        self.assertTrue(r.get("rebooting"))
+
+    def test_reboot_refuses_on_hard_errors_only(self):
+        c._run_adb = lambda adb, args, timeout=30: (1, b"", b"device unauthorized")  # type: ignore[assignment]
+        with self.assertRaisesRegex(RuntimeError, "reboot failed"):
+            c.NativeBridge().rebootDevice("emulator-5554")
+
     def test_pm_clear_stops_then_clears_and_clears_cache(self):
         seen: list[str] = []
         c._run_adb = lambda adb, args, timeout=30: (seen.append(" ".join(args)), (0, b"package:/data/app/x.apk\n" if "pm path" in " ".join(args) else (b"Success\n" if "pm clear" in " ".join(args) else b""), b""))[1]  # type: ignore[assignment]

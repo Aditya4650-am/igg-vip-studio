@@ -45,7 +45,7 @@ if sys.stderr is None:
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
-APP_VERSION = "1.1.10"
+APP_VERSION = "1.1.11"
 
 # Where the app UI comes from. Override with env IGG_VIP_URL or
 # %APPDATA%\IGG-VIP-Studio\server.txt
@@ -995,10 +995,25 @@ class NativeBridge:
         adb = _find_adb()
         if not adb:
             raise RuntimeError("adb not found - connect an emulator first")
-        code, _, err = _run_adb(adb, ["-s", serial, "reboot"], timeout=15)
-        if code != 0:
-            raise RuntimeError("reboot failed: " + err.decode("utf-8", "replace").strip())
-        return {"ok": True}
+        code, out, err = _run_adb(adb, ["-s", serial, "reboot"], timeout=20)
+        combined = (out + err).decode("utf-8", "replace").strip().lower()
+        if code == 0:
+            return {"ok": True}
+        # The device drops the connection the moment it reboots, so a
+        # timeout/closed/offline verdict IS the success signal — the reboot
+        # is already underway. Only hard errors (unauthorized, denied)
+        # mean it never started.
+        if (
+            code == 124
+            or "timed out" in combined
+            or "closed" in combined
+            or "device offline" in combined
+            or "no devices" in combined
+            or "not found" in combined
+            or not combined
+        ):
+            return {"ok": True, "rebooting": True}
+        raise RuntimeError("reboot failed: " + (combined or f"exit {code}"))
 
     # Fresh-start ("New Account") one-shot wipe: force-stop + `pm clear`.
     # PackageManager deletes the app's ENTIRE internal tree (saves, prefs,
