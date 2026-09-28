@@ -173,6 +173,21 @@ function cleanAndroidId(v: string | undefined): string {
   return String(v ?? "").trim().toLowerCase();
 }
 
+/**
+ * Extra-file triage by basename. Transient SQLite journals (`-shm`/`-wal`/
+ * `-journal`) are memory-mapped scratch state: backing them up is pointless
+ * and restoring them over a fresh database risks corruption — but they MUST
+ * be wiped, because a stale WAL can resurrect pre-wipe rows. Google
+ * telemetry files (`com.google.*`) regenerate on next sync; same treatment.
+ * Everything else is backed up byte-for-byte.
+ */
+function extraKeep(basename: string): boolean {
+  const b = basename.toLowerCase();
+  if (b.endsWith("-shm") || b.endsWith("-wal") || b.endsWith("-journal")) return false;
+  if (b.startsWith("com.google.") || b.startsWith("com.google.android.")) return false;
+  return true;
+}
+
 export function backupFreshStartState(s: FreshSession, input: FreshBackupInput) {
   const serial = requireSerial(input.serial);
   const cityPath = requireDevicePath("City file", input.cityPath);
@@ -184,13 +199,19 @@ export function backupFreshStartState(s: FreshSession, input: FreshBackupInput) 
   const oldLevel = parseLevel(xmlText);
   const extraPaths: string[] = [];
   const extra: Record<string, string> = {};
+  let skippedCount = 0;
   for (const f of input.extraFiles ?? []) {
     const p = requireDevicePath("Extra file", f.path);
     if (p === cityPath || p === localPath || extraPaths.includes(p)) {
       throw new Error(`Extra file duplicates a backup path: ${p}`);
     }
-    mustExtraBytes(`Extra file ${p}`, f.b64);
     extraPaths.push(p);
+    const base = p.split("/").pop() ?? p;
+    if (!extraKeep(base)) {
+      skippedCount += 1;
+      continue;
+    }
+    mustExtraBytes(`Extra file ${p}`, f.b64);
     extra[p] = f.b64;
   }
   s.freshBackupCity = input.cityB64;
@@ -206,7 +227,7 @@ export function backupFreshStartState(s: FreshSession, input: FreshBackupInput) 
     oldAndroidId: cleanAndroidId(input.androidId),
   };
   s.freshVerified = null;
-  return { oldCityId, oldLevel, extraCount: extraPaths.length, backedUp: true as const };
+  return { oldCityId, oldLevel, extraCount: extraPaths.length - skippedCount, skippedCount, backedUp: true as const };
 }
 
 export function wipeFreshStartPlan(s: FreshSession) {

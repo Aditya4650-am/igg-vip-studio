@@ -170,6 +170,29 @@ test("backup rejects adb shell error text, not just non-XML", () => {
   );
 });
 
+test("backup skips transient journals and google telemetry without failing", () => {
+  const s: FreshSession = { id: "s1" };
+  const r = backupFreshStartState(s, {
+    serial: "emulator-5554",
+    cityPath: "/a.xml",
+    localPath: "/b.xml",
+    cityB64: b64(CITY("c1", 5)),
+    localB64: b64("<x/>"),
+    extraFiles: [
+      { path: "/db/e.db-shm", b64: b64("\0\0binary-junk-not-a-file") },
+      { path: "/db/e.db-wal", b64: b64("\0\0binary-junk-not-a-file") },
+      { path: "/prefs/com.google.android.datatransport.events.xml", b64: b64("<map/>") },
+      { path: "/prefs/keep.xml", b64: b64("<map/>") },
+    ],
+  });
+  assert.equal(r.extraCount, 1);
+  assert.equal(r.skippedCount, 3);
+  // Skipped files are still wiped (stale WAL must die) but never restored.
+  const plan = wipeFreshStartPlan(s);
+  assert.deepEqual(plan.paths, ["/a.xml", "/b.xml", "/db/e.db-shm", "/db/e.db-wal", "/prefs/com.google.android.datatransport.events.xml", "/prefs/keep.xml"]);
+  assert.deepEqual(Object.keys(restoreFreshStartState(s).extra), ["/prefs/keep.xml"]);
+});
+
 test("plan and verify require a backup first", () => {
   const s: FreshSession = { id: "empty" };
   assert.throws(() => wipeFreshStartPlan(s), /Backup first/);

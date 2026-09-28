@@ -1236,7 +1236,7 @@ export function StudioApp() {
   // Fresh-start ("New Account") phase machine. Fully isolated: nothing from
   // other tabs' state is read or written here.
   const [freshPhase, setFreshPhase] = useState<"idle" | "backedup" | "wiped" | "verified">("idle");
-  const [freshBackup, setFreshBackup] = useState<{ oldCityId: string; oldLevel: number; extraCount: number; androidId: string } | null>(null);
+  const [freshBackup, setFreshBackup] = useState<{ oldCityId: string; oldLevel: number; extraCount: number; skippedCount: number; androidId: string } | null>(null);
   const [freshCheck, setFreshCheck] = useState<{ newCityId: string; androidReset: boolean } | null>(null);
   const [freshConfirm, setFreshConfirm] = useState("");
   const [pendingDecorMaxAll, setPendingDecorMaxAll] = useState(false);
@@ -1884,51 +1884,79 @@ export function StudioApp() {
   // Fresh-start ("New Account") flow. Phase machine only: idle -> backed up ->
   // wiped -> verified. Device file traffic goes through the native bridge;
   // the server only validates, tracks the backup, and verifies the result.
+  const onFreshBackupCore = async (): Promise<boolean> => {
+    if (!token || !session || !device) {
+      toast.error(tr("actionFailed"));
+      return false;
+    }
+    const native = nativeBridge();
+    if (!native?.listStateFiles || !native?.readFile || !native?.readAndroidId) {
+      toast.error(tr("freshNoBridge"));
+      return false;
+    }
+    const city = await native.pull(device);
+    const local = await native.pullLocalInfo(device);
+    const listed = await native.listStateFiles(device);
+    const extraFiles: { path: string; b64: string }[] = [];
+    for (const p of listed.files ?? []) {
+      if (p === city.file || p === local.file) continue;
+      if (extraFiles.length >= 60) break;
+      const f = await native.readFile(device, p);
+      extraFiles.push({ path: p, b64: f.b64 });
+    }
+    let androidId = "";
+    try {
+      androidId = (await native.readAndroidId(device)).androidId ?? "";
+    } catch {
+      androidId = "";
+    }
+    const r = await backupFreshStart({
+      data: {
+        token, sessionId: session.sessionId, serial: device,
+        cityPath: city.file, localPath: local.file,
+        cityB64: city.b64, localB64: local.b64, extraFiles, androidId,
+      },
+    });
+    setFreshBackup({ oldCityId: r.oldCityId, oldLevel: r.oldLevel, extraCount: r.extraCount, skippedCount: r.skippedCount ?? 0, androidId });
+    setFreshCheck(null);
+    setFreshConfirm("");
+    setFreshPhase("backedup");
+    return true;
+  };
+
   const onFreshBackup = async () => {
     if (!token || !session || !device) {
       toast.error(tr("actionFailed"));
       return;
     }
-    const native = nativeBridge();
-    if (!native?.listStateFiles || !native?.readFile || !native?.readAndroidId) {
-      toast.error(tr("freshNoBridge"));
-      return;
-    }
     setBusy(true);
     try {
-      const city = await native.pull(device);
-      const local = await native.pullLocalInfo(device);
-      const listed = await native.listStateFiles(device);
-      const extraFiles: { path: string; b64: string }[] = [];
-      for (const p of listed.files ?? []) {
-        if (p === city.file || p === local.file) continue;
-        if (extraFiles.length >= 60) break;
-        const f = await native.readFile(device, p);
-        extraFiles.push({ path: p, b64: f.b64 });
-      }
-      let androidId = "";
-      try {
-        androidId = (await native.readAndroidId(device)).androidId ?? "";
-      } catch {
-        androidId = "";
-      }
-      const r = await backupFreshStart({
-        data: {
-          token, sessionId: session.sessionId, serial: device,
-          cityPath: city.file, localPath: local.file,
-          cityB64: city.b64, localB64: local.b64, extraFiles, androidId,
-        },
-      });
-      setFreshBackup({ oldCityId: r.oldCityId, oldLevel: r.oldLevel, extraCount: r.extraCount, androidId });
-      setFreshCheck(null);
-      setFreshConfirm("");
-      setFreshPhase("backedup");
-      toast.success(tr("freshBackedUp"));
+      if (await onFreshBackupCore()) toast.success(tr("freshBackedUp"));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tr("nothing"));
     } finally {
       setBusy(false);
     }
+  };
+
+  const onFreshWipeCore = async (): Promise<boolean> => {
+    if (!token || !session || !device) {
+      toast.error(tr("actionFailed"));
+      return false;
+    }
+    const native = nativeBridge();
+    if (!native?.wipeFiles || !native?.resetAndroidId) {
+      toast.error(tr("freshNoBridge"));
+      return false;
+    }
+    const plan = await wipeFreshStart({ data: { token, sessionId: session.sessionId } });
+    const wiped = await native.wipeFiles(device, plan.paths);
+    if (!wiped.ok) throw new Error(wiped.error || tr("nothing"));
+    const reset = await native.resetAndroidId(device);
+    if (!reset.ok) throw new Error(tr("nothing"));
+    setFreshPhase("wiped");
+    setFreshConfirm("");
+    return true;
   };
 
   const onFreshWipe = async () => {
@@ -1940,21 +1968,32 @@ export function StudioApp() {
       toast.error(tr("freshConfirmPh"));
       return;
     }
-    const native = nativeBridge();
-    if (!native?.wipeFiles || !native?.resetAndroidId) {
-      toast.error(tr("freshNoBridge"));
+    setBusy(true);
+    try {
+      if (await onFreshWipeCore()) toast.success(tr("freshWiped"));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : tr("nothing"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // One-click Fresh Account: backup -> wipe -> new Android ID in one run.
+  // Verify still waits for the user to open the game (a fresh city must be
+  // minted on-device first), then one tap on Verify.
+  const onFreshOneClick = async () => {
+    if (!token || !session || !device) {
+      toast.error(tr("actionFailed"));
+      return;
+    }
+    if (freshConfirm.trim().toUpperCase() !== "WIPE") {
+      toast.error(tr("freshConfirmPh"));
       return;
     }
     setBusy(true);
     try {
-      const plan = await wipeFreshStart({ data: { token, sessionId: session.sessionId } });
-      const wiped = await native.wipeFiles(device, plan.paths);
-      if (!wiped.ok) throw new Error(wiped.error || tr("nothing"));
-      const reset = await native.resetAndroidId(device);
-      if (!reset.ok) throw new Error(tr("nothing"));
-      setFreshPhase("wiped");
-      setFreshConfirm("");
-      toast.success(tr("freshWiped"));
+      if (!(await onFreshBackupCore())) return;
+      if (await onFreshWipeCore()) toast.success(tr("freshWiped"));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tr("nothing"));
     } finally {
@@ -3023,6 +3062,22 @@ export function StudioApp() {
                     <p className="rounded-md bg-input px-3 py-2 text-sm text-amber">{tr("freshHint")}</p>
                     <p className="rounded-md bg-input px-3 py-2 text-xs text-muted">⚠️ {tr("freshCloudWarn")}</p>
                     <section className="panel">
+                      <h3 className="mb-1 text-xs font-bold tracking-wider uppercase text-primary">🚀 {tr("freshOneClick")}</h3>
+                      <p className="mb-3 text-xs text-muted">{tr("freshOneClickD")}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          className="field field-qty"
+                          placeholder={tr("freshConfirmPh")}
+                          aria-label={tr("freshConfirmPh")}
+                          value={freshConfirm}
+                          onChange={(e) => setFreshConfirm(e.target.value)}
+                        />
+                        <Button size="sm" variant="primary" onClick={onFreshOneClick}>
+                          {tr("freshOneClickBtn")}
+                        </Button>
+                      </div>
+                    </section>
+                    <section className="panel">
                       <h3 className="mb-1 text-xs font-bold tracking-wider uppercase text-primary">{tr("freshStep1")}</h3>
                       <p className="mb-3 text-xs text-muted">{tr("freshStep1d")}</p>
                       <Button size="sm" variant="primary" onClick={onFreshBackup}>
@@ -3030,7 +3085,7 @@ export function StudioApp() {
                       </Button>
                       {freshBackup && (
                         <p className="mt-2 text-xs text-muted">
-                          ✅ {tr("freshBackedUp")}: {freshBackup.oldCityId.slice(0, 12)}… · Lv{freshBackup.oldLevel} · {freshBackup.extraCount} {tr("freshExtra")}
+                          ✅ {tr("freshBackedUp")}: {freshBackup.oldCityId.slice(0, 12)}… · Lv{freshBackup.oldLevel} · {freshBackup.extraCount} {tr("freshExtra")}{freshBackup.skippedCount > 0 ? ` · ⏭️${freshBackup.skippedCount}` : ""}
                         </p>
                       )}
                     </section>
