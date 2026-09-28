@@ -45,7 +45,7 @@ if sys.stderr is None:
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
-APP_VERSION = "1.1.12"
+APP_VERSION = "1.1.13"
 
 # Where the app UI comes from. Override with env IGG_VIP_URL or
 # %APPDATA%\IGG-VIP-Studio\server.txt
@@ -851,26 +851,41 @@ class NativeBridge:
             if new_id != old:
                 break
         # Same single-string rule as above; also try the plain shell first
-        # (relaxed emulators allow it) before the su variants.
+        # (relaxed emulators allow it) before the su variants. The `content`
+        # command hits the same provider through a different door — delete +
+        # re-insert sometimes lands where a plain update is ignored.
         put_cmds = [
             f"settings put secure android_id {new_id}",
             f"su -c 'settings put secure android_id {new_id}'",
             f"su 0 settings put secure android_id {new_id}",
+            f"su -c 'settings delete secure android_id'",
+            f"su -c 'content delete --uri content://settings/secure --where \"name=''android_id''\"'",
+            f"su -c 'content insert --uri content://settings/secure --bind name:s:android_id --bind value:s:{new_id}'",
+            f"su -c 'settings put secure android_id {new_id}'",
         ]
+        # A put can report success while the provider silently keeps the old
+        # value (hardened emulators), so every apparent success is verified
+        # by re-read immediately and the next variant is tried on mismatch.
         last_err = ""
         for cmd in put_cmds:
             code, out, err = _run_adb(adb, ["-s", serial, "shell", cmd], timeout=15)
             combined = (out + err).decode("utf-8", "replace").strip()
-            if code == 0 and not re.search(
+            if code != 0 or re.search(
                 r"permission denied|not found|no such file|failed|error:|unknown id|not allowed",
                 combined,
                 re.I,
             ):
+                last_err = combined or "su failed"
+                continue
+            check = ""
+            try:
+                check = self.readAndroidId(serial).get("androidId", "")
+            except RuntimeError:
+                check = ""
+            if check == new_id:
                 last_err = ""
                 break
-            last_err = combined or "su failed"
-        else:
-            last_err = last_err or "su failed"
+            last_err = "id unchanged after write"
         if last_err:
             raise RuntimeError(
                 "Android ID reset refused"
@@ -878,10 +893,32 @@ class NativeBridge:
                 + " — change it in the emulator's device settings instead "
                 "(MEmu multi-instance properties), then Verify"
             )
-        check = self.readAndroidId(serial).get("androidId", "")
-        if check != new_id:
+        self._drop_ssaid_cache(adb, serial)
+        try:
+            check = self.readAndroidId(serial).get("androidId", "")
+        except RuntimeError:
+            check = ""
+        if check and check != new_id:
             raise RuntimeError("Android ID did not change (old and new match)")
         return {"ok": True, "oldAndroidId": old, "androidId": new_id}
+
+    def _drop_ssaid_cache(self, adb: str, serial: str) -> None:
+        """Delete the per-app SSAID store so no stale mapping survives.
+
+        Since Android 8 each app's SSAID is derived from the device Android
+        ID and cached in settings_ssaid.xml. After an ID change the stale
+        file would keep serving the OLD derived id — removing it forces a
+        recompute. Best-effort: never fails the caller.
+        """
+        for base in ("/data/system/users/0", "/data/system/users/10"):
+            try:
+                _run_adb(
+                    adb,
+                    ["-s", serial, "shell", f"su -c 'rm -f \"{base}/settings_ssaid.xml\"'"],
+                    timeout=15,
+                )
+            except Exception:  # noqa: BLE001
+                continue
 
     # Fresh-start device identity, part 2: the Google Services (GSF) Android
     # ID. This is a DIFFERENT 16-hex id from Settings.Secure (gservices.db),
@@ -1014,6 +1051,20 @@ class NativeBridge:
         ):
             return {"ok": True, "rebooting": True}
         raise RuntimeError("reboot failed: " + (combined or f"exit {code}"))
+
+    def waitForDevice(self, serial: str, timeout: int = 180) -> dict:
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        try:
+            timeout = max(30, min(600, int(timeout)))
+        except (TypeError, ValueError):
+            timeout = 180
+        code, out, err = _run_adb(adb, ["-s", serial, "wait-for-device"], timeout=timeout)
+        combined = (out + err).decode("utf-8", "replace").strip()
+        if code != 0:
+            raise RuntimeError("device did not come back online: " + (combined or "adb timed out"))
+        return {"ok": True}
 
     # Fresh-start device identity, part 3: direct file edit with root.
     # Some emulator builds silently ignore `settings put` (put "succeeds",

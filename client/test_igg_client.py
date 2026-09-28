@@ -499,6 +499,44 @@ class FreshStartBridge(unittest.TestCase):
         self.assertIn("com.google.android.gms", r["cleared"])
         self.assertIn("com.google.android.gsf", r["cleared"])
 
+    def test_reset_tries_content_commands_and_drops_ssaid(self):
+        seen: list[str] = []
+        state = {"id": "aaaaaaaaaaaaaaaa"}
+
+        def run(adb, args, timeout=30):
+            cmd = " ".join(args)
+            seen.append(cmd)
+            if "settings get secure android_id" in cmd and "put" not in cmd:
+                return (0, (state["id"] + "\n").encode(), b"")
+            if "settings put secure android_id" in cmd:
+                return (0, b"", b"")  # silent ignore: id stays
+            if "content delete" in cmd:
+                state["id"] = ""
+                return (0, b"", b"")
+            if "content insert" in cmd:
+                m = re.search(r"value:s:([0-9a-f]{16})", cmd)
+                state["id"] = m.group(1) if m else state["id"]
+                return (0, b"", b"")
+            if "settings_ssaid" in cmd:
+                return (0, b"", b"")
+            return (1, b"", b"unexpected")
+
+        c._run_adb = run  # type: ignore[assignment]
+        r = c.NativeBridge().resetAndroidId("emulator-5554")
+        self.assertTrue(r["ok"])
+        self.assertNotEqual(r["androidId"], "aaaaaaaaaaaaaaaa")
+        joined = "\n".join(seen)
+        self.assertIn("content delete", joined)
+        self.assertIn("content insert", joined)
+        self.assertIn("settings_ssaid", joined)
+
+    def test_wait_for_device_ok_and_timeout(self):
+        c._run_adb = lambda adb, args, timeout=30: (0, b"", b"")  # type: ignore[assignment]
+        self.assertTrue(c.NativeBridge().waitForDevice("emulator-5554")["ok"])
+        c._run_adb = lambda adb, args, timeout=30: (124, b"", b"adb timed out")  # type: ignore[assignment]
+        with self.assertRaisesRegex(RuntimeError, "did not come back"):
+            c.NativeBridge().waitForDevice("emulator-5554")
+
     def test_pm_clear_stops_then_clears_and_clears_cache(self):
         seen: list[str] = []
         c._run_adb = lambda adb, args, timeout=30: (seen.append(" ".join(args)), (0, b"package:/data/app/x.apk\n" if "pm path" in " ".join(args) else (b"Success\n" if "pm clear" in " ".join(args) else b""), b""))[1]  # type: ignore[assignment]

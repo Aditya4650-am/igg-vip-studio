@@ -67,6 +67,7 @@ type NativeBridge = {
   clearGms?: (serial: string) => Promise<{ ok: boolean; cleared?: string[]; error?: string }>;
   nukeSecureSettings?: (serial: string) => Promise<{ ok: boolean; moved?: string[]; error?: string }>;
   rebootDevice?: (serial: string) => Promise<{ ok: boolean; rebooting?: boolean }>;
+  waitForDevice?: (serial: string, timeout?: number) => Promise<{ ok: boolean }>;
   exportFile?: (name: string, b64: string) => Promise<{ ok: boolean; path: string; size?: number }>;
 };
 
@@ -2071,7 +2072,12 @@ export function StudioApp() {
       if (!nuked.ok) throw new Error(nuked.error || tr("nothing"));
       await native.rebootDevice(device);
       setFreshConfirm("");
-      toast.success(tr("freshRebooting"));
+      try {
+        await native.waitForDevice?.(device, 180);
+        toast.success(tr("freshBackOnline"));
+      } catch {
+        toast.success(tr("freshRebooting"));
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tr("nothing"));
     } finally {
