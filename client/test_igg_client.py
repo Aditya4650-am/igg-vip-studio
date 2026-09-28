@@ -627,6 +627,53 @@ class FreshStartBridge(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             c.NativeBridge().pmClear("emulator-5554")
 
+    def test_reinstall_backs_up_apk_then_uninstalls_and_reinstalls(self):
+        from pathlib import Path as _Path
+
+        calls: list[str] = []
+
+        def run(adb, args, timeout=30):
+            cmd = " ".join(args)
+            calls.append(cmd)
+            if "pm path com.playrix.township" in cmd and "vn" not in cmd:
+                return (1, b"", b"not installed")
+            if "pm path" in cmd:
+                return (0, b"package:/data/app/x/base.apk\npackage:/data/app/x/split.apk\n", b"")
+            if " pull " in cmd:
+                _Path(args[-1]).write_bytes(b"FAKEAPK")
+                return (0, b"", b"")
+            if "uninstall com.playrix" in cmd:
+                return (0, b"Success\n", b"")
+            if "install-multiple" in cmd:
+                return (0, b"Success\n", b"")
+            return (0, b"", b"")
+
+        c._run_adb = run  # type: ignore[assignment]
+        r = c.NativeBridge().reinstallTownship("emulator-5554")
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["apkCount"], 2)
+        self.assertGreater(r["apkBytes"], 0)
+        joined = "\n".join(calls)
+        self.assertLess(joined.index("uninstall"), joined.index("install-multiple"))
+
+    def test_reinstall_refuses_when_uninstall_fails(self):
+        from pathlib import Path as _Path2
+
+        def run(adb, args, timeout=30):
+            cmd = " ".join(args)
+            if "pm path" in cmd:
+                return (0, b"package:/data/app/x/base.apk\n", b"")
+            if " pull " in cmd:
+                _Path2(args[-1]).write_bytes(b"FAKEAPK")
+                return (0, b"", b"")
+            if "uninstall" in cmd:
+                return (1, b"", b"Failure [DELETE_FAILED_INTERNAL_ERROR]")
+            return (0, b"", b"")
+
+        c._run_adb = run  # type: ignore[assignment]
+        with self.assertRaisesRegex(RuntimeError, "uninstall failed"):
+            c.NativeBridge().reinstallTownship("emulator-5554")
+
 
 class CookieSafety(unittest.TestCase):
     """The proxy only works if the session cookie is host-only.

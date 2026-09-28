@@ -56,6 +56,7 @@ type NativeBridge = {
   clearSavedKey: () => Promise<{ ok: boolean }>;
   wipeFiles?: (serial: string, paths: string[]) => Promise<{ ok: boolean; wiped?: string[]; error?: string }>;
   pmClear?: (serial: string) => Promise<{ ok: boolean; package?: string; serial?: string; sdcard?: string }>;
+  reinstallTownship?: (serial: string) => Promise<{ ok: boolean; package?: string; apkCount?: number }>;
   listStateFiles?: (serial: string) => Promise<{ ok: boolean; package: string; files: string[] }>;
   readFile?: (serial: string, path: string) => Promise<{ b64: string; file: string; size?: number }>;
   writeFile?: (serial: string, path: string, b64: string) => Promise<{ ok: boolean; file?: string }>;
@@ -1249,6 +1250,20 @@ export function StudioApp() {
   const [freshCheck, setFreshCheck] = useState<{ newCityId: string; androidReset: boolean; gsfReset: boolean } | null>(null);
   const [freshIds, setFreshIds] = useState<{ androidFrom: string; androidTo: string; gsfRenewed: boolean } | null>(null);
   const [freshLog, setFreshLog] = useState<string[]>([]);
+  const [clientVer, setClientVer] = useState("");
+
+  useEffect(() => {
+    let stop = false;
+    nativeBridge()
+      ?.version()
+      .then((v) => {
+        if (!stop && v) setClientVer(v);
+      })
+      .catch(() => {});
+    return () => {
+      stop = true;
+    };
+  }, []);
   const [freshConfirm, setFreshConfirm] = useState("");
   const [pendingDecorMaxAll, setPendingDecorMaxAll] = useState(false);
   const upgradeFactorySel = useSetMap();
@@ -2108,6 +2123,31 @@ export function StudioApp() {
     }
   };
 
+  // Nuclear fallback: uninstall + reinstall the game itself. Needs no root
+  // and removes everything the package owns. Backup must already exist
+  // (the button stays disabled until then).
+  const onFreshReinstall = async () => {
+    if (!token || !session || !device) {
+      toast.error(tr("actionFailed"));
+      return;
+    }
+    const native = nativeBridge();
+    if (!native?.reinstallTownship) {
+      toast.error(tr("freshNoBridge"));
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await native.reinstallTownship(device);
+      if (!r.ok) throw new Error(tr("nothing"));
+      toast.success(`${tr("freshReinstalled")} (${r.package}, ${r.apkCount ?? 1} apk)`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : tr("nothing"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const onFreshVerify = async () => {
     if (!token || !session || !device) {
       toast.error(tr("actionFailed"));
@@ -2502,7 +2542,7 @@ export function StudioApp() {
               </Button>
             </div>
             <p className="mt-2 hidden text-xs text-muted lg:block">{tr("shortcut")}</p>
-            <p className="mt-1 hidden text-xs text-muted tabular-nums lg:block">build {__BUILD_ID__}</p>
+            <p className="mt-1 hidden text-xs text-muted tabular-nums lg:block">build {__BUILD_ID__}{clientVer ? ` · exe v${clientVer}` : ""}</p>
           </div>
 
           <div className="sidebar-tools">
@@ -3237,6 +3277,9 @@ export function StudioApp() {
                         </Button>
                         <Button size="sm" variant="ghost" disabled={freshPhase === "idle"} onClick={onFreshForce}>
                           {tr("freshForceBtn")}
+                        </Button>
+                        <Button size="sm" variant="ghost" disabled={freshPhase === "idle"} onClick={onFreshReinstall}>
+                          {tr("freshReinstallBtn")}
                         </Button>
                       </div>
                     </details>

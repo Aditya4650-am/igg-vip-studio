@@ -45,7 +45,7 @@ if sys.stderr is None:
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
-APP_VERSION = "1.1.15"
+APP_VERSION = "1.1.16"
 
 # Where the app UI comes from. Override with env IGG_VIP_URL or
 # %APPDATA%\IGG-VIP-Studio\server.txt
@@ -1215,9 +1215,73 @@ class NativeBridge:
             return out_dict
         raise RuntimeError("pm clear failed — " + (" | ".join(errs) or "no package worked"))
 
+    def reinstallTownship(self, serial: str) -> dict:
+        """Nuclear wipe: back up the APK, uninstall, reinstall from backup.
+
+        Uninstall removes EVERYTHING the package owns — internal tree,
+        external storage, code cache — deeper than `pm clear`, and needs no
+        root. After reinstall the game has no files at all, so whatever it
+        shows next either is a genuinely fresh city or came back over the
+        network (cloud/account restore), which no local wipe can prevent.
+        """
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        pkg: str | None = None
+        for cand in self._pkgs_for(serial):
+            if self._is_pkg_installed(adb, serial, cand):
+                pkg = cand
+                break
+        if not pkg:
+            raise RuntimeError("Township package not installed on " + serial)
+        code, out, err = _run_adb(adb, ["-s", serial, "shell", "pm", "path", pkg], timeout=15)
+        remotes = re.findall(rb"package:(/\S+\.apk)", out)
+        if code != 0 or not remotes:
+            raise RuntimeError(
+                "could not locate base APK for " + pkg + ": " + err.decode("utf-8", "replace").strip()
+            )
+        with tempfile.TemporaryDirectory() as td:
+            locals_: list[str] = []
+            total = 0
+            for i, remote in enumerate(remotes):
+                local = str(Path(td) / f"base{i}.apk")
+                code2, _, err2 = _run_adb(
+                    adb, ["-s", serial, "pull", remote.decode("utf-8", "replace"), local], timeout=180
+                )
+                if code2 != 0 or not Path(local).exists():
+                    raise RuntimeError(
+                        "APK backup failed: " + err2.decode("utf-8", "replace").strip()
+                    )
+                total += Path(local).stat().st_size
+                locals_.append(local)
+            _run_adb(adb, ["-s", serial, "shell", "am", "force-stop", pkg], timeout=10)
+            code3, out3, err3 = _run_adb(adb, ["-s", serial, "uninstall", pkg], timeout=120)
+            combined = (out3 + err3).decode("utf-8", "replace").strip()
+            if code3 != 0 or "success" not in combined.lower():
+                raise RuntimeError("uninstall failed: " + (combined or f"exit {code3}"))
+            if len(locals_) > 1:
+                code4, out4, err4 = _run_adb(
+                    adb, ["-s", serial, "install-multiple", *locals_], timeout=300
+                )
+            else:
+                code4, out4, err4 = _run_adb(
+                    adb, ["-s", serial, "install", "-r", locals_[0]], timeout=300
+                )
+            combined4 = (out4 + err4).decode("utf-8", "replace").strip()
+            if code4 != 0 or "success" not in combined4.lower():
+                raise RuntimeError(
+                    "reinstall failed (APK backup kept in temp, game currently uninstalled): "
+                    + (combined4 or f"exit {code4}")
+                )
+            if not self._is_pkg_installed(adb, serial, pkg):
+                raise RuntimeError("reinstall reported success but package is missing")
+        _active_package[serial] = pkg
+        _PATH_CACHE.pop((serial, pkg, SAVE_FILE), None)
+        _PATH_CACHE.pop((serial, pkg, LOCAL_INFO_FILE), None)
+        return {"ok": True, "package": pkg, "serial": serial, "apkCount": len(remotes), "apkBytes": total}
+
     def verifyWipe(self, serial: str) -> dict:
         """Prove the wipe: none of the save/login files may still exist.
-
         `pm clear` printing Success is trusted, but this closes the loop —
         if anything survived, the wipe is reported as incomplete instead of
         letting a stale city through to Verify.
