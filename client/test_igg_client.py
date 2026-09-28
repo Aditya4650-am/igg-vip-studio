@@ -348,6 +348,59 @@ class FreshStartBridge(unittest.TestCase):
             c.NativeBridge().writeFile("emulator-5554", "mGameInfo.xml", "eA==")
         self.assertEqual(seen, [])
 
+    def test_su_commands_are_single_shell_strings(self):
+        # Regression: passing su/-c/payload as separate argv items makes
+        # `adb shell` join them with spaces, and the device answers
+        # "Unknown id: put". Every su invocation must be one shell string.
+        seen: list[list[str]] = []
+        state = {"id": "aaaaaaaaaaaaaaaa"}
+
+        def run(adb, args, timeout=30):
+            seen.append(args)
+            cmd = " ".join(args)
+            if "settings put secure android_id" in cmd and "su -c '" in cmd:
+                state["id"] = cmd.strip().rsplit(" ", 1)[-1].rstrip("'")
+                return (0, b"", b"")
+            if "android_id" in cmd and "put" not in cmd:
+                return (0, (state["id"] + "\n").encode(), b"")
+            return (1, b"", b"unexpected")
+
+        c._run_adb = run  # type: ignore[assignment]
+        r = c.NativeBridge().resetAndroidId("emulator-5554")
+        self.assertTrue(r["ok"])
+        for args in seen:
+            shell_args = [a for a in args if a not in ("-s", "emulator-5554", "shell")]
+            if any("su -c" in a for a in shell_args):
+                quoted = [a for a in shell_args if a.startswith("su -c '")]
+                self.assertEqual(len(quoted), 1, args)
+
+    def test_unknown_id_falls_through_to_the_next_variant(self):
+        state = {"id": "aaaaaaaaaaaaaaaa"}
+        calls: list[str] = []
+
+        def run(adb, args, timeout=30):
+            cmd = " ".join(args)
+            calls.append(cmd)
+            if cmd.endswith("settings get secure android_id"):
+                return (0, (state["id"] + "\n").encode(), b"")
+            if "settings put secure android_id" in cmd:
+                if cmd.startswith("-s emulator-5554 shell settings put"):
+                    return (0, b"", b"Unknown id: put")
+                state["id"] = cmd.strip().rsplit(" ", 1)[-1].rstrip("'")
+                return (0, b"", b"")
+            return (1, b"", b"unexpected")
+
+        c._run_adb = run  # type: ignore[assignment]
+        r = c.NativeBridge().resetAndroidId("emulator-5554")
+        self.assertTrue(r["ok"])
+        self.assertNotEqual(r["androidId"], "aaaaaaaaaaaaaaaa")
+        self.assertTrue(any("settings put secure android_id" in x and "su -c" in x for x in calls))
+
+    def test_refusal_points_at_emulator_device_settings(self):
+        c._run_adb = lambda adb, args, timeout=30: (0, b"aaaaaaaaaaaaaaaa\n", b"") if "get" in " ".join(args) else (1, b"", b"Permission denied")  # type: ignore[assignment]
+        with self.assertRaisesRegex(RuntimeError, "emulator's device settings"):
+            c.NativeBridge().resetAndroidId("emulator-5554")
+
 
 class CookieSafety(unittest.TestCase):
     """The proxy only works if the session cookie is host-only.

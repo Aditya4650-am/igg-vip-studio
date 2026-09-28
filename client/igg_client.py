@@ -45,7 +45,7 @@ if sys.stderr is None:
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
-APP_VERSION = "1.1.7"
+APP_VERSION = "1.1.8"
 
 # Where the app UI comes from. Override with env IGG_VIP_URL or
 # %APPDATA%\IGG-VIP-Studio\server.txt
@@ -824,9 +824,13 @@ class NativeBridge:
         adb = _find_adb()
         if not adb:
             raise RuntimeError("adb not found - connect an emulator first")
+        # NOTE: the su form must be ONE shell string. Passing su/-c/payload as
+        # separate argv items makes `adb shell` join them with spaces and the
+        # device runs a broken command ("Unknown id: put").
         for args in (
             ["-s", serial, "shell", "settings", "get", "secure", "android_id"],
-            ["-s", serial, "shell", "su", "-c", "settings get secure android_id"],
+            ["-s", serial, "shell", "su -c 'settings get secure android_id'"],
+            ["-s", serial, "shell", "su 0 settings get secure android_id"],
         ):
             code, out, _ = _run_adb(adb, args, timeout=15)
             val = out.decode("utf-8", "replace").strip().lower()
@@ -846,13 +850,34 @@ class NativeBridge:
             new_id = secrets.token_hex(8)
             if new_id != old:
                 break
-        code, out, err = _run_adb(
-            adb, ["-s", serial, "shell", "su", "-c", f"settings put secure android_id {new_id}"],
-            timeout=15,
-        )
-        combined = (out + err).decode("utf-8", "replace").strip()
-        if code != 0 or re.search(r"permission denied|not found|failed|error:", combined, re.I):
-            raise RuntimeError("Android ID reset refused: " + (combined or "su failed"))
+        # Same single-string rule as above; also try the plain shell first
+        # (relaxed emulators allow it) before the su variants.
+        put_cmds = [
+            f"settings put secure android_id {new_id}",
+            f"su -c 'settings put secure android_id {new_id}'",
+            f"su 0 settings put secure android_id {new_id}",
+        ]
+        last_err = ""
+        for cmd in put_cmds:
+            code, out, err = _run_adb(adb, ["-s", serial, "shell", cmd], timeout=15)
+            combined = (out + err).decode("utf-8", "replace").strip()
+            if code == 0 and not re.search(
+                r"permission denied|not found|no such file|failed|error:|unknown id|not allowed",
+                combined,
+                re.I,
+            ):
+                last_err = ""
+                break
+            last_err = combined or "su failed"
+        else:
+            last_err = last_err or "su failed"
+        if last_err:
+            raise RuntimeError(
+                "Android ID reset refused"
+                + (": " + last_err if last_err != "su failed" else "")
+                + " — change it in the emulator's device settings instead "
+                "(MEmu multi-instance properties), then Verify"
+            )
         check = self.readAndroidId(serial).get("androidId", "")
         if check != new_id:
             raise RuntimeError("Android ID did not change (old and new match)")
