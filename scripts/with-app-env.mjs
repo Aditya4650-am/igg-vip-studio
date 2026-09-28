@@ -122,7 +122,15 @@ function main(argv) {
   }
   const env = mergeAppEnv(readAppEnv(projectRoot()), process.env);
   const resolved = resolveCmd(projectRoot(), command);
-  const child = spawn(resolved, args, { stdio: "inherit", env });
+  // Windows: spawning a `.cmd` shim directly is EINVAL on modern Node —
+  // it must go through cmd.exe. Only .cmd/.bat need this, and none of our
+  // args contain spaces, so the shell join is safe. Render (Linux) never
+  // resolves to .cmd, so deploy behaviour is unchanged.
+  const needsShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(resolved);
+  // cmd /s keeps only one outer quote pair, so the executable needs its own
+  // quotes — our workspace path contains a space ("Default Project").
+  const spawnFile = needsShell ? `"${resolved}"` : resolved;
+  const child = spawn(spawnFile, args, { stdio: "inherit", env, shell: needsShell });
   // The dev server is long-running and is stopped by signalling this wrapper.
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
     process.on(signal, () => child.kill(signal));
