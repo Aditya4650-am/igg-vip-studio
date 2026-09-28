@@ -321,6 +321,16 @@ export function applySave(p: SavePayload) {
     s.stats = { ...s.stats, ...revealed.stats };
     s.rawXml = applyStatChanges(s.rawXml, s.stats);
     parts.push("stats");
+    // Surface soft caps so a clamped value is never a silent surprise: the
+    // console shows what was asked versus what the anti-ban bands allowed.
+    const got = parseStats(s.rawXml);
+    for (const fid of ["tca", "coi"] as const) {
+      const want = (s.stats[fid] ?? "").trim();
+      const have = (got[fid] ?? "").trim();
+      if (want && have && /^-?\d+$/.test(want) && Number(want) > Number(have)) {
+        s.log.push(`Soft cap (anti-ban): ${fid} ${want} → ${have}`);
+      }
+    }
   }
   if (Object.keys(revealed.profile).length) {
     for (const [g, ids] of Object.entries(revealed.profile)) s.profile[g] = mergeUnique(s.profile[g] ?? [], ids);

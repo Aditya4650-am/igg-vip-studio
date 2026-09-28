@@ -142,8 +142,44 @@ export function parseStats(xml: string): Record<string, string> {
   return stats;
 }
 
+/**
+ * Anti-instant-ban soft caps for cash/coins by city level.
+ *
+ * A level-10 city can never legitimately hold millions, and Playrix flags
+ * impossible values on the next sync. These community-style bands are a
+ * heuristic, not official limits: values above the band are clamped down to
+ * it, everything else passes through untouched. Only `tca` (T-cash) and
+ * `coi` (coins) are capped — levels, dates and other fields are left alone.
+ */
+export function sanitizeStatChanges(xml: string, changes: Record<string, string>): Record<string, string> {
+  const out = { ...changes };
+  const levelRaw = readVar(xml, "levelup") ?? readVar(xml, "level") ?? "1";
+  const level = Math.max(1, parseInt(String(levelRaw), 10) || 1);
+
+  let maxCash = 50000;
+  if (level < 20) maxCash = 3000;
+  else if (level < 35) maxCash = 8000;
+  else if (level < 50) maxCash = 15000;
+  else if (level < 70) maxCash = 30000;
+
+  let maxCoins = 5000000;
+  if (level < 20) maxCoins = 200000;
+  else if (level < 50) maxCoins = 1000000;
+
+  if (out.tca != null && out.tca !== "") {
+    const v = parseInt(String(out.tca), 10);
+    if (Number.isFinite(v) && v > maxCash) out.tca = String(maxCash);
+  }
+  if (out.coi != null && out.coi !== "") {
+    const v = parseInt(String(out.coi), 10);
+    if (Number.isFinite(v) && v > maxCoins) out.coi = String(maxCoins);
+  }
+  return out;
+}
+
 export function applyStatChanges(xml: string, changes: Record<string, string>): string {
   let text = xml.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "");
+  changes = sanitizeStatChanges(text, changes);
   const sharedM3 = (changes.win ?? changes.m3l ?? "").trim();
 
   for (const fid of DATA_FIELDS) {
