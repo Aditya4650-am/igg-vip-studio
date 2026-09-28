@@ -45,7 +45,7 @@ if sys.stderr is None:
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
-APP_VERSION = "1.1.18"
+APP_VERSION = "1.1.19"
 
 # Where the app UI comes from. Override with env IGG_VIP_URL or
 # %APPDATA%\IGG-VIP-Studio\server.txt
@@ -1313,9 +1313,16 @@ class NativeBridge:
         LocalInfo + mGameInfo pair into the saves folder, so the game loads
         the provided city instead of minting or restoring one.
 
-        The pair is copied exactly the way TS-Lite does it (root `cp -af`,
-        `chmod 777`, `restorecon -vR`) and byte-verified afterwards, so a
-        partial copy can never be reported as success.
+        Runs the competitor's script command-for-command, in its own order:
+        `setenforce 0` → `rm -rf <saves>/*` → `mkdir -p` → `cp -af` both
+        files → `chmod 777` → `restorecon -vR` → `setenforce 1` → its
+        `[ -f ]` SUCCESS/FAILURE probe. Both of the first two steps were
+        missing from the earlier attempt: SELinux must be relaxed while the
+        root-owned files land, and the whole saves folder must be cleared —
+        one stale file left behind is enough for the game to fall back to
+        the old city. `wc -c` stays as our extra gate (SUCCESS only proves
+        the files exist), so a partial copy can never be reported as
+        success.
         """
         adb = _find_adb()
         if not adb:
@@ -1356,42 +1363,55 @@ class NativeBridge:
             if code != 0:
                 raise RuntimeError("adb push failed: " + err.decode("utf-8", "replace").strip())
         attempts: list[str] = []
+        # The competitor's script, reproduced command-for-command (its native
+        # nativeGetBackupScript builds exactly this, in this order):
+        #   setenforce 0 ; rm -rf <DIR>/* ; mkdir -p <DIR> ;
+        #   cp -af L1 <DIR>/LocalInfo.xml && cp -af M1 <DIR>/mGameInfo.xml &&
+        #   chmod 777 ... && restorecon -vR <DIR> ; setenforce 1 ;
+        #   [ -f ... ] && [ -f ... ] && echo SUCCESS || echo FAILURE
         for d in dirs:
-            script = "; ".join(
-                (
-                    f'mkdir -p "{d}"',
-                    f'cp -af "{tmp_l}" "{d}/LocalInfo.xml"',
-                    f'cp -af "{tmp_l}" "{d}/mLocalInfo.xml"',
-                    f'cp -af "{tmp_s}" "{d}/mGameInfo.xml"',
-                    f'chmod 777 "{d}/LocalInfo.xml" "{d}/mLocalInfo.xml" "{d}/mGameInfo.xml"',
-                    f'restorecon -vR "{d}" 2>/dev/null || true',
-                )
+            ds = d.rstrip("/") + "/"
+            script = (
+                "setenforce 0 ; "
+                f'rm -rf "{ds}"* ; '
+                f'mkdir -p "{d}" ; '
+                f'cp -af "{tmp_l}" "{ds}LocalInfo.xml" && '
+                f'cp -af "{tmp_s}" "{ds}mGameInfo.xml" && '
+                f'chmod 777 "{ds}LocalInfo.xml" && '
+                f'chmod 777 "{ds}mGameInfo.xml" && '
+                f'restorecon -vR "{d}" ; '
+                "setenforce 1 ; "
+                f'[ -f "{ds}LocalInfo.xml" ] && [ -f "{ds}mGameInfo.xml" ] '
+                '&& echo "SUCCESS" || echo "FAILURE" ; '
+                f'wc -c "{ds}LocalInfo.xml" "{ds}mGameInfo.xml"'
             )
-            for prefix in ("su -mm -c '", "su -c '"):
-                shell = prefix + script + "'"
+            # su -mm -c first: mount-master mode, what the competitor runs;
+            # plain su -c is the fallback for su builds that reject -mm.
+            for wrap in ("su -mm -c ", "su -c "):
+                shell = wrap + '"' + script.replace('"', '\\"') + '"'
                 code, out, err = _run_adb(adb, ["-s", serial, "shell", shell], timeout=60)
-                combined = (out + err).decode("utf-8", "replace").strip()
-                if code != 0 or re.search(
-                    r"permission denied|not found|no such file|failed", combined, re.I
-                ):
-                    attempts.append(f"{d}: {combined or f'exit {code}'}")
+                combined = (out + err).decode("utf-8", "replace")
+                if code != 0:
+                    attempts.append(
+                        f"{d}: {wrap.strip()} exit {code} {combined.strip()[:180]}"
+                    )
                     continue
-                # Prove both files landed with the exact bundled sizes.
+                if "FAILURE" in combined or "SUCCESS" not in combined:
+                    attempts.append(f"{d}: {combined.strip()[:220] or 'no output'}")
+                    continue
+                # SUCCESS only proves existence — prove the exact sizes too.
                 verdict: dict[str, int] = {}
                 ok = True
-                for fname, size in (("mGameInfo.xml", want["save"]), ("LocalInfo.xml", want["local"])):
-                    c2, o2, _ = _run_adb(
-                        adb,
-                        ["-s", serial, "shell", f"su -c 'wc -c < \"{d}/{fname}\"'"],
-                        timeout=20,
+                for fname, size in (
+                    ("LocalInfo.xml", want["local"]),
+                    ("mGameInfo.xml", want["save"]),
+                ):
+                    m = re.search(
+                        r"(?m)^(\d+)\s+\S*" + re.escape(fname) + r"\s*$", combined
                     )
-                    text = o2.decode("utf-8", "replace").strip().split()
-                    try:
-                        got = int(text[0]) if text else -1
-                    except ValueError:
-                        got = -1
+                    got = int(m.group(1)) if m else -1
                     verdict[fname] = got
-                    if c2 != 0 or got != size:
+                    if got != size:
                         ok = False
                 if ok:
                     _active_package[serial] = pkg
@@ -1409,6 +1429,36 @@ class NativeBridge:
             "fresh profile injection failed — "
             + (" | ".join(attempts)[:600] or "no writable saves folder")
         )
+
+    def launchGame(self, serial: str) -> dict:
+        """Start the game the way the competitor does after injecting: the
+        standard LAUNCHER intent via `monkey` (no activity name needed), with
+        a resolved `am start` as the fallback for builds without monkey.
+        """
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        pkg = self._active_pkg(adb, serial)
+        if not pkg:
+            raise RuntimeError("Township package not installed on " + serial)
+        errs: list[str] = []
+        for args in (
+            ["-s", serial, "shell",
+             f"monkey -p {pkg} -c android.intent.category.LAUNCHER 1"],
+            ["-s", serial, "shell",
+             f'am start -n "$(cmd package resolve-activity --brief {pkg} '
+             '| grep -m1 /)"'],
+        ):
+            code, out, err = _run_adb(adb, args, timeout=30)
+            combined = (out + err).decode("utf-8", "replace").strip()
+            if (
+                code == 0
+                and combined
+                and not re.search(r"no activities found|error:", combined, re.I)
+            ):
+                return {"ok": True, "package": pkg, "output": combined[:300]}
+            errs.append(combined[:200] or f"exit {code}")
+        raise RuntimeError("could not launch the game — " + " | ".join(errs))
 
     def verifyWipe(self, serial: str) -> dict:
         """Prove the wipe: none of the save/login files may still exist.

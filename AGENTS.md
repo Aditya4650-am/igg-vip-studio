@@ -200,30 +200,92 @@ numbers resolve to `null`.
 has **no** save at all, the game asks Playrix "which city belongs to this
 device?" and the server re-links the same old city from its device fingerprint —
 the wipe verifies as empty and the old city still returns. A wipe is therefore
-only preparation, never the thing that creates a Level-1 city.
+only preparation, never the thing that creates a Level-1 city. The wipe-based
+UI (One-click / Wipe / Force device ID / Reinstall) was removed in v1.1.19;
+the tab is now Backup → Inject → Open game → Verify.
 
-`injectFreshProfile()` in `igg_client.py` does what TS Lite does: force-stop the
-game, root-copy a complete ready-made pair — `fresh_profile/localinfo.profile`
-(LocalInfo container) + `fresh_profile/mgameinfo.profile` (mGameInfo container,
-300008 B) — into the saves folder (`cp -af`, `chmod 777`, `restorecon -vR`), then
-byte-verify both with `wc -c` before reporting anything. The game loads the
-provided city at launch and never issues the "which city is mine" request, so
-the old city cannot come back. The pair was extracted from the same asset TS
-Lite ships (`assets/images.dat`, AES-CBC key `T$L1t3_S3cur3_K3`) and is bundled
-through `igg_client.spec` `datas`; `_freshProfileDir()` finds it under
-`sys._MEIPASS` when frozen.
+`injectFreshProfile()` in `igg_client.py` reproduces TS Lite's native
+`nativeGetBackupScript` script **command-for-command, in its own order** —
+recovered by disassembling `libts_lite.so` (see `New Account: how TS Lite was
+reverse engineered` below), not by guessing:
 
-- Both names are written (`LocalInfo.xml` and `mLocalInfo.xml`) and the
-  discovered saves dir is targeted first — layouts differ between builds, and a
-  wrong filename means the injection silently does nothing.
+```
+setenforce 0 ; rm -rf "<DIR>/"* ; mkdir -p "<DIR>" ;
+cp -af <L1> "<DIR>/LocalInfo.xml" && cp -af <M1> "<DIR>/mGameInfo.xml" &&
+chmod 777 .../LocalInfo.xml && chmod 777 .../mGameInfo.xml &&
+restorecon -vR "<DIR>" ; setenforce 1 ;
+[ -f .../LocalInfo.xml ] && [ -f .../mGameInfo.xml ] && echo "SUCCESS" || echo "FAILURE"
+```
+
+run as `su -mm -c "<script with \" escapes>"` (fallback `su -c`), plus `wc -c`
+as our extra gate (SUCCESS only proves the files exist).
+
+The first injection attempt (v1.1.17/18) reported success and still showed the
+old city in game. The two missing steps were `setenforce 0/1` and — decisively
+— `rm -rf <DIR>/*`: it overwrote only the two known files, so every other stale
+file in `saves/` stayed for the game to fall back on. Both are now reproduced
+verbatim, and the copy is byte-verified before anything is reported.
+
+- The glob must be **outside** the quotes (`"<DIR>"/​*`, written
+  `f'rm -rf "{ds}"* ; '`): `"<DIR>/*"` is one literal string, so `rm -f`
+  silently removes nothing — the exact bug the script-order test caught.
+- Exactly the proven pair is written (`LocalInfo.xml` + `mGameInfo.xml`); the
+  third file the first attempt wrote (`mLocalInfo.xml`) is not part of TS
+  Lite's script and the folder is cleared first anyway. A test asserts
+  `mLocalInfo.xml` never appears in the command.
+- The discovered saves dir is targeted first, then the conventional
+  candidates — layouts differ between builds, and a wrong filename means the
+  injection silently does nothing.
 - Root is required; without it every candidate directory fails with its own
-  reason in the error, never a fake success. A size mismatch raises
-  `verification mismatch` instead of passing.
+  reason in the error, never a fake success. A wrong size, a `FAILURE`
+  answer, or a missing SUCCESS marker all raise instead of passing.
+- `launchGame()` mirrors the post-inject step: `monkey -p <pkg> -c
+  android.intent.category.LAUNCHER 1`, falling back to a resolved
+  `am start`.
 - The UI keeps the Inject button disabled until Backup has run: the pair
-  overwrites the current save.
+  replaces the current save. Verify is always enabled (no wipe to wait for).
 
-Guard rails: `test_igg_client.py` pins the bundled files at 4675 / 300008 bytes
-and asserts a truncated copy and a root denial both raise.
+The pair was extracted from the same asset TS Lite ships (`assets/images.dat`,
+AES-CBC key `T$L1t3_S3cur3_K3`) and is bundled through `igg_client.spec`
+`datas`; `_freshProfileDir()` finds it under `sys._MEIPASS` when frozen.
+
+Guard rails: `test_igg_client.py` pins the bundled files at 4675 / 300008
+bytes, asserts the script's command **order** (setenforce → rm -rf → mkdir →
+cp → chmod → restorecon → setenforce → probe → wc), and asserts a truncated
+copy, a FAILURE answer, and a root denial all raise. 55 tests total.
+
+### New Account: how TS Lite was reverse engineered
+
+To redo or extend this research (all scratch files live in temp, never the
+repo):
+
+1. The APK is a zip: pull `classes.dex` + `assets/images.dat` out of it with
+   `System.IO.Compression.ZipFile`.
+2. Decompile with jadx (`skylot/jadx` release `jadx-x.y.z.zip` →
+   `bin/jadx.bat -d out --no-res --show-bad-code classes.dex`). Maven's
+   `baksmali` jar is thin (no Main-Class) and the GitHub release asset name
+   is not guessable — go straight to jadx.
+3. Strings are MegatronKing StringFog: every literal is
+   `AbstractC0177lb.a("<b64 data>", "<b64 key>")` = base64 → repeating-key
+   XOR → UTF-8 (`com.github.megatronking.stringfog.xor.StringFogImpl`). A
+   regex over the jadx output rewrites all call sites in place (350 sites in
+   v1.2); afterwards `images.dat`, `force-stop`, and `com.playrix.township`
+   become greppable.
+4. The fresh-city flow is `RunnableC0060e` (case 11): force-stop →
+   `assets/images.dat` → `CUA.nativeDecryptBytes` (AES-CBC, key material
+   `T$L1t3_S3cur3_K3y_2024!` in the .so) → unzip to `L1.ts_lite`/`M1.ts_lite`
+   → `GOA.nativeGetBackupScript(L1, M1, "/data/user/0/com.playrix.township/saves/")`
+   → `RUA.nativeRunRootCommand`.
+5. The shell script lives in native code: `capstone` + `pyelftools`
+   disassembly of the JNI export, collecting every RIP-relative `.rodata`
+   reference in order, reconstructs the template (that is where `setenforce`
+   and `rm -rf <DIR>/*` were found — a strings-dump alone shows only
+   fragments and missed the order). `nativeRunRootCommand` wraps as
+   `su -mm -c "<cmd>" 2>&1` through `popen`.
+6. TS Lite does **not** touch `pm clear`, Android/GSF IDs, or
+   `shared_prefs` anywhere — grep for those in the decompiled sources
+   proves the absence. Its only other steps are the SUCCESS check and a
+   launch dialog (`monkey -p <pkg> -c android.intent.category.LAUNCHER 1`).
 
 ## Windows client
 

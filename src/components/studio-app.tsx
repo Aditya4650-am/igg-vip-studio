@@ -58,6 +58,7 @@ type NativeBridge = {
   pmClear?: (serial: string) => Promise<{ ok: boolean; package?: string; serial?: string; sdcard?: string }>;
   reinstallTownship?: (serial: string) => Promise<{ ok: boolean; package?: string; apkCount?: number }>;
   injectFreshProfile?: (serial: string) => Promise<{ ok: boolean; package?: string; dir?: string; verified?: Record<string, number> }>;
+  launchGame?: (serial: string) => Promise<{ ok: boolean; package?: string; output?: string }>;
   listStateFiles?: (serial: string) => Promise<{ ok: boolean; package: string; files: string[] }>;
   readFile?: (serial: string, path: string) => Promise<{ b64: string; file: string; size?: number }>;
   writeFile?: (serial: string, path: string, b64: string) => Promise<{ ok: boolean; file?: string }>;
@@ -1246,11 +1247,9 @@ export function StudioApp() {
   const [pendingDecorClone, setPendingDecorClone] = useState(false);
   // Fresh-start ("New Account") phase machine. Fully isolated: nothing from
   // other tabs' state is read or written here.
-  const [freshPhase, setFreshPhase] = useState<"idle" | "backedup" | "wiped" | "verified">("idle");
+  const [freshPhase, setFreshPhase] = useState<"idle" | "backedup" | "verified">("idle");
   const [freshBackup, setFreshBackup] = useState<{ oldCityId: string; oldLevel: number; extraCount: number; skippedCount: number; androidId: string } | null>(null);
   const [freshCheck, setFreshCheck] = useState<{ newCityId: string; androidReset: boolean; gsfReset: boolean } | null>(null);
-  const [freshIds, setFreshIds] = useState<{ androidFrom: string; androidTo: string; gsfRenewed: boolean } | null>(null);
-  const [freshLog, setFreshLog] = useState<string[]>([]);
   const [freshInjectNote, setFreshInjectNote] = useState("");
   const [clientVer, setClientVer] = useState("");
 
@@ -1266,7 +1265,6 @@ export function StudioApp() {
       stop = true;
     };
   }, []);
-  const [freshConfirm, setFreshConfirm] = useState("");
   const [pendingDecorMaxAll, setPendingDecorMaxAll] = useState(false);
   const upgradeFactorySel = useSetMap();
   const upgradeTrainSel = useSetMap();
@@ -1945,8 +1943,6 @@ export function StudioApp() {
     });
     setFreshBackup({ oldCityId: r.oldCityId, oldLevel: r.oldLevel, extraCount: r.extraCount, skippedCount: r.skippedCount ?? 0, androidId });
     setFreshCheck(null);
-    setFreshIds(null);
-    setFreshConfirm("");
     setFreshPhase("backedup");
     return true;
   };
@@ -1959,190 +1955,6 @@ export function StudioApp() {
     setBusy(true);
     try {
       if (await onFreshBackupCore()) toast.success(tr("freshBackedUp"));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : tr("nothing"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onFreshWipeCore = async (): Promise<"wiped" | "rebooting"> => {
-    if (!token || !session || !device) {
-      toast.error(tr("actionFailed"));
-      throw new Error(tr("actionFailed"));
-    }
-    const native = nativeBridge();
-    if (!native?.pmClear || !native?.resetAndroidId) {
-      toast.error(tr("freshNoBridge"));
-      throw new Error(tr("freshNoBridge"));
-    }
-    const say = (line: string) => setFreshLog((prev) => [...prev.slice(-7), line]);
-    // One atomic OS-level wipe (force-stop + pm clear + external storage),
-    // then fresh device ids. No per-file plan to go stale.
-    const cleared = await native.pmClear(device);
-    if (!cleared.ok) throw new Error(tr("nothing"));
-    say(`✅ ${tr("freshWiped")}`);
-    try {
-      const proof = await native.verifyWipe?.(device);
-      if (proof && !proof.ok) {
-        throw new Error(`${tr("freshWipeProved")} ✗: ${(proof.remaining ?? []).join(", ")}`);
-      }
-      if (proof) say(`✅ ${tr("freshWipeProved")}`);
-    } catch (e) {
-      if (e instanceof Error && e.message.includes("✗")) throw e;
-      /* old EXE without verifyWipe: pm clear Success stands */
-    }
-    let androidFrom = "";
-    let androidTo = "";
-    let needReboot = false;
-    try {
-      const reset = await native.resetAndroidId(device);
-      if (!reset.ok) throw new Error(tr("nothing"));
-      androidFrom = (reset.oldAndroidId ?? "").slice(0, 8);
-      androidTo = (reset.androidId ?? "").slice(0, 8);
-      say(`✅ 🆔 ${androidFrom}…→${androidTo}…`);
-    } catch {
-      // settings provider ignores writes on hardened emulators — with root
-      // confirmed, edit the settings file itself; a reboot then picks it up.
-      if (!native.forceAndroidId || !native.rebootDevice) throw new Error(tr("freshNoBridge"));
-      say(`⏳ ${tr("freshFileId")}`);
-      const forced = await native.forceAndroidId(device);
-      if (!forced.ok) throw new Error(tr("nothing"));
-      androidFrom = (forced.oldAndroidId ?? "").slice(0, 8);
-      androidTo = (forced.androidId ?? "").slice(0, 8);
-      needReboot = true;
-    }
-    let gsfRenewed = false;
-    try {
-      const gsf = await native.resetGsfId?.(device);
-      gsfRenewed = Boolean(gsf?.ok);
-    } catch {
-      gsfRenewed = false;
-    }
-    say(gsfRenewed ? `✅ GSF ✓` : `… GSF ${tr("freshGsfKept")}`);
-    try {
-      const gms = await native.clearGms?.(device);
-      if (gms?.ok) say(`✅ ${tr("freshGmsOut")}`);
-      else if (gms && !gms.ok) say(`… GMS: ${gms.error ?? gms.skipped?.join(", ") ?? tr("nothing")}`);
-    } catch {
-      /* unlink best-effort only */
-    }
-    try {
-      const fp = await native.deviceFingerprint?.(device);
-      const model = fp?.props?.["ro.product.model"];
-      const rel = fp?.props?.["ro.build.version.release"];
-      if (model) say(`📱 ${model}${rel ? ` · Android ${rel}` : ""} ${tr("freshFpFixed")}`);
-    } catch {
-      /* display-only */
-    }
-    setFreshIds({ androidFrom, androidTo, gsfRenewed });
-    setFreshPhase("wiped");
-    setFreshConfirm("");
-    if (needReboot) {
-      const reboot = native.rebootDevice;
-      if (!reboot) throw new Error(tr("freshNoBridge"));
-      await reboot(device);
-      return "rebooting";
-    }
-    return "wiped";
-  };
-
-  const onFreshWipe = async () => {
-    if (!token || !session || !device) {
-      toast.error(tr("actionFailed"));
-      return;
-    }
-    if (freshConfirm.trim().toUpperCase() !== "WIPE") {
-      toast.error(tr("freshConfirmPh"));
-      return;
-    }
-    setBusy(true);
-    try {
-      const done = await onFreshWipeCore();
-      toast.success(tr(done === "rebooting" ? "freshRebooting" : "freshWiped"));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : tr("nothing"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // One-click Fresh Account: backup -> wipe -> new Android ID in one run.
-  // Verify still waits for the user to open the game (a fresh city must be
-  // minted on-device first), then one tap on Verify.
-  const onFreshOneClick = async () => {
-    if (!token || !session || !device) {
-      toast.error(tr("actionFailed"));
-      return;
-    }
-    if (freshConfirm.trim().toUpperCase() !== "WIPE") {
-      toast.error(tr("freshConfirmPh"));
-      return;
-    }
-    setBusy(true);
-    try {
-      setFreshLog([]);
-      if (!(await onFreshBackupCore())) return;
-      const done = await onFreshWipeCore();
-      toast.success(tr(done === "rebooting" ? "freshRebooting" : "freshWiped"));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : tr("nothing"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onFreshForce = async () => {
-    if (!token || !session || !device) {
-      toast.error(tr("actionFailed"));
-      return;
-    }
-    if (freshConfirm.trim().toUpperCase() !== "WIPE") {
-      toast.error(tr("freshConfirmPh"));
-      return;
-    }
-    const native = nativeBridge();
-    if (!native?.nukeSecureSettings || !native?.rebootDevice) {
-      toast.error(tr("freshNoBridge"));
-      return;
-    }
-    setBusy(true);
-    try {
-      const nuked = await native.nukeSecureSettings(device);
-      if (!nuked.ok) throw new Error(nuked.error || tr("nothing"));
-      await native.rebootDevice(device);
-      setFreshConfirm("");
-      try {
-        await native.waitForDevice?.(device, 180);
-        toast.success(tr("freshBackOnline"));
-      } catch {
-        toast.success(tr("freshRebooting"));
-      }
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : tr("nothing"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // Nuclear fallback: uninstall + reinstall the game itself. Needs no root
-  // and removes everything the package owns. Backup must already exist
-  // (the button stays disabled until then).
-  const onFreshReinstall = async () => {
-    if (!token || !session || !device) {
-      toast.error(tr("actionFailed"));
-      return;
-    }
-    const native = nativeBridge();
-    if (!native?.reinstallTownship) {
-      toast.error(tr("freshNoBridge"));
-      return;
-    }
-    setBusy(true);
-    try {
-      const r = await native.reinstallTownship(device);
-      if (!r.ok) throw new Error(tr("nothing"));
-      toast.success(`${tr("freshReinstalled")} (${r.package}, ${r.apkCount ?? 1} apk)`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tr("nothing"));
     } finally {
@@ -2175,6 +1987,27 @@ export function StudioApp() {
       const msg = e instanceof Error ? e.message : tr("nothing");
       setFreshInjectNote(`❌ ${msg}`);
       toast.error(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onFreshLaunch = async () => {
+    if (!device) {
+      toast.error(tr("actionFailed"));
+      return;
+    }
+    const native = nativeBridge();
+    if (!native?.launchGame) {
+      toast.error(tr("freshNoBridge"));
+      return;
+    }
+    setBusy(true);
+    try {
+      await native.launchGame(device);
+      toast.success(tr("freshGameOpened"));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : tr("nothing"));
     } finally {
       setBusy(false);
     }
@@ -3259,8 +3092,13 @@ export function StudioApp() {
                         <Button size="sm" variant="primary" disabled={!freshBackup || busy} onClick={onFreshInject}>
                           {tr("freshInjectBtn")}
                         </Button>
+                        <Button size="sm" variant="ghost" disabled={busy} onClick={onFreshLaunch}>
+                          🎮 {tr("freshOpenGame")}
+                        </Button>
                         {freshBackup && (
-                          <span className="text-xs text-muted">✅ {tr("freshBackedUp")}</span>
+                          <span className="text-xs text-muted">
+                            ✅ {tr("freshBackedUp")}: {freshBackup.oldCityId.slice(0, 12)}… · Lv{freshBackup.oldLevel} · {freshBackup.extraCount} {tr("freshExtra")}{freshBackup.skippedCount > 0 ? ` · ⏭️${freshBackup.skippedCount}` : ""}
+                          </span>
                         )}
                       </div>
                       {!freshBackup && (
@@ -3271,44 +3109,10 @@ export function StudioApp() {
                       )}
                     </section>
                     <section className="panel">
-                      <h3 className="mb-1 text-xs font-bold tracking-wider uppercase text-primary">🚀 {tr("freshOneClick")}</h3>
-                      <p className="mb-3 text-xs text-muted">{tr("freshOneClickD")}</p>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <input
-                          className="field field-qty"
-                          placeholder={tr("freshConfirmPh")}
-                          aria-label={tr("freshConfirmPh")}
-                          value={freshConfirm}
-                          onChange={(e) => setFreshConfirm(e.target.value)}
-                        />
-                        <Button size="sm" variant="primary" onClick={onFreshOneClick}>
-                          {tr("freshOneClickBtn")}
-                        </Button>
-                      </div>
-                      {freshLog.length > 0 && (
-                        <div className="mt-2 space-y-1">
-                          {freshLog.map((line, i) => (
-                            <p key={i} className="text-xs text-muted">{line}</p>
-                          ))}
-                        </div>
-                      )}
-                      {freshBackup && (
-                        <p className="mt-2 text-xs text-muted">
-                          ✅ {tr("freshBackedUp")}: {freshBackup.oldCityId.slice(0, 12)}… · Lv{freshBackup.oldLevel} · {freshBackup.extraCount} {tr("freshExtra")}{freshBackup.skippedCount > 0 ? ` · ⏭️${freshBackup.skippedCount}` : ""}
-                        </p>
-                      )}
-                      {freshPhase === "wiped" && (
-                        <p className="mt-2 text-xs text-muted">
-                          ✅ {tr("freshWiped")}
-                          {freshIds ? ` · 🆔 ${freshIds.androidFrom}…→${freshIds.androidTo}… · GSF ${freshIds.gsfRenewed ? "✓" : "…"}` : ""}
-                        </p>
-                      )}
-                    </section>
-                    <section className="panel">
                       <h3 className="mb-1 text-xs font-bold tracking-wider uppercase text-primary">{tr("freshStep3")}</h3>
                       <p className="mb-3 text-xs text-muted">{tr("freshStep3d")}</p>
                       <div className="flex flex-wrap items-center gap-2">
-                        <Button size="sm" variant="primary" disabled={freshPhase !== "wiped" && freshPhase !== "verified"} onClick={onFreshVerify}>
+                        <Button size="sm" variant="primary" disabled={busy} onClick={onFreshVerify}>
                           {tr("freshVerifyBtn")}
                         </Button>
                         <Button size="sm" variant="ghost" disabled={!freshBackup} onClick={onFreshRestore}>
@@ -3321,23 +3125,6 @@ export function StudioApp() {
                         </p>
                       )}
                     </section>
-                    <details className="panel">
-                      <summary className="cursor-pointer text-xs font-bold tracking-wider uppercase text-muted">{tr("freshAdvanced")}</summary>
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <Button size="sm" variant="ghost" onClick={onFreshBackup}>
-                          {tr("freshBackupBtn")}
-                        </Button>
-                        <Button size="sm" variant="ghost" disabled={freshPhase === "idle"} onClick={onFreshWipe}>
-                          {tr("freshWipeBtn")}
-                        </Button>
-                        <Button size="sm" variant="ghost" disabled={freshPhase === "idle"} onClick={onFreshForce}>
-                          {tr("freshForceBtn")}
-                        </Button>
-                        <Button size="sm" variant="ghost" disabled={freshPhase === "idle"} onClick={onFreshReinstall}>
-                          {tr("freshReinstallBtn")}
-                        </Button>
-                      </div>
-                    </details>
                     <p className="rounded-md bg-input px-3 py-2 text-xs text-muted">ℹ️ {tr("freshLimits")}</p>
                   </div>
                 )}

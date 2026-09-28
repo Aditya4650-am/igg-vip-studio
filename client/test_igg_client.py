@@ -311,6 +311,14 @@ class FreshStartBridge(unittest.TestCase):
             c.FRESH_PROFILE_DIR = saved
 
     def _inject_shell(self, overrides=None):
+        # The whole proven script runs in ONE root command and must answer
+        # with its SUCCESS probe plus both byte counts.
+        ok_out = (
+            b"restorecon: reset /data/user/0/com.playrix.township/saves/LocalInfo.xml context\n"
+            b"SUCCESS\n"
+            b"4675 /data/user/0/com.playrix.township/saves/LocalInfo.xml\n"
+            b"300008 /data/user/0/com.playrix.township/saves/mGameInfo.xml\n"
+        )
         mapping = {
             "pm path": (0, b"package:/data/app/p/base.apk\n", b""),
             "am force-stop": (0, b"", b""),
@@ -318,13 +326,7 @@ class FreshStartBridge(unittest.TestCase):
                 0, b"/data/user/0/com.playrix.township/saves/mGameInfo.xml\n", b""
             ),
             "push": (0, b"", b""),
-            "mkdir -p": (0, b"", b""),
-            'wc -c < "/data/user/0/com.playrix.township/saves/mGameInfo.xml"': (
-                0, b"300008\n", b""
-            ),
-            'wc -c < "/data/user/0/com.playrix.township/saves/LocalInfo.xml"': (
-                0, b"4675\n", b""
-            ),
+            "setenforce 0": (0, ok_out, b""),
         }
         if overrides:
             mapping.update(overrides)
@@ -339,26 +341,133 @@ class FreshStartBridge(unittest.TestCase):
         self.assertEqual(r["verified"]["mGameInfo.xml"], 300008)
         self.assertEqual(r["verified"]["LocalInfo.xml"], 4675)
 
+    def test_inject_script_is_the_proven_one_and_in_order(self):
+        # Reproduce the competitor's script command-for-command: SELinux off,
+        # clear the saves folder, copy the pair, fix modes + labels, SELinux
+        # back on, then its SUCCESS probe. A missing `setenforce 0` or `rm -rf`
+        # is exactly what let the old city survive last time.
+        seen: list[str] = []
+        base = self._inject_shell()
+
+        def spy(adb, args, timeout=30):
+            cmd = " ".join(str(a) for a in args)
+            if "setenforce 0" in cmd:
+                seen.append(cmd)
+            return base(adb, args, timeout)
+
+        c._run_adb = spy  # type: ignore[assignment]
+        r = c.NativeBridge().injectFreshProfile("emulator-5554")
+        self.assertTrue(r["ok"])
+        self.assertEqual(len(seen), 1, "one root command for the whole script")
+        cmd = seen[0]
+        self.assertIn('su -mm -c "', cmd, "mount-master wrapper is what it runs")
+        idx = -1
+        for marker in (
+            "setenforce 0",
+            'rm -rf \\"',
+            'mkdir -p \\"',
+            'cp -af \\"',
+            "LocalInfo.xml",
+            "mGameInfo.xml",
+            "chmod 777",
+            "restorecon -vR",
+            "setenforce 1",
+            '[ -f \\"',
+            'echo \\"SUCCESS\\"',
+            "wc -c",
+        ):
+            pos = cmd.find(marker, idx + 1)
+            self.assertGreater(pos, idx, f"missing or out of order: {marker!r}")
+            idx = pos
+        # Exactly the proven pair — no third file.
+        self.assertNotIn("mLocalInfo.xml", cmd)
+
     def test_wrong_copy_size_is_an_error_never_a_success(self):
         # A truncated copy must not be reported as a working fresh start —
         # that silent-success pattern is exactly what broke the wipe flow.
         c._run_adb = self._inject_shell({
-            'wc -c < "/data/user/0/com.playrix.township/saves/mGameInfo.xml"': (
-                0, b"1234\n", b""
+            "setenforce 0": (
+                0,
+                b"SUCCESS\n"
+                b"1234 /data/user/0/com.playrix.township/saves/mGameInfo.xml\n"
+                b"4675 /data/user/0/com.playrix.township/saves/LocalInfo.xml\n",
+                b"",
             ),
         })  # type: ignore[assignment]
         with self.assertRaises(RuntimeError) as ctx:
             c.NativeBridge().injectFreshProfile("emulator-5554")
         self.assertIn("verification mismatch", str(ctx.exception))
 
+    def test_failed_probe_is_an_error_never_a_success(self):
+        # The script answering FAILURE (or nothing) must surface as an error
+        # with the reason, not a silent pass.
+        c._run_adb = self._inject_shell({
+            "setenforce 0": (0, b"FAILURE\n", b""),
+        })  # type: ignore[assignment]
+        with self.assertRaises(RuntimeError) as ctx:
+            c.NativeBridge().injectFreshProfile("emulator-5554")
+        self.assertIn("FAILURE", str(ctx.exception))
+
     def test_root_denied_is_reported_with_the_reason(self):
         c._run_adb = self._inject_shell({
-            "mkdir -p": (1, b"", b"Permission denied"),
+            "setenforce 0": (1, b"", b"Permission denied"),
         })  # type: ignore[assignment]
         with self.assertRaises(RuntimeError) as ctx:
             c.NativeBridge().injectFreshProfile("emulator-5554")
         self.assertIn("injection failed", str(ctx.exception))
         self.assertIn("Permission denied", str(ctx.exception))
+
+    # --- launch (mirrors the post-inject "open the game" step) ------------
+
+    @staticmethod
+    def _pkg_path():
+        return (0, b"package:/data/app/p/base.apk\n", b"")
+
+    def test_launch_game_uses_the_proven_monkey_intent(self):
+        seen: list[str] = []
+
+        def run(adb, args, timeout=30):
+            cmd = " ".join(str(a) for a in args)
+            seen.append(cmd)
+            if "pm path" in cmd:
+                return self._pkg_path()
+            if "monkey" in cmd:
+                return (0, b"Events injected: 1\n", b"")
+            return (1, b"", b"unexpected: " + cmd.encode()[:40])
+
+        c._run_adb = run  # type: ignore[assignment]
+        r = c.NativeBridge().launchGame("emulator-5554")
+        self.assertTrue(r["ok"])
+        monkey = next(c for c in seen if "monkey" in c)
+        self.assertIn("monkey -p com.playrix.township", monkey)
+        self.assertIn("android.intent.category.LAUNCHER 1", monkey)
+
+    def test_launch_game_falls_back_to_resolved_am_start(self):
+        def run(adb, args, timeout=30):
+            cmd = " ".join(str(a) for a in args)
+            if "pm path" in cmd:
+                return self._pkg_path()
+            if "monkey" in cmd:
+                return (0, b"No activities found to run 'monkey'\n", b"")
+            if "am start" in cmd:
+                return (0, b"Starting: Intent { cmp=com.playrix.township/.A }\n", b"")
+            return (1, b"", b"unexpected: " + cmd.encode()[:40])
+
+        c._run_adb = run  # type: ignore[assignment]
+        r = c.NativeBridge().launchGame("emulator-5554")
+        self.assertTrue(r["ok"])
+
+    def test_launch_game_reports_failure_not_fake_success(self):
+        def run(adb, args, timeout=30):
+            cmd = " ".join(str(a) for a in args)
+            if "pm path" in cmd:
+                return self._pkg_path()
+            return (0, b"No activities found to run 'monkey'\n", b"")
+
+        c._run_adb = run  # type: ignore[assignment]
+        with self.assertRaises(RuntimeError) as ctx:
+            c.NativeBridge().launchGame("emulator-5554")
+        self.assertIn("could not launch", str(ctx.exception))
 
     def test_lists_state_files_for_the_installed_package(self):
         c._run_adb = self._shell({  # type: ignore[assignment]
