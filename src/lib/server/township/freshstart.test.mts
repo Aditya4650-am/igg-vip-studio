@@ -147,6 +147,28 @@ test("verify passes when the GSF id moved even if Settings id is stuck", () => {
   assert.equal(r.clean, true);
 });
 
+test("refusal names exactly which identity is stuck", () => {
+  const s: FreshSession = { id: "s1" };
+  backupFreshStartState(s, {
+    serial: "emulator-5554",
+    cityPath: "/a.xml",
+    localPath: "/b.xml",
+    cityB64: b64(CITY("c-old", 9)),
+    localB64: b64("<x/>"),
+    androidId: "aaaaaaaaaaaaaaaa",
+    gsfId: "1111111111111111",
+  });
+  assert.throws(
+    () =>
+      verifyFreshStartState(s, {
+        cityB64: b64(CITY("c-new", 1)),
+        androidId: "aaaaaaaaaaaaaaaa",
+        gsfAndroidId: "1111111111111111",
+      }),
+    /Android aaaaaaaa…=aaaaaaaa… \(stuck\), GSF 11111111…=11111111… \(stuck\)/,
+  );
+});
+
 test("verify refuses when both known ids are unchanged", () => {
   const s: FreshSession = { id: "s1" };
   backupFreshStartState(s, {

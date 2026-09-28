@@ -257,11 +257,19 @@ export function verifyFreshStartState(s: FreshSession, input: FreshVerifyInput) 
   const gsfChanged = Boolean(b.meta.oldGsfId && newGsfId && newGsfId !== b.meta.oldGsfId);
   // A new city under an unchanged device identity gets re-linked to the ban,
   // so pass when EITHER hardware id moved. Refuse only when both are known
-  // and neither moved — or when the Android id is known and stuck.
+  // and neither moved — and say exactly which id is stuck, so the toast is
+  // a diagnosis, not a dead end.
   const androidStuck = Boolean(b.meta.oldAndroidId && newAndroidId && newAndroidId === b.meta.oldAndroidId);
   const gsfStuck = Boolean(b.meta.oldGsfId && newGsfId && newGsfId === b.meta.oldGsfId);
+  const short = (v: string) => (v ? `${v.slice(0, 8)}…` : "unknown");
   if (!androidChanged && !gsfChanged && (androidStuck || gsfStuck || b.meta.oldAndroidId)) {
-    throw new Error("Device identity unchanged — the ban will follow the new city");
+    const gsfPart =
+      b.meta.oldGsfId || newGsfId
+        ? `, GSF ${short(b.meta.oldGsfId)}=${short(newGsfId)}${gsfStuck ? " (stuck)" : ""}`
+        : "";
+    throw new Error(
+      `Device identity unchanged — Android ${short(b.meta.oldAndroidId)}=${short(newAndroidId)}${androidStuck ? " (stuck)" : ""}${gsfPart} — the ban will follow the new city`,
+    );
   }
   s.freshVerified = { newCityId, newAndroidId };
   return {
