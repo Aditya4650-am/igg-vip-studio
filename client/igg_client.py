@@ -45,7 +45,7 @@ if sys.stderr is None:
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
-APP_VERSION = "1.1.16"
+APP_VERSION = "1.1.17"
 
 # Where the app UI comes from. Override with env IGG_VIP_URL or
 # %APPDATA%\IGG-VIP-Studio\server.txt
@@ -67,6 +67,12 @@ GAME_PACKAGES = ["com.playrix.township", "com.playrix.township.vn"]
 
 SAVE_FILE = "mGameInfo.xml"
 LOCAL_INFO_FILE = "mLocalInfo.xml"
+# Bundled fresh-city profile (extracted from the proven TS-Lite asset): a
+# complete LocalInfo + mGameInfo pair for a brand-new city, in the game's
+# own container encoding.
+FRESH_PROFILE_DIR = "fresh_profile"
+FRESH_LOCAL_PROFILE = "localinfo.profile"
+FRESH_SAVE_PROFILE = "mgameinfo.profile"
 
 # The save lives in the package's private storage and needs root via `su`, but
 # the exact folder differs between game builds (`saves/`, `files/`, or the
@@ -1279,6 +1285,130 @@ class NativeBridge:
         _PATH_CACHE.pop((serial, pkg, SAVE_FILE), None)
         _PATH_CACHE.pop((serial, pkg, LOCAL_INFO_FILE), None)
         return {"ok": True, "package": pkg, "serial": serial, "apkCount": len(remotes), "apkBytes": total}
+
+    def _freshProfileDir(self) -> Path:
+        """Locate the bundled fresh-city profile (frozen EXE or source tree)."""
+        roots: list[Path] = []
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            roots.append(Path(meipass))
+        roots.append(Path(__file__).resolve().parent)
+        for root in roots:
+            d = root / FRESH_PROFILE_DIR
+            if (d / FRESH_LOCAL_PROFILE).is_file() and (d / FRESH_SAVE_PROFILE).is_file():
+                return d
+        raise RuntimeError(
+            "fresh profile missing from install (fresh_profile/"
+            f"{FRESH_LOCAL_PROFILE} + {FRESH_SAVE_PROFILE})"
+        )
+
+    def injectFreshProfile(self, serial: str) -> dict:
+        """Hand the game a complete ready-made city (TS-Lite-style Level 1).
+
+        Wiping alone can never work: once the device has no save at all the
+        game asks Playrix "which city belongs to this device?", and the server
+        re-links the same old city from its device fingerprint — that is why a
+        proven-empty wipe still comes back as the old city. TS-Lite never lets
+        that request happen: it force-stops the game and copies a complete
+        LocalInfo + mGameInfo pair into the saves folder, so the game loads
+        the provided city instead of minting or restoring one.
+
+        The pair is copied exactly the way TS-Lite does it (root `cp -af`,
+        `chmod 777`, `restorecon -vR`) and byte-verified afterwards, so a
+        partial copy can never be reported as success.
+        """
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        pkg = self._active_pkg(adb, serial)
+        if not pkg:
+            raise RuntimeError("Township package not installed on " + serial)
+        profile = self._freshProfileDir()
+        src_local = profile / FRESH_LOCAL_PROFILE
+        src_save = profile / FRESH_SAVE_PROFILE
+        want: dict[str, int] = {
+            "local": src_local.stat().st_size,
+            "save": src_save.stat().st_size,
+        }
+        stopped = self.forceStop(serial)
+        if not stopped.get("ok"):
+            raise RuntimeError("could not stop the game first: " + str(stopped.get("error")))
+        # Most specific target first: wherever the real save was found, then
+        # the conventional candidates (layouts differ between builds).
+        dirs: list[str] = []
+        for fname in (SAVE_FILE, "LocalInfo.xml", LOCAL_INFO_FILE):
+            found = _find_on_device(adb, serial, pkg, fname)
+            if found:
+                parent = found.rsplit("/", 1)[0]
+                if parent not in dirs:
+                    dirs.append(parent)
+        for base in (f"/data/data/{pkg}", f"/data/user/0/{pkg}", f"/data/user_de/0/{pkg}"):
+            for sub in ("saves", "files"):
+                d = f"{base}/{sub}"
+                if d not in dirs:
+                    dirs.append(d)
+        # Stage the profile where root can copy it from (adb push can only
+        # reach /data/local/tmp without root).
+        tmp_l = "/data/local/tmp/igg_fresh_localinfo"
+        tmp_s = "/data/local/tmp/igg_fresh_mgameinfo"
+        for src, tmp in ((src_local, tmp_l), (src_save, tmp_s)):
+            code, _, err = _run_adb(adb, ["-s", serial, "push", str(src), tmp], timeout=90)
+            if code != 0:
+                raise RuntimeError("adb push failed: " + err.decode("utf-8", "replace").strip())
+        attempts: list[str] = []
+        for d in dirs:
+            script = "; ".join(
+                (
+                    f'mkdir -p "{d}"',
+                    f'cp -af "{tmp_l}" "{d}/LocalInfo.xml"',
+                    f'cp -af "{tmp_l}" "{d}/mLocalInfo.xml"',
+                    f'cp -af "{tmp_s}" "{d}/mGameInfo.xml"',
+                    f'chmod 777 "{d}/LocalInfo.xml" "{d}/mLocalInfo.xml" "{d}/mGameInfo.xml"',
+                    f'restorecon -vR "{d}" 2>/dev/null || true',
+                )
+            )
+            for prefix in ("su -mm -c '", "su -c '"):
+                shell = prefix + script + "'"
+                code, out, err = _run_adb(adb, ["-s", serial, "shell", shell], timeout=60)
+                combined = (out + err).decode("utf-8", "replace").strip()
+                if code != 0 or re.search(
+                    r"permission denied|not found|no such file|failed", combined, re.I
+                ):
+                    attempts.append(f"{d}: {combined or f'exit {code}'}")
+                    continue
+                # Prove both files landed with the exact bundled sizes.
+                verdict: dict[str, int] = {}
+                ok = True
+                for fname, size in (("mGameInfo.xml", want["save"]), ("LocalInfo.xml", want["local"])):
+                    c2, o2, _ = _run_adb(
+                        adb,
+                        ["-s", serial, "shell", f"su -c 'wc -c < \"{d}/{fname}\"'"],
+                        timeout=20,
+                    )
+                    text = o2.decode("utf-8", "replace").strip().split()
+                    try:
+                        got = int(text[0]) if text else -1
+                    except ValueError:
+                        got = -1
+                    verdict[fname] = got
+                    if c2 != 0 or got != size:
+                        ok = False
+                if ok:
+                    _active_package[serial] = pkg
+                    _PATH_CACHE.pop((serial, pkg, SAVE_FILE), None)
+                    _PATH_CACHE.pop((serial, pkg, LOCAL_INFO_FILE), None)
+                    return {
+                        "ok": True,
+                        "package": pkg,
+                        "dir": d,
+                        "sizes": want,
+                        "verified": verdict,
+                    }
+                attempts.append(f"{d}: verification mismatch {verdict} (want {want})")
+        raise RuntimeError(
+            "fresh profile injection failed — "
+            + (" | ".join(attempts)[:600] or "no writable saves folder")
+        )
 
     def verifyWipe(self, serial: str) -> dict:
         """Prove the wipe: none of the save/login files may still exist.

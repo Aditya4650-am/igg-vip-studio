@@ -57,6 +57,7 @@ type NativeBridge = {
   wipeFiles?: (serial: string, paths: string[]) => Promise<{ ok: boolean; wiped?: string[]; error?: string }>;
   pmClear?: (serial: string) => Promise<{ ok: boolean; package?: string; serial?: string; sdcard?: string }>;
   reinstallTownship?: (serial: string) => Promise<{ ok: boolean; package?: string; apkCount?: number }>;
+  injectFreshProfile?: (serial: string) => Promise<{ ok: boolean; package?: string; dir?: string; verified?: Record<string, number> }>;
   listStateFiles?: (serial: string) => Promise<{ ok: boolean; package: string; files: string[] }>;
   readFile?: (serial: string, path: string) => Promise<{ b64: string; file: string; size?: number }>;
   writeFile?: (serial: string, path: string, b64: string) => Promise<{ ok: boolean; file?: string }>;
@@ -1250,6 +1251,7 @@ export function StudioApp() {
   const [freshCheck, setFreshCheck] = useState<{ newCityId: string; androidReset: boolean; gsfReset: boolean } | null>(null);
   const [freshIds, setFreshIds] = useState<{ androidFrom: string; androidTo: string; gsfRenewed: boolean } | null>(null);
   const [freshLog, setFreshLog] = useState<string[]>([]);
+  const [freshInjectNote, setFreshInjectNote] = useState("");
   const [clientVer, setClientVer] = useState("");
 
   useEffect(() => {
@@ -2143,6 +2145,36 @@ export function StudioApp() {
       toast.success(`${tr("freshReinstalled")} (${r.package}, ${r.apkCount ?? 1} apk)`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tr("nothing"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // TS-Lite-style Level 1: hand the game a complete ready-made city instead
+  // of wiping. A wipe leaves no identity, so Playrix re-links the old city
+  // from the device fingerprint; injecting the pair means that request never
+  // happens. Requires an existing backup — the pair replaces the save.
+  const onFreshInject = async () => {
+    if (!token || !session || !device) {
+      toast.error(tr("actionFailed"));
+      return;
+    }
+    const native = nativeBridge();
+    if (!native?.injectFreshProfile) {
+      toast.error(tr("freshNoBridge"));
+      return;
+    }
+    setBusy(true);
+    try {
+      setFreshInjectNote(`⏳ ${tr("freshInjecting")}`);
+      const r = await native.injectFreshProfile(device);
+      if (!r.ok) throw new Error(tr("nothing"));
+      setFreshInjectNote(`✅ ${tr("freshInjected")}: ${r.dir ?? ""} · mGameInfo ${r.verified?.["mGameInfo.xml"] ?? "?"}B · LocalInfo ${r.verified?.["LocalInfo.xml"] ?? "?"}B`);
+      toast.success(tr("freshInjected"));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : tr("nothing");
+      setFreshInjectNote(`❌ ${msg}`);
+      toast.error(msg);
     } finally {
       setBusy(false);
     }
@@ -3215,6 +3247,29 @@ export function StudioApp() {
                   <div className="space-y-3">
                     <p className="rounded-md bg-input px-3 py-2 text-sm text-amber">{tr("freshHint")}</p>
                     <p className="rounded-md bg-input px-3 py-2 text-xs text-muted">⚠️ {tr("freshCloudWarn")}</p>
+                    <section className="panel">
+                      <h3 className="mb-1 text-xs font-bold tracking-wider uppercase text-cyan">🏙️ {tr("freshInject")}</h3>
+                      <p className="mb-3 text-xs text-muted">{tr("freshInjectD")}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {!freshBackup && (
+                          <Button size="sm" variant="ghost" disabled={busy} onClick={onFreshBackup}>
+                            {tr("freshBackupBtn")}
+                          </Button>
+                        )}
+                        <Button size="sm" variant="primary" disabled={!freshBackup || busy} onClick={onFreshInject}>
+                          {tr("freshInjectBtn")}
+                        </Button>
+                        {freshBackup && (
+                          <span className="text-xs text-muted">✅ {tr("freshBackedUp")}</span>
+                        )}
+                      </div>
+                      {!freshBackup && (
+                        <p className="mt-2 text-xs text-muted">{tr("freshInjectNeedBackup")}</p>
+                      )}
+                      {freshInjectNote && (
+                        <p className="mt-2 break-all text-xs text-muted">{freshInjectNote}</p>
+                      )}
+                    </section>
                     <section className="panel">
                       <h3 className="mb-1 text-xs font-bold tracking-wider uppercase text-primary">🚀 {tr("freshOneClick")}</h3>
                       <p className="mb-3 text-xs text-muted">{tr("freshOneClickD")}</p>

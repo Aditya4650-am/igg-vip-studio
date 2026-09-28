@@ -290,6 +290,76 @@ class FreshStartBridge(unittest.TestCase):
             return (1, b"", b"unexpected: " + cmd.encode()[:40])
         return run
 
+    # --- bundled fresh-city profile (TS-Lite-style injection) ---------------
+
+    def test_bundled_profile_files_exist_and_are_complete(self):
+        d = c.NativeBridge()._freshProfileDir()
+        local = (d / c.FRESH_LOCAL_PROFILE).read_bytes()
+        save = (d / c.FRESH_SAVE_PROFILE).read_bytes()
+        self.assertEqual(len(local), 4675)
+        self.assertEqual(len(save), 300008)
+        # The save is the game's own container, not plain XML.
+        self.assertFalse(save.lstrip().startswith(b"<"))
+
+    def test_missing_profile_directory_is_reported_not_hidden(self):
+        saved = c.FRESH_PROFILE_DIR
+        c.FRESH_PROFILE_DIR = "fresh_profile_does_not_exist"
+        try:
+            with self.assertRaises(RuntimeError):
+                c.NativeBridge()._freshProfileDir()
+        finally:
+            c.FRESH_PROFILE_DIR = saved
+
+    def _inject_shell(self, overrides=None):
+        mapping = {
+            "pm path": (0, b"package:/data/app/p/base.apk\n", b""),
+            "am force-stop": (0, b"", b""),
+            "find ": (
+                0, b"/data/user/0/com.playrix.township/saves/mGameInfo.xml\n", b""
+            ),
+            "push": (0, b"", b""),
+            "mkdir -p": (0, b"", b""),
+            'wc -c < "/data/user/0/com.playrix.township/saves/mGameInfo.xml"': (
+                0, b"300008\n", b""
+            ),
+            'wc -c < "/data/user/0/com.playrix.township/saves/LocalInfo.xml"': (
+                0, b"4675\n", b""
+            ),
+        }
+        if overrides:
+            mapping.update(overrides)
+        return self._shell(mapping)
+
+    def test_injects_and_verifies_both_profile_files(self):
+        c._run_adb = self._inject_shell()  # type: ignore[assignment]
+        r = c.NativeBridge().injectFreshProfile("emulator-5554")
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["package"], "com.playrix.township")
+        self.assertEqual(r["dir"], "/data/user/0/com.playrix.township/saves")
+        self.assertEqual(r["verified"]["mGameInfo.xml"], 300008)
+        self.assertEqual(r["verified"]["LocalInfo.xml"], 4675)
+
+    def test_wrong_copy_size_is_an_error_never_a_success(self):
+        # A truncated copy must not be reported as a working fresh start —
+        # that silent-success pattern is exactly what broke the wipe flow.
+        c._run_adb = self._inject_shell({
+            'wc -c < "/data/user/0/com.playrix.township/saves/mGameInfo.xml"': (
+                0, b"1234\n", b""
+            ),
+        })  # type: ignore[assignment]
+        with self.assertRaises(RuntimeError) as ctx:
+            c.NativeBridge().injectFreshProfile("emulator-5554")
+        self.assertIn("verification mismatch", str(ctx.exception))
+
+    def test_root_denied_is_reported_with_the_reason(self):
+        c._run_adb = self._inject_shell({
+            "mkdir -p": (1, b"", b"Permission denied"),
+        })  # type: ignore[assignment]
+        with self.assertRaises(RuntimeError) as ctx:
+            c.NativeBridge().injectFreshProfile("emulator-5554")
+        self.assertIn("injection failed", str(ctx.exception))
+        self.assertIn("Permission denied", str(ctx.exception))
+
     def test_lists_state_files_for_the_installed_package(self):
         c._run_adb = self._shell({  # type: ignore[assignment]
             "pm path": (0, b"package:/data/app/pkg/base.apk\n", b""),

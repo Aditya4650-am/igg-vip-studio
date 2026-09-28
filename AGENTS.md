@@ -194,6 +194,37 @@ Guard rails: `studio-pipeline.test.ts` asserts every shipped file maps to its ow
 path, that the trailing avatars get unique non-star emoji, and that out-of-range
 numbers resolve to `null`.
 
+## New Account: wipe vs injection
+
+`pm clear` + file wipes cannot produce a new city on their own. Once the device
+has **no** save at all, the game asks Playrix "which city belongs to this
+device?" and the server re-links the same old city from its device fingerprint —
+the wipe verifies as empty and the old city still returns. A wipe is therefore
+only preparation, never the thing that creates a Level-1 city.
+
+`injectFreshProfile()` in `igg_client.py` does what TS Lite does: force-stop the
+game, root-copy a complete ready-made pair — `fresh_profile/localinfo.profile`
+(LocalInfo container) + `fresh_profile/mgameinfo.profile` (mGameInfo container,
+300008 B) — into the saves folder (`cp -af`, `chmod 777`, `restorecon -vR`), then
+byte-verify both with `wc -c` before reporting anything. The game loads the
+provided city at launch and never issues the "which city is mine" request, so
+the old city cannot come back. The pair was extracted from the same asset TS
+Lite ships (`assets/images.dat`, AES-CBC key `T$L1t3_S3cur3_K3`) and is bundled
+through `igg_client.spec` `datas`; `_freshProfileDir()` finds it under
+`sys._MEIPASS` when frozen.
+
+- Both names are written (`LocalInfo.xml` and `mLocalInfo.xml`) and the
+  discovered saves dir is targeted first — layouts differ between builds, and a
+  wrong filename means the injection silently does nothing.
+- Root is required; without it every candidate directory fails with its own
+  reason in the error, never a fake success. A size mismatch raises
+  `verification mismatch` instead of passing.
+- The UI keeps the Inject button disabled until Backup has run: the pair
+  overwrites the current save.
+
+Guard rails: `test_igg_client.py` pins the bundled files at 4675 / 300008 bytes
+and asserts a truncated copy and a root denial both raise.
+
 ## Windows client
 
 Built by `.github/workflows/build-client.yml` on a `windows-latest` runner,

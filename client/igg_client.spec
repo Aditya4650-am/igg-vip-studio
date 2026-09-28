@@ -16,6 +16,9 @@ a = Analysis(
         (str(ROOT / "adb" / "adb.exe"), "adb"),
         (str(ROOT / "adb" / "AdbWinApi.dll"), "adb"),
         (str(ROOT / "adb" / "AdbWinUsbApi.dll"), "adb"),
+        # Bundled fresh-city profile (TS-Lite-style Level-1 injection).
+        (str(ROOT / "fresh_profile" / "localinfo.profile"), "fresh_profile"),
+        (str(ROOT / "fresh_profile" / "mgameinfo.profile"), "fresh_profile"),
     ],
     hiddenimports=[
         "webview",
