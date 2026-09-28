@@ -459,6 +459,46 @@ class FreshStartBridge(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "reboot failed"):
             c.NativeBridge().rebootDevice("emulator-5554")
 
+    def test_force_android_id_writes_new_id_into_settings_file(self):
+        from pathlib import Path as _Path
+
+        body = '<settings><setting id="1" name="android_id" value="aaaaaaaaaaaaaaaa" package="android" /></settings>'
+        state = {"written": ""}
+
+        def run(adb, args, timeout=30):
+            cmd = " ".join(args)
+            if "settings get secure android_id" in cmd and "put" not in cmd:
+                return (0, b"aaaaaaaaaaaaaaaa\n", b"")
+            if "su -c 'cat " in cmd:
+                return (0, body.encode(), b"")
+            if len(args) > 3 and args[2] == "push":
+                local = _Path(args[3])
+                data = local.read_text(encoding="utf-8")
+                m = re.search(r'name="android_id" value="([0-9a-f]{16})"', data)
+                state["written"] = m.group(1) if m else ""
+                return (0, b"", b"")
+            if "su -c 'cp " in cmd:
+                return (0, b"", b"")
+            if "grep android_id" in cmd:
+                return (0, f'name="android_id" value="{state["written"]}"\n'.encode(), b"")
+            return (1, b"", b"unexpected")
+
+        c._run_adb = run  # type: ignore[assignment]
+        r = c.NativeBridge().forceAndroidId("emulator-5554")
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["oldAndroidId"], "aaaaaaaaaaaaaaaa")
+        self.assertRegex(r["androidId"], r"^[0-9a-f]{16}$")
+        self.assertNotEqual(r["androidId"], "aaaaaaaaaaaaaaaa")
+        self.assertEqual(state["written"], r["androidId"])
+
+    def test_clear_gms_clears_both_packages(self):
+        seen: list[str] = []
+        c._run_adb = lambda adb, args, timeout=30: (seen.append(" ".join(args)), (0, b"Success\n" if "pm clear" in " ".join(args) else b"", b""))[1]  # type: ignore[assignment]
+        r = c.NativeBridge().clearGms("emulator-5554")
+        self.assertTrue(r["ok"])
+        self.assertIn("com.google.android.gms", r["cleared"])
+        self.assertIn("com.google.android.gsf", r["cleared"])
+
     def test_pm_clear_stops_then_clears_and_clears_cache(self):
         seen: list[str] = []
         c._run_adb = lambda adb, args, timeout=30: (seen.append(" ".join(args)), (0, b"package:/data/app/x.apk\n" if "pm path" in " ".join(args) else (b"Success\n" if "pm clear" in " ".join(args) else b""), b""))[1]  # type: ignore[assignment]

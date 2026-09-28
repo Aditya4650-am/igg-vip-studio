@@ -45,7 +45,7 @@ if sys.stderr is None:
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
-APP_VERSION = "1.1.11"
+APP_VERSION = "1.1.12"
 
 # Where the app UI comes from. Override with env IGG_VIP_URL or
 # %APPDATA%\IGG-VIP-Studio\server.txt
@@ -1014,6 +1014,98 @@ class NativeBridge:
         ):
             return {"ok": True, "rebooting": True}
         raise RuntimeError("reboot failed: " + (combined or f"exit {code}"))
+
+    # Fresh-start device identity, part 3: direct file edit with root.
+    # Some emulator builds silently ignore `settings put` (put "succeeds",
+    # re-read shows the old id). With root confirmed, editing
+    # settings_secure.xml itself cannot be ignored — but the provider only
+    # picks it up on boot, so callers must rebootDevice right after.
+    _SECURE_XML_CANDIDATES = (
+        "/data/system/users/0/settings_secure.xml",
+        "/data/system/users/10/settings_secure.xml",
+    )
+
+    def forceAndroidId(self, serial: str) -> dict:
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        try:
+            old = self.readAndroidId(serial).get("androidId", "")
+        except RuntimeError:
+            old = ""
+        for _ in range(5):
+            new_id = secrets.token_hex(8)
+            if new_id != old:
+                break
+        target: str | None = None
+        original = ""
+        for remote in self._SECURE_XML_CANDIDATES:
+            code, out, _ = _run_adb(
+                adb, ["-s", serial, "shell", f"su -c 'cat \"{remote}\"'"], timeout=15
+            )
+            if code == 0 and "android_id" in out.decode("utf-8", "replace"):
+                target = remote
+                original = out.decode("utf-8", "replace")
+                break
+        if not target:
+            raise RuntimeError("settings_secure.xml not readable (need root)")
+        updated, n = re.subn(
+            r'(name="android_id"\s+value=")[0-9a-fA-F]*(")',
+            r"\g<1>" + new_id + r"\g<2>",
+            original,
+        )
+        if n == 0:
+            updated, n = re.subn(
+                r'(value=")[0-9a-fA-F]*(")(\s*/?>[^<]*name="android_id"|name="android_id")',
+                r"\g<1>" + new_id + r"\g<2>\g<3>",
+                original,
+            )
+        if n == 0:
+            raise RuntimeError("android_id entry not found in settings_secure.xml")
+        with tempfile.TemporaryDirectory() as td:
+            local = Path(td) / "settings_secure.xml"
+            local.write_text(updated, encoding="utf-8")
+            tmp = "/data/local/tmp/igg_secure.xml"
+            code, _, err = _run_adb(adb, ["-s", serial, "push", str(local), tmp], timeout=30)
+            if code != 0:
+                raise RuntimeError("adb push failed: " + err.decode("utf-8", "replace").strip())
+            shell = f"su -c 'cp \"{tmp}\" \"{target}\" && chmod 600 \"{target}\"'"
+            code2, out2, err2 = _run_adb(adb, ["-s", serial, "shell", shell], timeout=30)
+            combined = (out2 + err2).decode("utf-8", "replace").strip()
+            if code2 != 0 or re.search(r"permission denied|failed|error:", combined, re.I):
+                raise RuntimeError("could not write settings_secure.xml: " + (combined or "su failed"))
+            code3, out3, _ = _run_adb(
+                adb, ["-s", serial, "shell", f"su -c 'grep android_id \"{target}\"'"], timeout=15
+            )
+            if new_id not in out3.decode("utf-8", "replace"):
+                raise RuntimeError("settings file did not take the new id")
+        return {"ok": True, "oldAndroidId": old, "androidId": new_id, "needsReboot": True}
+
+    # Fresh-start device identity, part 4: evict Google service state.
+    # GMS holds the advertising id, checkin identity and signed-in accounts;
+    # clearing its packages signs the emulator out and forces fresh GSF/ad
+    # ids on next sync. Safe on a Township burner emulator; Play Store simply
+    # asks to sign in again.
+    def clearGms(self, serial: str) -> dict:
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        cleared: list[str] = []
+        errs: list[str] = []
+        for pkg in ("com.google.android.gms", "com.google.android.gsf"):
+            _run_adb(adb, ["-s", serial, "shell", "am", "force-stop", pkg], timeout=10)
+            code, out, err = _run_adb(adb, ["-s", serial, "shell", "pm", "clear", pkg], timeout=60)
+            combined = (out + err).decode("utf-8", "replace").strip()
+            if code == 0 and "success" in combined.lower():
+                cleared.append(pkg)
+            else:
+                errs.append(f"{pkg}: " + (combined or f"exit {code}"))
+        if not cleared:
+            return {"ok": False, "cleared": [], "error": " | ".join(errs) or "GMS packages not found"}
+        out_dict: dict = {"ok": True, "cleared": cleared}
+        if errs:
+            out_dict["error"] = " | ".join(errs)
+        return out_dict
 
     # Fresh-start ("New Account") one-shot wipe: force-stop + `pm clear`.
     # PackageManager deletes the app's ENTIRE internal tree (saves, prefs,

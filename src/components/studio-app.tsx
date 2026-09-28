@@ -63,8 +63,10 @@ type NativeBridge = {
   resetAndroidId?: (serial: string) => Promise<{ ok: boolean; androidId: string; oldAndroidId?: string }>;
   readGsfId?: (serial: string) => Promise<{ ok: boolean; gsfId?: string; reason?: string }>;
   resetGsfId?: (serial: string) => Promise<{ ok: boolean; deleted?: string[]; error?: string }>;
+  forceAndroidId?: (serial: string) => Promise<{ ok: boolean; androidId: string; oldAndroidId?: string; needsReboot?: boolean }>;
+  clearGms?: (serial: string) => Promise<{ ok: boolean; cleared?: string[]; error?: string }>;
   nukeSecureSettings?: (serial: string) => Promise<{ ok: boolean; moved?: string[]; error?: string }>;
-  rebootDevice?: (serial: string) => Promise<{ ok: boolean }>;
+  rebootDevice?: (serial: string) => Promise<{ ok: boolean; rebooting?: boolean }>;
   exportFile?: (name: string, b64: string) => Promise<{ ok: boolean; path: string; size?: number }>;
 };
 
@@ -1243,6 +1245,7 @@ export function StudioApp() {
   const [freshBackup, setFreshBackup] = useState<{ oldCityId: string; oldLevel: number; extraCount: number; skippedCount: number; androidId: string } | null>(null);
   const [freshCheck, setFreshCheck] = useState<{ newCityId: string; androidReset: boolean; gsfReset: boolean } | null>(null);
   const [freshIds, setFreshIds] = useState<{ androidFrom: string; androidTo: string; gsfRenewed: boolean } | null>(null);
+  const [freshLog, setFreshLog] = useState<string[]>([]);
   const [freshConfirm, setFreshConfirm] = useState("");
   const [pendingDecorMaxAll, setPendingDecorMaxAll] = useState(false);
   const upgradeFactorySel = useSetMap();
@@ -1943,22 +1946,46 @@ export function StudioApp() {
     }
   };
 
-  const onFreshWipeCore = async (): Promise<boolean> => {
+  const onFreshWipeCore = async (): Promise<"wiped" | "rebooting"> => {
     if (!token || !session || !device) {
       toast.error(tr("actionFailed"));
-      return false;
+      throw new Error(tr("actionFailed"));
     }
     const native = nativeBridge();
     if (!native?.pmClear || !native?.resetAndroidId) {
       toast.error(tr("freshNoBridge"));
-      return false;
+      throw new Error(tr("freshNoBridge"));
     }
+    const say = (line: string) => setFreshLog((prev) => [...prev.slice(-7), line]);
     // One atomic OS-level wipe (force-stop + pm clear + external storage),
     // then fresh device ids. No per-file plan to go stale.
     const cleared = await native.pmClear(device);
     if (!cleared.ok) throw new Error(tr("nothing"));
-    const reset = await native.resetAndroidId(device);
-    if (!reset.ok) throw new Error(tr("nothing"));
+    say(`✅ ${tr("freshWiped")}`);
+    let androidFrom = "";
+    let androidTo = "";
+    try {
+      const reset = await native.resetAndroidId(device);
+      if (!reset.ok) throw new Error(tr("nothing"));
+      androidFrom = (reset.oldAndroidId ?? "").slice(0, 8);
+      androidTo = (reset.androidId ?? "").slice(0, 8);
+      say(`✅ 🆔 ${androidFrom}…→${androidTo}…`);
+    } catch {
+      // settings provider ignores writes on hardened emulators — with root
+      // confirmed, edit the settings file itself, then reboot is mandatory
+      // for the OS to pick it up.
+      if (!native.forceAndroidId || !native.rebootDevice) throw new Error(tr("freshNoBridge"));
+      say(`⏳ ${tr("freshFileId")}`);
+      const forced = await native.forceAndroidId(device);
+      if (!forced.ok) throw new Error(tr("nothing"));
+      androidFrom = (forced.oldAndroidId ?? "").slice(0, 8);
+      androidTo = (forced.androidId ?? "").slice(0, 8);
+      await native.rebootDevice(device);
+      setFreshIds({ androidFrom, androidTo, gsfRenewed: false });
+      setFreshPhase("wiped");
+      setFreshConfirm("");
+      return "rebooting";
+    }
     let gsfRenewed = false;
     try {
       const gsf = await native.resetGsfId?.(device);
@@ -1966,14 +1993,17 @@ export function StudioApp() {
     } catch {
       gsfRenewed = false;
     }
-    setFreshIds({
-      androidFrom: (reset.oldAndroidId ?? "").slice(0, 8),
-      androidTo: (reset.androidId ?? "").slice(0, 8),
-      gsfRenewed,
-    });
+    say(gsfRenewed ? `✅ GSF ✓` : `… GSF ${tr("freshGsfKept")}`);
+    try {
+      const gms = await native.clearGms?.(device);
+      if (gms?.ok) say(`✅ ${tr("freshGmsOut")}`);
+    } catch {
+      /* unlink best-effort only */
+    }
+    setFreshIds({ androidFrom, androidTo, gsfRenewed });
     setFreshPhase("wiped");
     setFreshConfirm("");
-    return true;
+    return "wiped";
   };
 
   const onFreshWipe = async () => {
@@ -1987,7 +2017,8 @@ export function StudioApp() {
     }
     setBusy(true);
     try {
-      if (await onFreshWipeCore()) toast.success(tr("freshWiped"));
+      const done = await onFreshWipeCore();
+      toast.success(tr(done === "rebooting" ? "freshRebooting" : "freshWiped"));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tr("nothing"));
     } finally {
@@ -2009,8 +2040,10 @@ export function StudioApp() {
     }
     setBusy(true);
     try {
+      setFreshLog([]);
       if (!(await onFreshBackupCore())) return;
-      if (await onFreshWipeCore()) toast.success(tr("freshWiped"));
+      const done = await onFreshWipeCore();
+      toast.success(tr(done === "rebooting" ? "freshRebooting" : "freshWiped"));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tr("nothing"));
     } finally {
@@ -3128,37 +3161,18 @@ export function StudioApp() {
                           {tr("freshOneClickBtn")}
                         </Button>
                       </div>
-                    </section>
-                    <section className="panel">
-                      <h3 className="mb-1 text-xs font-bold tracking-wider uppercase text-primary">{tr("freshStep1")}</h3>
-                      <p className="mb-3 text-xs text-muted">{tr("freshStep1d")}</p>
-                      <Button size="sm" variant="primary" onClick={onFreshBackup}>
-                        {tr("freshBackupBtn")}
-                      </Button>
+                      {freshLog.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          {freshLog.map((line, i) => (
+                            <p key={i} className="text-xs text-muted">{line}</p>
+                          ))}
+                        </div>
+                      )}
                       {freshBackup && (
                         <p className="mt-2 text-xs text-muted">
                           ✅ {tr("freshBackedUp")}: {freshBackup.oldCityId.slice(0, 12)}… · Lv{freshBackup.oldLevel} · {freshBackup.extraCount} {tr("freshExtra")}{freshBackup.skippedCount > 0 ? ` · ⏭️${freshBackup.skippedCount}` : ""}
                         </p>
                       )}
-                    </section>
-                    <section className="panel">
-                      <h3 className="mb-1 text-xs font-bold tracking-wider uppercase text-primary">{tr("freshStep2")}</h3>
-                      <p className="mb-3 text-xs text-muted">{tr("freshStep2d")}</p>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <input
-                          className="field field-qty"
-                          placeholder={tr("freshConfirmPh")}
-                          aria-label={tr("freshConfirmPh")}
-                          value={freshConfirm}
-                          onChange={(e) => setFreshConfirm(e.target.value)}
-                        />
-                        <Button size="sm" variant="primary" disabled={freshPhase === "idle"} onClick={onFreshWipe}>
-                          {tr("freshWipeBtn")}
-                        </Button>
-                        <Button size="sm" variant="ghost" disabled={freshPhase === "idle"} onClick={onFreshForce}>
-                          {tr("freshForceBtn")}
-                        </Button>
-                      </div>
                       {freshPhase === "wiped" && (
                         <p className="mt-2 text-xs text-muted">
                           ✅ {tr("freshWiped")}
@@ -3183,6 +3197,20 @@ export function StudioApp() {
                         </p>
                       )}
                     </section>
+                    <details className="panel">
+                      <summary className="cursor-pointer text-xs font-bold tracking-wider uppercase text-muted">{tr("freshAdvanced")}</summary>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <Button size="sm" variant="ghost" onClick={onFreshBackup}>
+                          {tr("freshBackupBtn")}
+                        </Button>
+                        <Button size="sm" variant="ghost" disabled={freshPhase === "idle"} onClick={onFreshWipe}>
+                          {tr("freshWipeBtn")}
+                        </Button>
+                        <Button size="sm" variant="ghost" disabled={freshPhase === "idle"} onClick={onFreshForce}>
+                          {tr("freshForceBtn")}
+                        </Button>
+                      </div>
+                    </details>
                     <p className="rounded-md bg-input px-3 py-2 text-xs text-muted">ℹ️ {tr("freshLimits")}</p>
                   </div>
                 )}
