@@ -548,6 +548,54 @@ class FreshStartBridge(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "did not come back"):
             c.NativeBridge().waitForDevice("emulator-5554")
 
+    def test_verify_wipe_passes_when_nothing_remains(self):
+        def run(adb, args, timeout=30):
+            cmd = " ".join(args)
+            if "pm path com.playrix.township " in cmd or cmd.endswith("pm path com.playrix.township"):
+                return (1, b"", b"not installed")
+            if "pm path" in cmd:
+                return (0, b"package:/data/app/x.apk\n", b"")
+            if "su -c 'ls " in cmd:
+                return (1, b"", b"No such file")
+            return (0, b"", b"")
+
+        c._run_adb = run  # type: ignore[assignment]
+        r = c.NativeBridge().verifyWipe("emulator-5554")
+        self.assertTrue(r["ok"])
+        self.assertGreater(r["checked"], 0)
+
+    def test_verify_wipe_names_surviving_files(self):
+        def run(adb, args, timeout=30):
+            cmd = " ".join(args)
+            if "pm path" in cmd:
+                return (0, b"package:/data/app/x.apk\n", b"")
+            if "su -c 'ls " in cmd and "mGameInfo.xml" in cmd and "/saves/" in cmd:
+                return (0, b"/data/data/com.playrix.township.vn/saves/mGameInfo.xml\n", b"")
+            if "su -c 'ls " in cmd:
+                return (1, b"", b"No such file")
+            return (0, b"", b"")
+
+        c._run_adb = run  # type: ignore[assignment]
+        r = c.NativeBridge().verifyWipe("emulator-5554")
+        self.assertFalse(r["ok"])
+        self.assertTrue(any("mGameInfo.xml" in p for p in r["remaining"]))
+
+    def test_device_fingerprint_reads_build_props(self):
+        def run(adb, args, timeout=30):
+            cmd = " ".join(args)
+            if cmd.endswith("getprop ro.product.model"):
+                return (0, b"MEmu\n", b"")
+            if cmd.endswith("getprop ro.build.fingerprint"):
+                return (0, b"generic/fake\n", b"")
+            if "getprop" in cmd:
+                return (1, b"", b"unknown prop")
+            return (1, b"", b"unexpected")
+
+        c._run_adb = run  # type: ignore[assignment]
+        r = c.NativeBridge().deviceFingerprint("emulator-5554")
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["props"].get("ro.product.model"), "MEmu")
+
     def test_pm_clear_stops_then_clears_and_clears_cache(self):
         seen: list[str] = []
         c._run_adb = lambda adb, args, timeout=30: (seen.append(" ".join(args)), (0, b"package:/data/app/x.apk\n" if "pm path" in " ".join(args) else (b"Success\n" if "pm clear" in " ".join(args) else b""), b""))[1]  # type: ignore[assignment]

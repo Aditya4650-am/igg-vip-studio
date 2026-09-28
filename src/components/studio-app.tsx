@@ -64,7 +64,9 @@ type NativeBridge = {
   readGsfId?: (serial: string) => Promise<{ ok: boolean; gsfId?: string; reason?: string }>;
   resetGsfId?: (serial: string) => Promise<{ ok: boolean; deleted?: string[]; error?: string }>;
   forceAndroidId?: (serial: string) => Promise<{ ok: boolean; androidId: string; oldAndroidId?: string; needsReboot?: boolean }>;
-  clearGms?: (serial: string) => Promise<{ ok: boolean; cleared?: string[]; error?: string }>;
+  clearGms?: (serial: string) => Promise<{ ok: boolean; cleared?: string[]; skipped?: string[]; error?: string }>;
+  verifyWipe?: (serial: string) => Promise<{ ok: boolean; remaining?: string[]; checked?: number }>;
+  deviceFingerprint?: (serial: string) => Promise<{ ok: boolean; props?: Record<string, string> }>;
   nukeSecureSettings?: (serial: string) => Promise<{ ok: boolean; moved?: string[]; error?: string }>;
   rebootDevice?: (serial: string) => Promise<{ ok: boolean; rebooting?: boolean }>;
   waitForDevice?: (serial: string, timeout?: number) => Promise<{ ok: boolean }>;
@@ -1963,6 +1965,16 @@ export function StudioApp() {
     const cleared = await native.pmClear(device);
     if (!cleared.ok) throw new Error(tr("nothing"));
     say(`✅ ${tr("freshWiped")}`);
+    try {
+      const proof = await native.verifyWipe?.(device);
+      if (proof && !proof.ok) {
+        throw new Error(`${tr("freshWipeProved")} ✗: ${(proof.remaining ?? []).join(", ")}`);
+      }
+      if (proof) say(`✅ ${tr("freshWipeProved")}`);
+    } catch (e) {
+      if (e instanceof Error && e.message.includes("✗")) throw e;
+      /* old EXE without verifyWipe: pm clear Success stands */
+    }
     let androidFrom = "";
     let androidTo = "";
     let needReboot = false;
@@ -1994,8 +2006,17 @@ export function StudioApp() {
     try {
       const gms = await native.clearGms?.(device);
       if (gms?.ok) say(`✅ ${tr("freshGmsOut")}`);
+      else if (gms && !gms.ok) say(`… GMS: ${gms.error ?? gms.skipped?.join(", ") ?? tr("nothing")}`);
     } catch {
       /* unlink best-effort only */
+    }
+    try {
+      const fp = await native.deviceFingerprint?.(device);
+      const model = fp?.props?.["ro.product.model"];
+      const rel = fp?.props?.["ro.build.version.release"];
+      if (model) say(`📱 ${model}${rel ? ` · Android ${rel}` : ""} ${tr("freshFpFixed")}`);
+    } catch {
+      /* display-only */
     }
     setFreshIds({ androidFrom, androidTo, gsfRenewed });
     setFreshPhase("wiped");

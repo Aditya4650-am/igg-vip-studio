@@ -45,7 +45,7 @@ if sys.stderr is None:
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
-APP_VERSION = "1.1.14"
+APP_VERSION = "1.1.15"
 
 # Where the app UI comes from. Override with env IGG_VIP_URL or
 # %APPDATA%\IGG-VIP-Studio\server.txt
@@ -1142,6 +1142,7 @@ class NativeBridge:
         if not adb:
             raise RuntimeError("adb not found - connect an emulator first")
         cleared: list[str] = []
+        skipped: list[str] = []
         errs: list[str] = []
         # Play Games signs back in silently and restores cloud saves, so it
         # goes too — otherwise the banned city returns by itself.
@@ -1151,6 +1152,7 @@ class NativeBridge:
             "com.google.android.play.games",
         ):
             if not self._is_pkg_installed(adb, serial, pkg):
+                skipped.append(pkg)
                 continue
             _run_adb(adb, ["-s", serial, "shell", "am", "force-stop", pkg], timeout=10)
             code, out, err = _run_adb(adb, ["-s", serial, "shell", "pm", "clear", pkg], timeout=60)
@@ -1160,8 +1162,8 @@ class NativeBridge:
             else:
                 errs.append(f"{pkg}: " + (combined or f"exit {code}"))
         if not cleared:
-            return {"ok": False, "cleared": [], "error": " | ".join(errs) or "GMS packages not found"}
-        out_dict: dict = {"ok": True, "cleared": cleared}
+            return {"ok": False, "cleared": [], "skipped": skipped, "error": " | ".join(errs) or "GMS packages not found"}
+        out_dict: dict = {"ok": True, "cleared": cleared, "skipped": skipped}
         if errs:
             out_dict["error"] = " | ".join(errs)
         return out_dict
@@ -1212,6 +1214,63 @@ class NativeBridge:
                 out_dict["sdcard"] = " | ".join(sdcard)
             return out_dict
         raise RuntimeError("pm clear failed — " + (" | ".join(errs) or "no package worked"))
+
+    def verifyWipe(self, serial: str) -> dict:
+        """Prove the wipe: none of the save/login files may still exist.
+
+        `pm clear` printing Success is trusted, but this closes the loop —
+        if anything survived, the wipe is reported as incomplete instead of
+        letting a stale city through to Verify.
+        """
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        pkg: str | None = None
+        for cand in self._pkgs_for(serial):
+            if self._is_pkg_installed(adb, serial, cand):
+                pkg = cand
+                break
+        if not pkg:
+            raise RuntimeError("Township package not installed on " + serial)
+        remaining: list[str] = []
+        checked = 0
+        for filename in (SAVE_FILE, SAVE_FILE[:-4] + ".bak", LOCAL_INFO_FILE):
+            for base in (f"/data/data/{pkg}", f"/data/user/0/{pkg}"):
+                for sub in ("saves", "files"):
+                    remote = f"{base}/{sub}/{filename}"
+                    checked += 1
+                    code, out, _ = _run_adb(
+                        adb, ["-s", serial, "shell", f"su -c 'ls \"{remote}\"'"], timeout=15
+                    )
+                    if code == 0 and out.strip():
+                        remaining.append(remote)
+        if remaining:
+            return {"ok": False, "remaining": remaining, "checked": checked}
+        return {"ok": True, "checked": checked}
+
+    _FINGERPRINT_PROPS = (
+        "ro.product.model",
+        "ro.product.manufacturer",
+        "ro.product.brand",
+        "ro.product.device",
+        "ro.build.fingerprint",
+        "ro.build.version.release",
+    )
+
+    def deviceFingerprint(self, serial: str) -> dict:
+        """Read-only hardware profile. No ADB command changes these values —
+        they are pinned by the emulator instance itself. Shown so a MEmu
+        clone (fresh fingerprint) can be told apart from the banned one.
+        """
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        props: dict[str, str] = {}
+        for name in self._FINGERPRINT_PROPS:
+            code, out, _ = _run_adb(adb, ["-s", serial, "shell", "getprop", name], timeout=10)
+            if code == 0 and out.strip():
+                props[name] = out.decode("utf-8", "replace").strip()
+        return {"ok": True, "props": props}
 
     # self-update
     def installUpdate(self, release: dict) -> dict:
