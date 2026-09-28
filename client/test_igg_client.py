@@ -268,6 +268,87 @@ class OriginIp(unittest.TestCase):
             urllib.request.urlopen = real
 
 
+class FreshStartBridge(unittest.TestCase):
+    """New-Account bridge: enumerate state files, read/write them, reset Android ID."""
+
+    def setUp(self):
+        self._adb = c._find_adb
+        self._run = c._run_adb
+        c._find_adb = lambda: "/fake/adb"  # type: ignore[assignment]
+
+    def tearDown(self):
+        c._find_adb = self._adb  # type: ignore[assignment]
+        c._run_adb = self._run  # type: ignore[assignment]
+
+    def _shell(self, mapping):
+        def run(adb, args, timeout=30):
+            cmd = " ".join(args)
+            for key, val in mapping.items():
+                if key in cmd:
+                    return val
+            return (1, b"", b"unexpected: " + cmd.encode()[:40])
+        return run
+
+    def test_lists_state_files_for_the_installed_package(self):
+        c._run_adb = self._shell({  # type: ignore[assignment]
+            "pm path": (0, b"package:/data/app/pkg/base.apk\n", b""),
+            "ls \"/data/data/com.playrix.township/saves\"": (0, b"mGameInfo.xml\n", b""),
+            "ls \"/data/data/com.playrix.township/files\"": (0, b"mLocalInfo.xml\n", b""),
+            "ls \"/data/data/com.playrix.township/shared_prefs\"": (
+                0, b"account.xml\nwebview.db\n", b"",
+            ),
+            "ls \"/data/data/com.playrix.township/databases\"": (1, b"", b"No such file"),
+            "ls \"/data/user/0/": (1, b"", b"No such file"),
+        })
+        r = c.NativeBridge().listStateFiles("emulator-5554")
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["package"], "com.playrix.township")
+        self.assertIn("/data/data/com.playrix.township/saves/mGameInfo.xml", r["files"])
+        self.assertIn("/data/data/com.playrix.township/shared_prefs/account.xml", r["files"])
+
+    def test_read_android_id_accepts_only_hex(self):
+        c._run_adb = self._shell({  # type: ignore[assignment]
+            "android_id": (0, b"abcdef0123456789\n", b""),
+        })
+        r = c.NativeBridge().readAndroidId("emulator-5554")
+        self.assertEqual(r["androidId"], "abcdef0123456789")
+
+    def test_read_android_id_rejects_shell_chatter(self):
+        c._run_adb = self._shell({  # type: ignore[assignment]
+            "android_id": (0, b"error: device offline\n", b""),
+        })
+        with self.assertRaises(RuntimeError):
+            c.NativeBridge().readAndroidId("emulator-5554")
+
+    def test_reset_android_id_verifies_the_change(self):
+        seen: list[str] = []
+        state = {"id": "aaaaaaaaaaaaaaaa"}
+
+        def run(adb, args, timeout=30):
+            cmd = " ".join(args)
+            seen.append(cmd)
+            if "settings put secure android_id" in cmd:
+                state["id"] = cmd.strip().rsplit(" ", 1)[-1]
+                return (0, b"", b"")
+            if "android_id" in cmd:
+                return (0, (state["id"] + "\n").encode(), b"")
+            return (1, b"", b"unexpected")
+
+        c._run_adb = run  # type: ignore[assignment]
+        r = c.NativeBridge().resetAndroidId("emulator-5554")
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["oldAndroidId"], "aaaaaaaaaaaaaaaa")
+        self.assertRegex(r["androidId"], r"^[0-9a-f]{16}$")
+        self.assertNotEqual(r["androidId"], "aaaaaaaaaaaaaaaa")
+
+    def test_write_file_rejects_relative_paths(self):
+        seen: list[list[str]] = []
+        c._run_adb = lambda adb, args, timeout=30: (seen.append(args), (0, b"", b""))[1]  # type: ignore[assignment]
+        with self.assertRaises(RuntimeError):
+            c.NativeBridge().writeFile("emulator-5554", "mGameInfo.xml", "eA==")
+        self.assertEqual(seen, [])
+
+
 class CookieSafety(unittest.TestCase):
     """The proxy only works if the session cookie is host-only.
 

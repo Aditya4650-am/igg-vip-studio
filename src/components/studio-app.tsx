@@ -30,9 +30,13 @@ import {
   verifyLicense,
   attachFriendCity,
   attachLocal,
+  backupFreshStart,
+  wipeFreshStart,
+  verifyFreshStart,
+  restoreFreshStart,
 } from "@/lib/studio-api";
 
-type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "barn" | "museum" | "cards" | "zoo" | "upgrades";
+type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "barn" | "museum" | "cards" | "zoo" | "upgrades" | "newgame";
 type SessionSnap = Awaited<ReturnType<typeof connectLoad>>;
 type Catalogs = Awaited<ReturnType<typeof getCatalogs>>;
 type UnbanMode = "inicial" | "completo" | "novo";
@@ -52,6 +56,11 @@ type NativeBridge = {
   saveKey: (key: string) => Promise<{ ok: boolean }>;
   clearSavedKey: () => Promise<{ ok: boolean }>;
   wipeFiles?: (serial: string, paths: string[]) => Promise<{ ok: boolean; wiped?: string[]; error?: string }>;
+  listStateFiles?: (serial: string) => Promise<{ ok: boolean; package: string; files: string[] }>;
+  readFile?: (serial: string, path: string) => Promise<{ b64: string; file: string; size?: number }>;
+  writeFile?: (serial: string, path: string, b64: string) => Promise<{ ok: boolean; file?: string }>;
+  readAndroidId?: (serial: string) => Promise<{ ok: boolean; androidId: string }>;
+  resetAndroidId?: (serial: string) => Promise<{ ok: boolean; androidId: string; oldAndroidId?: string }>;
   exportFile?: (name: string, b64: string) => Promise<{ ok: boolean; path: string; size?: number }>;
 };
 
@@ -90,7 +99,7 @@ function downloadText(name: string, text: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "barn", "museum", "cards", "zoo", "upgrades"];
+const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "barn", "museum", "cards", "zoo", "upgrades", "newgame"];
 // Premium tab bar: 8 primary slots + a "More" overflow for the rest, so
 // labels never compress or wrap. Derived from TABS — one source of truth.
 const PRIMARY_TABS: Tab[] = TABS.slice(0, 8);
@@ -109,6 +118,7 @@ const TAB_KEY: Record<Tab, keyof Dict> = {
   cards: "tabCards",
   zoo: "tabZoo",
   upgrades: "tabUpgrades",
+  newgame: "tabNewGame",
 };
 const TAB_EMOJI: Record<Tab, string> = {
   data: "📊",
@@ -124,6 +134,7 @@ const TAB_EMOJI: Record<Tab, string> = {
   cards: "🃏",
   zoo: "🐾",
   upgrades: "⚙️",
+  newgame: "🎮",
 };
 
 
@@ -1222,6 +1233,12 @@ export function StudioApp() {
   const [pendingUnban, setPendingUnban] = useState<UnbanMode | null>(null);
   const [pendingDecorFragments, setPendingDecorFragments] = useState(false);
   const [pendingDecorClone, setPendingDecorClone] = useState(false);
+  // Fresh-start ("New Account") phase machine. Fully isolated: nothing from
+  // other tabs' state is read or written here.
+  const [freshPhase, setFreshPhase] = useState<"idle" | "backedup" | "wiped" | "verified">("idle");
+  const [freshBackup, setFreshBackup] = useState<{ oldCityId: string; oldLevel: number; extraCount: number; androidId: string } | null>(null);
+  const [freshCheck, setFreshCheck] = useState<{ newCityId: string; androidReset: boolean } | null>(null);
+  const [freshConfirm, setFreshConfirm] = useState("");
   const [pendingDecorMaxAll, setPendingDecorMaxAll] = useState(false);
   const upgradeFactorySel = useSetMap();
   const upgradeTrainSel = useSetMap();
@@ -1864,6 +1881,146 @@ export function StudioApp() {
     return counts;
   }, [decoratedWithThemes]);
 
+  // Fresh-start ("New Account") flow. Phase machine only: idle -> backed up ->
+  // wiped -> verified. Device file traffic goes through the native bridge;
+  // the server only validates, tracks the backup, and verifies the result.
+  const onFreshBackup = async () => {
+    if (!token || !session || !device) {
+      toast.error(tr("actionFailed"));
+      return;
+    }
+    const native = nativeBridge();
+    if (!native?.listStateFiles || !native?.readFile || !native?.readAndroidId) {
+      toast.error(tr("freshNoBridge"));
+      return;
+    }
+    setBusy(true);
+    try {
+      const city = await native.pull(device);
+      const local = await native.pullLocalInfo(device);
+      const listed = await native.listStateFiles(device);
+      const extraFiles: { path: string; b64: string }[] = [];
+      for (const p of listed.files ?? []) {
+        if (p === city.file || p === local.file) continue;
+        if (extraFiles.length >= 60) break;
+        const f = await native.readFile(device, p);
+        extraFiles.push({ path: p, b64: f.b64 });
+      }
+      let androidId = "";
+      try {
+        androidId = (await native.readAndroidId(device)).androidId ?? "";
+      } catch {
+        androidId = "";
+      }
+      const r = await backupFreshStart({
+        data: {
+          token, sessionId: session.sessionId, serial: device,
+          cityPath: city.file, localPath: local.file,
+          cityB64: city.b64, localB64: local.b64, extraFiles, androidId,
+        },
+      });
+      setFreshBackup({ oldCityId: r.oldCityId, oldLevel: r.oldLevel, extraCount: r.extraCount, androidId });
+      setFreshCheck(null);
+      setFreshConfirm("");
+      setFreshPhase("backedup");
+      toast.success(tr("freshBackedUp"));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : tr("nothing"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onFreshWipe = async () => {
+    if (!token || !session || !device) {
+      toast.error(tr("actionFailed"));
+      return;
+    }
+    if (freshConfirm.trim().toUpperCase() !== "WIPE") {
+      toast.error(tr("freshConfirmPh"));
+      return;
+    }
+    const native = nativeBridge();
+    if (!native?.wipeFiles || !native?.resetAndroidId) {
+      toast.error(tr("freshNoBridge"));
+      return;
+    }
+    setBusy(true);
+    try {
+      const plan = await wipeFreshStart({ data: { token, sessionId: session.sessionId } });
+      const wiped = await native.wipeFiles(device, plan.paths);
+      if (!wiped.ok) throw new Error(wiped.error || tr("nothing"));
+      const reset = await native.resetAndroidId(device);
+      if (!reset.ok) throw new Error(tr("nothing"));
+      setFreshPhase("wiped");
+      setFreshConfirm("");
+      toast.success(tr("freshWiped"));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : tr("nothing"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onFreshVerify = async () => {
+    if (!token || !session || !device) {
+      toast.error(tr("actionFailed"));
+      return;
+    }
+    const native = nativeBridge();
+    if (!native?.readAndroidId) {
+      toast.error(tr("freshNoBridge"));
+      return;
+    }
+    setBusy(true);
+    try {
+      const city = await native.pull(device);
+      let androidId = "";
+      try {
+        androidId = (await native.readAndroidId(device)).androidId ?? "";
+      } catch {
+        androidId = "";
+      }
+      const r = await verifyFreshStart({
+        data: { token, sessionId: session.sessionId, cityB64: city.b64, androidId },
+      });
+      setFreshCheck({ newCityId: r.newCityId, androidReset: r.androidReset });
+      setFreshPhase("verified");
+      toast.success(tr("freshVerified"));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : tr("nothing"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onFreshRestore = async () => {
+    if (!token || !session || !device) {
+      toast.error(tr("actionFailed"));
+      return;
+    }
+    const native = nativeBridge();
+    if (!native?.writeFile) {
+      toast.error(tr("freshNoBridge"));
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await restoreFreshStart({ data: { token, sessionId: session.sessionId } });
+      const b = r.backup as { cityB64: string; localB64: string; extra: Record<string, string>; cityPath: string; localPath: string };
+      await native.writeFile(device, b.cityPath, b.cityB64);
+      await native.writeFile(device, b.localPath, b.localB64);
+      for (const [p, data] of Object.entries(b.extra ?? {})) {
+        await native.writeFile(device, p, data);
+      }
+      toast.success(tr("saved"));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : tr("nothing"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const tabCount: Record<Tab, number> = {
     data: 0,
     profile: profileSel.count,
@@ -1878,6 +2035,7 @@ export function StudioApp() {
     cards: cardsCount,
     zoo: zooSel.count,
     upgrades: upgradeFactorySel.count + upgradeTrainSel.count + upgradeIslandSel.count,
+    newgame: freshPhase === "idle" ? 0 : 1,
   };
 
   const barnTotal = Object.values(barnItems).reduce((n, v) => n + (Number(v) || 0), 0);
@@ -2857,6 +3015,62 @@ export function StudioApp() {
                         ))}
                       </section>
                     </div>
+                  </div>
+                )}
+
+                {tab === "newgame" && (
+                  <div className="space-y-3">
+                    <p className="rounded-md bg-input px-3 py-2 text-sm text-amber">{tr("freshHint")}</p>
+                    <p className="rounded-md bg-input px-3 py-2 text-xs text-muted">⚠️ {tr("freshCloudWarn")}</p>
+                    <section className="panel">
+                      <h3 className="mb-1 text-xs font-bold tracking-wider uppercase text-primary">{tr("freshStep1")}</h3>
+                      <p className="mb-3 text-xs text-muted">{tr("freshStep1d")}</p>
+                      <Button size="sm" variant="primary" onClick={onFreshBackup}>
+                        {tr("freshBackupBtn")}
+                      </Button>
+                      {freshBackup && (
+                        <p className="mt-2 text-xs text-muted">
+                          ✅ {tr("freshBackedUp")}: {freshBackup.oldCityId.slice(0, 12)}… · Lv{freshBackup.oldLevel} · {freshBackup.extraCount} {tr("freshExtra")}
+                        </p>
+                      )}
+                    </section>
+                    <section className="panel">
+                      <h3 className="mb-1 text-xs font-bold tracking-wider uppercase text-primary">{tr("freshStep2")}</h3>
+                      <p className="mb-3 text-xs text-muted">{tr("freshStep2d")}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          className="field field-qty"
+                          placeholder={tr("freshConfirmPh")}
+                          aria-label={tr("freshConfirmPh")}
+                          value={freshConfirm}
+                          onChange={(e) => setFreshConfirm(e.target.value)}
+                        />
+                        <Button size="sm" variant="primary" disabled={freshPhase === "idle"} onClick={onFreshWipe}>
+                          {tr("freshWipeBtn")}
+                        </Button>
+                      </div>
+                      {freshPhase === "wiped" && (
+                        <p className="mt-2 text-xs text-muted">✅ {tr("freshWiped")}</p>
+                      )}
+                    </section>
+                    <section className="panel">
+                      <h3 className="mb-1 text-xs font-bold tracking-wider uppercase text-primary">{tr("freshStep3")}</h3>
+                      <p className="mb-3 text-xs text-muted">{tr("freshStep3d")}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button size="sm" variant="primary" disabled={freshPhase !== "wiped" && freshPhase !== "verified"} onClick={onFreshVerify}>
+                          {tr("freshVerifyBtn")}
+                        </Button>
+                        <Button size="sm" variant="ghost" disabled={!freshBackup} onClick={onFreshRestore}>
+                          {tr("freshRestoreBtn")}
+                        </Button>
+                      </div>
+                      {freshCheck && (
+                        <p className="mt-2 text-xs text-muted">
+                          ✅ {tr("freshVerified")}: {freshCheck.newCityId.slice(0, 12)}…{freshCheck.androidReset ? " · 🆔✓" : ""}
+                        </p>
+                      )}
+                    </section>
+                    <p className="rounded-md bg-input px-3 py-2 text-xs text-muted">ℹ️ {tr("freshLimits")}</p>
                   </div>
                 )}
 

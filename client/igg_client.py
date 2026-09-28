@@ -19,6 +19,7 @@ import socket
 import ssl
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -44,7 +45,7 @@ if sys.stderr is None:
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
-APP_VERSION = "1.1.6"
+APP_VERSION = "1.1.7"
 
 # Where the app UI comes from. Override with env IGG_VIP_URL or
 # %APPDATA%\IGG-VIP-Studio\server.txt
@@ -734,6 +735,128 @@ class NativeBridge:
         if not stop.get("ok"):
             errs.append(str(stop.get("error") or "force-stop failed"))
         return {"ok": not errs, "wiped": cleaned, "error": " | ".join(errs)}
+
+    # Fresh-start ("New Account") helpers: enumerate + read + restore the
+    # full state-file set (city, login, prefs, databases) and reset the
+    # Android ID, so a ban cannot survive in an identity file we never saw.
+    def _active_pkg(self, adb: str, serial: str) -> str | None:
+        for pkg in self._pkgs_for(serial):
+            if self._is_pkg_installed(adb, serial, pkg):
+                return pkg
+        return None
+
+    def listStateFiles(self, serial: str) -> dict:
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        pkg = self._active_pkg(adb, serial)
+        if not pkg:
+            raise RuntimeError("Township package not installed on " + serial)
+        found: list[str] = []
+        for base in (f"/data/data/{pkg}", f"/data/user/0/{pkg}"):
+            for sub in ("saves", "files", "shared_prefs", "databases"):
+                code, out, _ = _run_adb(
+                    adb, ["-s", serial, "shell", f"su -c 'ls \"{base}/{sub}\"'"], timeout=15
+                )
+                if code != 0:
+                    continue
+                for name in out.decode("utf-8", "replace").split():
+                    name = name.strip()
+                    if not name or name in (".", ".."):
+                        continue
+                    # Skip bulky caches and opaque storage; identity + saves only.
+                    if sub in ("saves", "files") and name not in (
+                        SAVE_FILE, SAVE_FILE[:-4] + ".bak", LOCAL_INFO_FILE,
+                    ):
+                        continue
+                    if len(found) < 64:
+                        found.append(f"{base}/{sub}/{name}")
+        # De-duplicate while keeping discovery order.
+        uniq: list[str] = []
+        for p in found:
+            if p not in uniq:
+                uniq.append(p)
+        _active_package[serial] = pkg
+        return {"ok": True, "package": pkg, "files": uniq}
+
+    def readFile(self, serial: str, path: str) -> dict:
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        p = str(path or "").strip()
+        if not p.startswith("/"):
+            raise RuntimeError("absolute device path required")
+        buf = self._pull_privileged(adb, serial, p)
+        if not buf:
+            raise RuntimeError("could not read " + p)
+        return {"b64": base64.b64encode(buf).decode("ascii"), "file": p, "size": len(buf)}
+
+    def writeFile(self, serial: str, path: str, b64: str) -> dict:
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        p = str(path or "").strip()
+        if not p.startswith("/"):
+            raise RuntimeError("absolute device path required")
+        try:
+            data = base64.b64decode(b64)
+        except Exception:
+            raise RuntimeError("backup payload is not valid base64")
+        if not data or len(data) > 24 * 1024 * 1024:
+            raise RuntimeError("backup payload has an unusable size")
+        with tempfile.TemporaryDirectory() as td:
+            local = Path(td) / "restore.bin"
+            local.write_bytes(data)
+            tmp = "/data/local/tmp/mGameInfo_restore.bin"
+            code, _, err = _run_adb(adb, ["-s", serial, "push", str(local), tmp], timeout=60)
+            if code != 0:
+                raise RuntimeError("adb push failed: " + err.decode("utf-8", "replace").strip())
+            shell = f"su -c 'cp \"{tmp}\" \"{p}\" && chmod 600 \"{p}\"'"
+            code2, out2, err2 = _run_adb(adb, ["-s", serial, "shell", shell], timeout=30)
+            combined = (out2 + err2).decode("utf-8", "replace").strip()
+            if code2 != 0 or re.search(
+                r"permission denied|not found|no such file|failed|error:", combined, re.I
+            ):
+                raise RuntimeError(f"restore failed for {p}: {combined or 'su cp failed'}")
+        return {"ok": True, "file": p, "size": len(data)}
+
+    def readAndroidId(self, serial: str) -> dict:
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        for args in (
+            ["-s", serial, "shell", "settings", "get", "secure", "android_id"],
+            ["-s", serial, "shell", "su", "-c", "settings get secure android_id"],
+        ):
+            code, out, _ = _run_adb(adb, args, timeout=15)
+            val = out.decode("utf-8", "replace").strip().lower()
+            if code == 0 and re.fullmatch(r"[0-9a-f]{16}", val or ""):
+                return {"ok": True, "androidId": val}
+        raise RuntimeError("could not read Android ID (need root)")
+
+    def resetAndroidId(self, serial: str) -> dict:
+        adb = _find_adb()
+        if not adb:
+            raise RuntimeError("adb not found - connect an emulator first")
+        try:
+            old = self.readAndroidId(serial).get("androidId", "")
+        except RuntimeError as e:
+            raise RuntimeError("read current Android ID first: " + str(e))
+        for _ in range(5):
+            new_id = secrets.token_hex(8)
+            if new_id != old:
+                break
+        code, out, err = _run_adb(
+            adb, ["-s", serial, "shell", "su", "-c", f"settings put secure android_id {new_id}"],
+            timeout=15,
+        )
+        combined = (out + err).decode("utf-8", "replace").strip()
+        if code != 0 or re.search(r"permission denied|not found|failed|error:", combined, re.I):
+            raise RuntimeError("Android ID reset refused: " + (combined or "su failed"))
+        check = self.readAndroidId(serial).get("androidId", "")
+        if check != new_id:
+            raise RuntimeError("Android ID did not change (old and new match)")
+        return {"ok": True, "oldAndroidId": old, "androidId": new_id}
 
     # self-update
     def installUpdate(self, release: dict) -> dict:
