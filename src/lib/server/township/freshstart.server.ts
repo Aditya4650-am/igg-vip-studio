@@ -248,7 +248,7 @@ export function verifyFreshStartState(s: FreshSession, input: FreshVerifyInput) 
   const xmlText = openCityXml("Fresh city file", input.cityB64);
   const newCityId = parseCityId(xmlText);
   if (!newCityId) throw new Error("Fresh city has no id");
-  if (newCityId === b.meta.oldCityId) throw new Error("Same city — wipe did not happen");
+  if (newCityId === b.meta.oldCityId) throw new Error("Same city — wipe did not take effect, or cloud/account restore brought it back");
   const level = parseLevel(xmlText);
   if (level !== 1) throw new Error("Not level 1");
   const newAndroidId = cleanAndroidId(input.androidId);

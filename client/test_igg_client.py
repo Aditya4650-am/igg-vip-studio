@@ -491,13 +491,24 @@ class FreshStartBridge(unittest.TestCase):
         self.assertNotEqual(r["androidId"], "aaaaaaaaaaaaaaaa")
         self.assertEqual(state["written"], r["androidId"])
 
-    def test_clear_gms_clears_both_packages(self):
+    def test_clear_gms_clears_all_packages_including_play_games(self):
         seen: list[str] = []
-        c._run_adb = lambda adb, args, timeout=30: (seen.append(" ".join(args)), (0, b"Success\n" if "pm clear" in " ".join(args) else b"", b""))[1]  # type: ignore[assignment]
+
+        def run(adb, args, timeout=30):
+            cmd = " ".join(args)
+            seen.append(cmd)
+            if "pm path" in cmd:
+                return (0, b"package:/data/app/x.apk\n", b"")
+            if "pm clear" in cmd:
+                return (0, b"Success\n", b"")
+            return (0, b"", b"")
+
+        c._run_adb = run  # type: ignore[assignment]
         r = c.NativeBridge().clearGms("emulator-5554")
         self.assertTrue(r["ok"])
         self.assertIn("com.google.android.gms", r["cleared"])
         self.assertIn("com.google.android.gsf", r["cleared"])
+        self.assertIn("com.google.android.play.games", r["cleared"])
 
     def test_reset_tries_content_commands_and_drops_ssaid(self):
         seen: list[str] = []

@@ -1965,6 +1965,7 @@ export function StudioApp() {
     say(`✅ ${tr("freshWiped")}`);
     let androidFrom = "";
     let androidTo = "";
+    let needReboot = false;
     try {
       const reset = await native.resetAndroidId(device);
       if (!reset.ok) throw new Error(tr("nothing"));
@@ -1973,19 +1974,14 @@ export function StudioApp() {
       say(`✅ 🆔 ${androidFrom}…→${androidTo}…`);
     } catch {
       // settings provider ignores writes on hardened emulators — with root
-      // confirmed, edit the settings file itself, then reboot is mandatory
-      // for the OS to pick it up.
+      // confirmed, edit the settings file itself; a reboot then picks it up.
       if (!native.forceAndroidId || !native.rebootDevice) throw new Error(tr("freshNoBridge"));
       say(`⏳ ${tr("freshFileId")}`);
       const forced = await native.forceAndroidId(device);
       if (!forced.ok) throw new Error(tr("nothing"));
       androidFrom = (forced.oldAndroidId ?? "").slice(0, 8);
       androidTo = (forced.androidId ?? "").slice(0, 8);
-      await native.rebootDevice(device);
-      setFreshIds({ androidFrom, androidTo, gsfRenewed: false });
-      setFreshPhase("wiped");
-      setFreshConfirm("");
-      return "rebooting";
+      needReboot = true;
     }
     let gsfRenewed = false;
     try {
@@ -2004,6 +2000,12 @@ export function StudioApp() {
     setFreshIds({ androidFrom, androidTo, gsfRenewed });
     setFreshPhase("wiped");
     setFreshConfirm("");
+    if (needReboot) {
+      const reboot = native.rebootDevice;
+      if (!reboot) throw new Error(tr("freshNoBridge"));
+      await reboot(device);
+      return "rebooting";
+    }
     return "wiped";
   };
 

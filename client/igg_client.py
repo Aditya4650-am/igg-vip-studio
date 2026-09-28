@@ -45,7 +45,7 @@ if sys.stderr is None:
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
-APP_VERSION = "1.1.13"
+APP_VERSION = "1.1.14"
 
 # Where the app UI comes from. Override with env IGG_VIP_URL or
 # %APPDATA%\IGG-VIP-Studio\server.txt
@@ -1143,7 +1143,15 @@ class NativeBridge:
             raise RuntimeError("adb not found - connect an emulator first")
         cleared: list[str] = []
         errs: list[str] = []
-        for pkg in ("com.google.android.gms", "com.google.android.gsf"):
+        # Play Games signs back in silently and restores cloud saves, so it
+        # goes too — otherwise the banned city returns by itself.
+        for pkg in (
+            "com.google.android.gms",
+            "com.google.android.gsf",
+            "com.google.android.play.games",
+        ):
+            if not self._is_pkg_installed(adb, serial, pkg):
+                continue
             _run_adb(adb, ["-s", serial, "shell", "am", "force-stop", pkg], timeout=10)
             code, out, err = _run_adb(adb, ["-s", serial, "shell", "pm", "clear", pkg], timeout=60)
             combined = (out + err).decode("utf-8", "replace").strip()
