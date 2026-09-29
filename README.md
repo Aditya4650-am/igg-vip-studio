@@ -54,3 +54,13 @@ Saves are edited by **string replacement only** — never parsed and re-serializ
 Built by `.github/workflows/build-client.yml` on `windows-latest` (PyInstaller cannot cross-compile). Push a `v*` tag to build and attach the EXE to a GitHub release, or run the workflow manually from Actions. The client loads its UI from the deployed Render server, so UI/icon changes need only a Render deploy + EXE restart — rebuild the EXE only when `client/` changes.
 
 Point the client at another server without rebuilding via `%APPDATA%\IGG-VIP-Studio\server.txt` or the `IGG_VIP_URL` environment variable.
+
+### "Failed to extract … decompression resulted in return code -1"
+
+**This is a full disk, not a broken download.** The EXE is a *onefile* build: every launch unpacks ~300 MB into `%TEMP%`, and that message means Windows had nowhere to put it.
+
+1. Check free space on **C:** — near 0 GB triggers it.
+2. Delete stale `%TEMP%\_MEI*` folders. Each failed launch leaves a partial one behind (one machine had 17 of them = 372 MB).
+3. Relaunch. **No reinstall or re-download** — a brand-new EXE fails identically on a full disk.
+
+The error text comes from PyInstaller's bootloader, which runs before any of the app's own code, so it cannot be made friendlier from our side — free space is the only fix.

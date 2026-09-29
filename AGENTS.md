@@ -376,6 +376,28 @@ HTTP with no auth. This repository is private, so a GitHub release asset URL
 will not work for auto-update; it needs a publicly reachable URL, or a
 hosted binary on the Render service.
 
+### "decompression resulted in return code -1" = disk full
+
+Not a corrupt EXE and not a PyInstaller bug. The spec builds **onefile**
+(`runtime_tmpdir=None`, no `COLLECT`), so every launch unpacks ~300 MB into
+`%TEMP%\_MEIxxxx`; with no free bytes the bootloader's `inflate()` fails on the
+first large blob and the process exits `-1` before any of our Python runs.
+Measured 2026-09-29: the machine had **0 bytes free** of 194.6 GB and had
+accumulated 17 leftover `_MEI*` folders (372 MB). Clearing stale temp plus the
+npm/uv caches gave 4.1 GB, and the rebuilt EXE opened its window normally —
+**zero code change**. Do not re-download or rebuild chasing it: a fresh build
+fails the same way while the disk is full. PyInstaller owns that dialog text
+and it is unreachable from Python, so the only remedy is free space; the user's
+Downloads/OneDrive are theirs to review, never touch them.
+
+**Testing gotcha (cost several wrong conclusions):** `Start-Process` returns the
+PyInstaller *parent*, whose only window is the invisible
+`PyInstallerOnefileHiddenWindow` and whose `MainWindowTitle` is always `''`.
+The app runs in the **child** (`Win32_Process.ParentProcessId == $p.Id`), so
+polling `$p.MainWindowTitle` reports "hangs with no window" for an EXE that is
+working perfectly. Enumerate the child's windows instead, and kill the child
+too — stopping only the parent orphans live instances.
+
 ## Deployment
 
 Render only, via `render.yaml`. This **must** be a persistent server: FetchCity
