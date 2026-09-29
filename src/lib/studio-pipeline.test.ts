@@ -15,6 +15,7 @@ const { iconForZoo } = await import("./game-icon-map.ts");
 const { iconForUpgradeLabel } = await import("./game-icon-map.ts");
 const { ZOO_REQUIREMENTS } = await import("./server/township/zoo.server.ts");
 const { readdirSync, existsSync, readFileSync } = await import("node:fs");
+const { injectRegata } = await import("./server/township/inject.server.ts");
 
 const { token } = verifyLicenseKey("IGG-OWNER-TESTKEY", "TEST-DEVICE-0001");
 
@@ -598,4 +599,178 @@ test("barn: discovery finds catalog stock in any letter case, never order counte
   assert.equal(snap.barn.items["apple"], 50, "lowercase stock must be discovered");
   assert.ok(!("MapOrder" in snap.barn.items), "order progress must not leak into the barn");
   assert.ok(!("QuestComplete" in snap.barn.items), "quest progress must not leak into the barn");
+});
+
+// ---------------------------------------------------------------------------
+// Ban guard rails.
+//
+// A copy taken from another player must never carry that player's identity
+// into our save. Playrix checks the declared owner of a save when it is
+// uploaded, so a leaked cityId / deviceId / profile record there is an instant
+// ban rather than a cosmetic bug. These tests pin the three defences: the
+// restore modes, the clone button, and the push gate every feature ends up in.
+// ---------------------------------------------------------------------------
+
+const FRIEND_CITY_XML = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  "<Global>",
+  '<Var name="cityId" v="FRD123456" t="s"/>',
+  '<Var name="deviceId" v="dead-beef-device" t="s"/>',
+  '<Var name="money" v="999999" t="i"/>',
+  // The donor's profile/event store. This is the element "All" used to copy.
+  "<DataStoreCollection>",
+  '<DataElem name="saveId" type="string" value="FRD123456"/>',
+  '<DataElem name="SaveId" type="string" value="FRD123456"/>',
+  '<DataElem name="mainPlayer" type="bool" value="true"/>',
+  '<DataElem name="name" type="string" value="frdplayer"/>',
+  '<DataElem name="currentProfiles" type="array"><DataElem type="string" value="FRD123456"/></DataElem>',
+  "</DataStoreCollection>",
+  "</Global>",
+].join("");
+
+test("no restore mode copies the friend's account identity", () => {
+  // "All" (novo) used to copy the donor's DataStoreCollection wholesale — 38
+  // copies of their cityId, 58 mainPlayer records, their player name and the
+  // currentProfiles account list. That block is what told Playrix another
+  // account was this save's main player, so it is no longer copied at all.
+  const { sessionId } = load();
+  studio.attachFriendXml(token, sessionId, FRIEND_CITY_XML);
+  for (const mode of ["inicial", "completo", "novo"] as const) {
+    const out = studio.applyUnban(token, sessionId, mode);
+    const xml = Buffer.from(out.fileB64!, "base64").toString("utf8");
+    assert.ok(!xml.includes("FRD123456"), `${mode} leaked the friend's cityId`);
+    assert.ok(!xml.includes("dead-beef-device"), `${mode} leaked the friend's deviceId`);
+    assert.ok(!xml.includes("mainPlayer"), `${mode} leaked a mainPlayer record`);
+    balanced(xml);
+  }
+});
+
+test("the push gate refuses a save that declares someone else as its owner", () => {
+  const mine = [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    "<Global>",
+    '<Var name="cityId" v="ME12345678" t="s"/>',
+    "</Global>",
+  ].join("");
+
+  // Identity drift is caught whatever produced it — this is the single check
+  // every feature passes through before a byte reaches the device.
+  assert.throws(
+    () =>
+      studio.assertPushSafe({
+        loadedXml: mine,
+        rawXml: mine.replace("ME12345678", "FRD123456"),
+        friendXml: null,
+      } as never),
+    /cityId/i,
+  );
+
+  assert.throws(
+    () =>
+      studio.assertPushSafe({
+        loadedXml: mine,
+        rawXml: mine.replace("</Global>", '<Var name="deviceId" v="someone-elses" t="s"/></Global>'),
+        friendXml: null,
+      } as never),
+    /deviceId/i,
+  );
+
+  // A save that keeps its own identity is allowed through, edits and all...
+  studio.assertPushSafe({
+    loadedXml: mine,
+    rawXml: mine.replace('<Var name="cityId"', '<Var name="levelup" v="60" t="i"/><Var name="cityId"'),
+    friendXml: null,
+  } as never);
+
+  // ...and so is a file we never touched.
+  studio.assertPushSafe({ loadedXml: mine, rawXml: mine, friendXml: null } as never);
+});
+
+const TOWN_OWN = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  '<Global><Var name="cityId" v="ME12345678" t="s"/></Global>',
+  '<Zoo><TownGround ver="2"><row j="0" v="ZOOMAP"/></TownGround><Buildings><Object id="zoo1"/></Buildings></Zoo>',
+  '<TownGround ver="2"><row j="0" v="MYTOWN"/></TownGround><Buildings><Object id="mine1"/></Buildings>',
+].join("");
+
+const TOWN_DONOR = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  '<Global><Var name="cityId" v="FRD123456" t="s"/><Var name="deviceId" v="dead-beef" t="s"/></Global>',
+  '<Zoo><TownGround ver="2"><row j="0" v="ZOOMAP"/></TownGround><Buildings><Object id="zoo1"/></Buildings></Zoo>',
+  '<TownGround ver="2"><row j="0" v="FRIENDTOWN"/></TownGround><Buildings><Object id="friend1"/></Buildings>',
+].join("");
+
+function townSession(xml: string) {
+  return studio.connectLoad(token, "test-device", undefined, undefined, Buffer.from(xml).toString("base64"));
+}
+
+test("clone town layout: only the town moves, never the donor's identity", () => {
+  const snap = townSession(TOWN_OWN);
+  studio.attachFriendXml(token, snap.sessionId, TOWN_DONOR);
+  const out = studio.applySave({ token, sessionId: snap.sessionId, townClone: true });
+
+  const xml = out.xml!;
+  assert.ok(out.parts.includes("town-clone"), "the action must be reported");
+  assert.match(xml, /FRIENDTOWN/, "the donor's town grid must be copied");
+  assert.match(xml, /friend1/, "the donor's buildings must be copied");
+  assert.ok(!xml.includes("MYTOWN"), "our own town must be replaced");
+  assert.ok(xml.includes("ZOOMAP"), "the Zoo's own TownGround/Buildings pair must be left alone");
+  assert.ok(!xml.includes("FRD123456"), "the donor's cityId must not follow the town");
+  assert.ok(!xml.includes("dead-beef"), "the donor's deviceId must not follow the town");
+  balanced(xml);
+});
+
+test("clone town layout refuses to claim success when nothing changed", () => {
+  const snap = townSession(TOWN_OWN);
+  studio.attachFriendXml(token, snap.sessionId, TOWN_OWN);
+  assert.throws(() => studio.applySave({ token, sessionId: snap.sessionId, townClone: true }), /thay/i);
+});
+
+test("clone town layout refuses a file that is not a city", () => {
+  const snap = townSession(TOWN_OWN);
+  studio.attachFriendXml(token, snap.sessionId, '<Global><Var name="x" v="1"/></Global>');
+  assert.throws(() => studio.applySave({ token, sessionId: snap.sessionId, townClone: true }), /TownGround/);
+});
+
+test("regatta never hands one save a second identity", () => {
+  // A save whose completed tasks already use a user id other than its cityId
+  // Var must not get a third: injected tasks reuse the id the save's own
+  // records already carry instead of minting one.
+  const xml = [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    "<Global>",
+    '<Var name="cityId" v="CITYAAAAA" t="s"/>',
+    '<PrevRegata><MyOldTask id="t1" score="135" user="PREVCITY1"/></PrevRegata>',
+    "</Global>",
+  ].join("");
+  const out = injectRegata(xml, 4, 135);
+  const users = [...new Set([...out.matchAll(/<MyOldTask[^>]*\buser="([^"]*)"/g)].map((m) => m[1]))];
+  assert.deepEqual(users, ["PREVCITY1"], "injected tasks must reuse the save's own user id");
+  balanced(out);
+});
+
+test("the push gate rolls back instead of leaving an unpushable save", () => {
+  // A save that declares no identity at all gives Regatta nothing to attribute
+  // its tasks to, so the gate refuses the file. The session must then be put
+  // back exactly as it was — otherwise every later action fails the same way
+  // and the user is stuck holding a save that can never be written to the
+  // device, which looks like the whole tool has stopped working.
+  const bare = [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    "<Global>",
+    '<Var name="money" v="1" t="i"/>',
+    "</Global>",
+  ].join("");
+  const snap = townSession(bare);
+  assert.throws(
+    () => studio.applySave({ token, sessionId: snap.sessionId, regatta: true }),
+    /user id 0/,
+    "a save with no identity of its own must not get unattributed records",
+  );
+  const after = studio.exportCurrent(token, snap.sessionId);
+  assert.equal(
+    Buffer.from(after.fileB64, "base64").toString("utf8"),
+    bare,
+    "the refused edit must be undone, not left half-applied",
+  );
 });

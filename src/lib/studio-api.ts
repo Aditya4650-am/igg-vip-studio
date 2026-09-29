@@ -82,6 +82,7 @@ const saveSchema = z.object({
   unbanMode: z.enum(["inicial", "completo", "novo"]).optional(),
   decorFragments: z.boolean().optional(),
   decorClone: z.boolean().optional(),
+  townClone: z.boolean().optional(),
   decorMaxAll: z.boolean().optional(),
   upgrades: z.object({
     factory: z.record(z.string(), z.number()).optional(),

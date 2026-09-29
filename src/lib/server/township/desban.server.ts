@@ -35,7 +35,15 @@ const COMPLETO_BLOCKS = [
   "FragmentedBeautyManager",
 ];
 
-const NOVO_BLOCKS = ["Minigames", "DSCollapseQuests", "QuestsBook", "DSCollection", "DataStoreCollection"];
+// DataStoreCollection is deliberately NOT in this list. It is the donor's
+// profile/event store (measured on a real FetchCity response: 1.4 MB, 38 copies
+// of the donor's cityId, 58 `mainPlayer` records, 161 `saveId` records and the
+// `currentProfiles` account-switcher list). Copying it made "All" write another
+// player's account as this save's main player, which Playrix rejects on upload —
+// an instant ban. Every other block here measured clean of identity markers.
+// The reference tool copies DSCollection in the same step and never copies
+// DataStoreCollection either.
+const NOVO_BLOCKS = ["Minigames", "DSCollapseQuests", "QuestsBook", "DSCollection"];
 
 const TUTORIAL_DONE = [
   "StartTutorialFinished",
@@ -212,17 +220,101 @@ function pickMain(xml: string, tag: string) {
   return pool.reduce((a, b) => (b.end - b.start > a.end - a.start ? b : a));
 }
 
+/**
+ * The user id a save's own records are attributed to, in the order builds
+ * actually expose it: an `<Object user="...">` (what the reference tool
+ * rewrites), the declared cityId, then any record already carrying one. Saves
+ * disagree on which of these is live, so take the first that exists rather
+ * than assuming a single layout.
+ */
+function attributedUser(xml: string): string | null {
+  const obj = xml.match(/<Object\b[^>]*\buser="([^"]+)"/i);
+  if (obj?.[1]) return obj[1]!;
+  const owner = parseOwnMeta(xml).cityId;
+  if (owner) return owner;
+  return xml.match(/\buser="([^"]+)"/i)?.[1] ?? null;
+}
+
+/**
+ * Re-point records copied out of another player's save at us. Current builds
+ * carry no `user=` on town objects at all (verified against every save on hand,
+ * including a live FetchCity response), so this is normally a no-op — but a
+ * foreign owner left on a copied object is the one thing a cloned town must
+ * never carry. When the donor's id cannot be re-pointed at ours, the attribute
+ * is dropped rather than pushed.
+ */
+function reattribute(block: string, src: string, tgt: string): string {
+  if (!/\buser="/i.test(block)) return block;
+  const ours = attributedUser(tgt);
+  if (!ours) return block.replace(/\s+user="[^"]*"/gi, "");
+  const theirs = attributedUser(src);
+  const point = theirs ? block.split(`user="${theirs}"`).join(`user="${ours}"`) : block;
+  // Anything still carrying another owner is foreign — never push it.
+  return point.replace(/\s+user="([^"]*)"/g, (_m, v: string) => (v === ours ? ` user="${ours}"` : ""));
+}
+
+/**
+ * Merge guard: a copy taken from another player's save must not carry that
+ * player's identity into ours. Playrix checks the declared owner of a save on
+ * upload, so a leaked cityId / deviceId / profile record there is an instant
+ * ban rather than a cosmetic bug — fail loudly before the file is pushed.
+ *
+ * Every check compares the result against the save we started from, so a
+ * marker already in our own file (a teammate in our roster, say) is never
+ * mistaken for one we just imported.
+ */
+export function assertNoForeignIdentity(own: string, merged: string, donor: string) {
+  const problems: string[] = [];
+
+  const wasOwner = parseOwnMeta(own).cityId;
+  const nowOwner = parseOwnMeta(merged).cityId;
+  if (wasOwner && nowOwner && nowOwner !== wasOwner) problems.push(`cityId ${wasOwner} → ${nowOwner}`);
+
+  const hadDevices = new Set([...own.matchAll(/<Var\s+name="deviceId"\s+v="([^"]*)"/gi)].map((m) => m[1]!));
+  for (const [, d] of merged.matchAll(/<Var\s+name="deviceId"\s+v="([^"]*)"/gi)) {
+    if (d && !hadDevices.has(d)) problems.push(`deviceId ${d}`);
+  }
+
+  const hadUsers = new Set([...own.matchAll(/\buser="([^"]*)"/gi)].map((m) => m[1]!));
+  const ours = declaredIds(own);
+  for (const [, u] of merged.matchAll(/\buser="([^"]*)"/gi)) {
+    // Ids our own file claims (cityId, SaveId, …) count as ours: a rewritten
+    // donor record is attributed to us even when this save carried no user= of
+    // its own before the merge.
+    if (u && !hadUsers.has(u) && !ours.has(u)) problems.push(`user id ${u}`);
+  }
+
+  const donorId = parseOwnMeta(donor).cityId;
+  if (donorId) {
+    const before = own.split(donorId).length - 1;
+    const after = merged.split(donorId).length - 1;
+    if (after > before) problems.push(`thành phố của bạn cũ ${donorId} (+${after - before})`);
+  }
+
+  const mpBefore = (own.match(/name="mainPlayer"/gi) ?? []).length;
+  const mpAfter = (merged.match(/name="mainPlayer"/gi) ?? []).length;
+  if (mpAfter > mpBefore) problems.push(`mainPlayer +${mpAfter - mpBefore}`);
+
+  if (problems.length) {
+    throw new Error(
+      `Bản sao mang theo danh tính của người khác (${problems.join(", ")}). ` +
+        "Đã hủy trước khi đẩy lên máy để tránh khóa tài khoản.",
+    );
+  }
+}
+
 function cloneMain(src: string, tgt: string, tag: string): { xml: string; action: string } {
   const srcBlk = pickMain(src, tag);
   if (!srcBlk) return { xml: tgt, action: "missing_src" };
   const tgtBlk = pickMain(tgt, tag);
-  if (tgtBlk) return { xml: tgt.slice(0, tgtBlk.start) + srcBlk.block + tgt.slice(tgtBlk.end), action: "replace" };
+  const block = reattribute(srcBlk.block, src, tgt);
+  if (tgtBlk) return { xml: tgt.slice(0, tgtBlk.start) + block + tgt.slice(tgtBlk.end), action: "replace" };
   const z = zooEnd(tgt);
-  if (z >= 0) return { xml: tgt.slice(0, z) + "\n" + srcBlk.block + tgt.slice(z), action: "insert" };
+  if (z >= 0) return { xml: tgt.slice(0, z) + "\n" + block + tgt.slice(z), action: "insert" };
   for (const c of ["</Global>", "</root>", "</Root>"]) {
-    if (tgt.includes(c)) return { xml: tgt.replace(c, srcBlk.block + "\n" + c), action: "insert" };
+    if (tgt.includes(c)) return { xml: tgt.replace(c, block + "\n" + c), action: "insert" };
   }
-  return { xml: tgt + "\n" + srcBlk.block, action: "insert" };
+  return { xml: tgt + "\n" + block, action: "insert" };
 }
 
 function cloneSimple(src: string, tgt: string, tag: string): { xml: string; action: string } {
@@ -780,8 +872,28 @@ export function parseOwnMeta(xml: string) {
   };
 }
 
+/**
+ * Every id this save claims for itself: the declared cityId plus the id Vars
+ * older builds name differently (SaveId / userId / PlayerId). A record
+ * attributed to any of them is our own even when this save never wrote a
+ * `user=` before — and a save that can only tell us its SaveId still has a
+ * real identity, so refusing it would break a feature without protecting
+ * anything. Built from the save we *started* with, never from a merge result.
+ */
+export function declaredIds(xml: string): Set<string> {
+  const out = new Set<string>();
+  const c = parseOwnMeta(xml).cityId;
+  if (c) out.add(c);
+  for (const name of ["SaveId", "userId", "UserId", "PlayerId", "cityId"]) {
+    const v = readVarLoose(xml, name);
+    if (v) out.add(v);
+  }
+  return out;
+}
+
 export function cloneDecorOnly(ownXml: string, friendXml: string) {
   let own = ownXml.replace(/^\uFEFF/, "");
+  const before = own;
   const fr = friendXml.replace(/^\uFEFF/, "");
   const blocks: string[] = [];
   const vars: string[] = [];
@@ -804,11 +916,41 @@ export function cloneDecorOnly(ownXml: string, friendXml: string) {
   }
   own = maxBuildingsStash(own, [], 10);
   own = maxFragments(own);
+  assertNoForeignIdentity(before, own, fr);
   return { xml: own, report: { blocks, vars } };
+}
+
+/**
+ * Clone town layout — paste another player's town into ours and nothing else.
+ * Only the main town's `<TownGround>` + `<Buildings>` move across (`pickMain`
+ * skips the Zoo's own pair, which is deliberately left alone); no stats, no
+ * profile stores, no event state, so there is no account identity to leak in
+ * the first place. The donor file is only ever read: our cityId, session and
+ * device id stay exactly as they were.
+ */
+export function cloneTownLayout(ownXml: string, friendXml: string) {
+  const before = ownXml.replace(/^\uFEFF/, "");
+  let own = before;
+  const fr = friendXml.replace(/^\uFEFF/, "");
+  const blocks: string[] = [];
+  for (const tag of ["TownGround", "Buildings"]) {
+    const r = cloneMain(fr, own, tag);
+    own = r.xml;
+    blocks.push(`${tag}:${r.action}`);
+  }
+  if (blocks.every((b) => b.endsWith(":missing_src"))) {
+    throw new Error("File bạn không chứa TownGround/Buildings — cần City XML của một thành phố thật.");
+  }
+  // Never report a success that changed nothing: the game would silently keep
+  // the old town and the user would see a green tick for an untouched save.
+  if (own === before) throw new Error("Thành phố không có gì thay đổi — file của bạn đã giống hệt file được chọn.");
+  assertNoForeignIdentity(before, own, fr);
+  return { xml: own, report: { blocks, vars: [] } };
 }
 
 export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" | "completo" | "novo") {
   let own = ownXml.replace(/^\uFEFF/, "");
+  const before = own;
   const fr = friendXml.replace(/^\uFEFF/, "");
   for (const name of INICIAL_VARS) {
     const val = readVarLoose(fr, name);
@@ -817,7 +959,11 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
   for (const m of fr.matchAll(/<Var\s+name="(Achievement_[^"]+)"\s+v="([^"]*)"/gi)) {
     own = writeVar(own, m[1]!, m[2]!);
   }
-  if (mode === "inicial") return skipTutorials(own, fr);
+  if (mode === "inicial") {
+    own = skipTutorials(own, fr);
+    assertNoForeignIdentity(before, own, fr);
+    return own;
+  }
 
   for (const tag of ["TownGround", "Buildings"]) own = cloneMain(fr, own, tag).xml;
   for (const tag of COMPLETO_BLOCKS) own = cloneSimple(fr, own, tag).xml;
@@ -839,7 +985,9 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
   own = copyDataElemByName(fr, own, "PlayerProfile");
   own = copyDataElemByName(fr, own, "Configs");
 
-  return skipTutorials(own, fr);
+  own = skipTutorials(own, fr);
+  assertNoForeignIdentity(before, own, fr);
+  return own;
 }
 
 export function maxBuildingsStash(xml: string, ids: string[] = [], count = 10) {

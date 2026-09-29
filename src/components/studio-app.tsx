@@ -1245,6 +1245,7 @@ export function StudioApp() {
   const [pendingUnban, setPendingUnban] = useState<UnbanMode | null>(null);
   const [pendingDecorFragments, setPendingDecorFragments] = useState(false);
   const [pendingDecorClone, setPendingDecorClone] = useState(false);
+  const [pendingTownClone, setPendingTownClone] = useState(false);
   // Fresh-start ("New Account") phase machine. Fully isolated: nothing from
   // other tabs' state is read or written here.
   const [freshPhase, setFreshPhase] = useState<"idle" | "backedup" | "verified">("idle");
@@ -1602,6 +1603,7 @@ export function StudioApp() {
       setPendingUnban(null);
       setPendingDecorFragments(false);
       setPendingDecorClone(false);
+      setPendingTownClone(false);
       setPendingDecorMaxAll(false);
       setProfileOpen(null);
       setSkinOpen(null);
@@ -1632,6 +1634,7 @@ export function StudioApp() {
     upgradeFactorySel.count + upgradeTrainSel.count + upgradeIslandSel.count +
     (barnDirty ? 1 : 0) + (pendingRegatta ? 1 : 0) + (pendingSeason ? 1 : 0) + (pendingUnban ? 1 : 0) +
     (pendingDecorFragments ? 1 : 0) + (pendingDecorClone ? 1 : 0) + (pendingDecorMaxAll ? 1 : 0) +
+    (pendingTownClone ? 1 : 0) +
     (pendingUpgradeFactory ? 1 : 0) + (pendingUpgradeTrain ? 1 : 0) + (pendingUpgradeIsland ? 1 : 0);
 
   const parseQty = useCallback(() => {
@@ -1732,6 +1735,7 @@ export function StudioApp() {
         pendingSeason ||
         pendingDecorFragments ||
         pendingDecorClone ||
+        pendingTownClone ||
         pendingDecorMaxAll;
 
       if (pendingUnban && !hasOtherChanges) {
@@ -1779,6 +1783,7 @@ export function StudioApp() {
           unbanMode: pendingUnban ?? undefined,
           decorFragments: pendingDecorFragments,
           decorClone: pendingDecorClone,
+          townClone: pendingTownClone,
           decorMaxAll: pendingDecorMaxAll,
           upgrades: (upgradeFactorySel.count > 0 || upgradeTrainSel.count > 0 || upgradeIslandSel.count > 0) ? {
             factory: upgradeFactorySel.count > 0 ? Object.fromEntries(Object.values(upgradeFactorySel.asRecord()).flat().map(id => [id, upgradeTargetLevel])) : undefined,
@@ -1820,6 +1825,7 @@ export function StudioApp() {
       setPendingUnban(null);
       setPendingDecorFragments(false);
       setPendingDecorClone(false);
+      setPendingTownClone(false);
       setPendingDecorMaxAll(false);
       setPendingUpgradeFactory(false);
       setPendingUpgradeTrain(false);
@@ -1829,7 +1835,7 @@ export function StudioApp() {
     } finally {
       setBusy(false);
     }
-  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, cardsQty, zooSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, pendingSeason, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingDecorMaxAll, parseDecorQty, tr, device, upgradeFactorySel, upgradeTrainSel, upgradeIslandSel, upgradeTargetLevel]);
+  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, cardsQty, zooSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, pendingSeason, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingTownClone, pendingDecorMaxAll, parseDecorQty, tr, device, upgradeFactorySel, upgradeTrainSel, upgradeIslandSel, upgradeTargetLevel]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -3338,6 +3344,38 @@ export function StudioApp() {
                       >
                         Bỏ chọn
                       </Button>
+                    </div>
+                    <div className="panel mb-3">
+                      <h3 className="mb-1 text-sm font-semibold">{tr("cloneSection")}</h3>
+                      <p className="mb-2 text-xs text-muted">{tr("cloneSectionHint")}</p>
+                      {!session?.friendCity ? (
+                        <p className="text-xs text-warning">{tr("cloneNeedFetch")}</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={busy}
+                            onClick={() => {
+                              setPendingTownClone(true);
+                              toast.success(tr("cloneTown"));
+                            }}
+                          >
+                            {tr("cloneTown")}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={busy}
+                            onClick={() => {
+                              setPendingDecorClone(true);
+                              toast.success(tr("decorClone"));
+                            }}
+                          >
+                            {tr("decorClone")}
+                          </Button>
+                        </div>
+                      )}
                     </div>
                     {decorSel.size ? (
                       <p className="mb-3 text-xs text-muted">{decorSel.size} {tr("decorSelected")} · {tr("quantity").toLowerCase()} {parseDecorQty()} · {tr("decorApplyHint")}.</p>

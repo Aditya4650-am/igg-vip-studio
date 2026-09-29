@@ -303,6 +303,11 @@ const vi = {
  toastSeasonQueued: "Season Pass đã chọn — bấm Lưu & đẩy để áp dụng",
  connectFailed: "Kết nối thất bại",
  actionFailed: "Thao tác thất bại",
+  cloneSection: "Clone từ thành phố khác",
+  cloneSectionHint:
+    "Hai nút này chỉ đọc file city đã FetchCity — cityId, phiên và thiết bị của bạn không bị đụng tới. Bố cục thành phố chỉ ghép TownGround + Buildings; Clone thành phố bạn chỉ ghép bộ sưu tập trang trí.",
+  cloneNeedFetch: "Cần FetchCity một thành phố trước khi Clone",
+  cloneTown: "Clone bố cục thành phố",
 };
 
 const en: typeof vi = {
@@ -585,6 +590,11 @@ const en: typeof vi = {
  stickerSelectedHint: "{count} stickers selected. Choices apply when you press Save & push.",
  connectFailed: "Connection failed",
  actionFailed: "Action failed",
+  cloneSection: "Clone from another city",
+  cloneSectionHint:
+    "Both buttons only read the city you already fetched — your cityId, session and device are never touched. Town layout merges just TownGround + Buildings; Clone friend city merges only the decoration inventory.",
+  cloneNeedFetch: "FetchCity a city before cloning",
+  cloneTown: "Clone town layout",
 };
 
 function overlay(p: Partial<typeof en>): typeof en {

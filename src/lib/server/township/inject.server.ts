@@ -356,6 +356,31 @@ export function injectProfile(xml: string, selection: Record<string, string[]>) 
   return text;
 }
 
+/**
+ * The id this save's own regatta records are attributed to. Healthy saves put
+ * the save's own cityId on `MyOldTask` and teammates only on `TakenTask`
+ * (verified on two real saves), so the existing `MyOldTask` value is
+ * authoritative — reading it back means this feature can never hand one save
+ * two identities, which is what a server notices when it is looking.
+ */
+function resolveRegataUser(text: string): string {
+  for (const pat of [/<MyOldTask\b[^>]*\buser="([^"]*)"/gi, /\buser="([^"]*)"/gi]) {
+    for (const m of text.matchAll(pat)) if (m[1]?.trim()) return m[1].trim();
+  }
+  for (const name of ["SaveId", "userId", "UserId", "cityId", "PlayerId"]) {
+    const r =
+      text.match(new RegExp(`<Var\\b[^>]*\\bname="${name}"[^>]*\\bv="([^"]*)"`, "i")) ??
+      text.match(new RegExp(`<Var\\b[^>]*\\bv="([^"]*)"[^>]*\\bname="${name}"`, "i"));
+    if (r?.[1]?.trim()) return r[1].trim();
+  }
+  // Some saves declare it only on <AWS>; parseOwnMeta reads both shapes, so
+  // this must too or a save with no cityId Var falls through to "0".
+  const aws = text.match(/<AWS\b([^>]*?)\/?>/i)?.[1] ?? "";
+  const a = aws.match(/\bcityId="([^"]*)"/i)?.[1];
+  if (a?.trim()) return a.trim();
+  return "0";
+}
+
 export function injectRegata(xml: string, nTasks = 105, score = 135) {
   let text = asText(xml);
   text = writeVar(text, "RegataTasksCompleted", String(nTasks));
@@ -372,16 +397,7 @@ export function injectRegata(xml: string, nTasks = 105, score = 135) {
   }
 
   if (!m || m.index === undefined) {
-    let user = "0";
-    for (const name of ["SaveId", "userId", "UserId", "cityId", "PlayerId"]) {
-      const r =
-        text.match(new RegExp(`<Var\\b[^>]*\\bname="${name}"[^>]*\\bv="([^"]*)"`, "i")) ??
-        text.match(new RegExp(`<Var\\b[^>]*\\bv="([^"]*)"[^>]*\\bname="${name}"`, "i"));
-      if (r?.[1]?.trim()) {
-        user = r[1].trim();
-        break;
-      }
-    }
+    const user = resolveRegataUser(text);
     // Insert a fresh block inside the root, then operate on it in place. The
     // previous version appended at EOF when no root closer matched, which left
     // the new element outside the document (and unreachable by the game).
@@ -396,7 +412,13 @@ export function injectRegata(xml: string, nTasks = 105, score = 135) {
   }
 
   const block = m[1]!;
-  const user = block.match(/\buser="([^"]*)"/i)?.[1] ?? "0";
+  // The block's own completed tasks decide the id (the reference tool reads it
+  // the same way); then the block attribute, then whatever this save already
+  // uses elsewhere. Never invent one.
+  const user =
+    block.match(/<MyOldTask\b[^>]*\buser="([^"]*)"/i)?.[1] ??
+    block.match(/\buser="([^"]*)"/i)?.[1] ??
+    resolveRegataUser(text);
   // FreeTask ids come from inside the block; when the block has too few (or
   // none), top up from the document so every generated MyOldTask gets a
   // distinct id. Repeating one id across 105 tasks makes them collide.

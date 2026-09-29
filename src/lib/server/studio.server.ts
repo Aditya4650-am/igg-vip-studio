@@ -21,6 +21,8 @@ import {
 import {
   applyDesban,
   cloneDecorOnly,
+  cloneTownLayout,
+  declaredIds,
   fetchCityXml,
   maxBuildingsStash,
   maxFragments,
@@ -138,8 +140,65 @@ export function listDevices() {
   return [] as { id: string; label: string }[];
 }
 
+/**
+ * The last gate before any file leaves for the device. Every feature ends up
+ * in `encodeSave`, so putting the identity check here is what makes the
+ * promise apply to *all* of them instead of to whichever one happens to
+ * remember.
+ *
+ * A save must keep declaring the identity it was loaded with: its cityId, its
+ * device, and the user id its own records are attributed to. Anything else in
+ * there belongs to someone else, and Playrix rejects that on upload — an
+ * instant ban rather than a cosmetic bug. Everything is compared against the
+ * save as it was loaded, so a marker our own file already carried (a teammate
+ * in the roster, say) is never mistaken for one a feature just imported.
+ */
+export function assertPushSafe(s: Session) {
+  const was = s.loadedXml?.replace(/^\uFEFF/, "");
+  const now = s.rawXml?.replace(/^\uFEFF/, "");
+  if (!was || !now || was === now) return;
+
+  const problems: string[] = [];
+
+  const wasOwner = parseOwnMeta(was).cityId;
+  const nowOwner = parseOwnMeta(now).cityId;
+  if (wasOwner && nowOwner && nowOwner !== wasOwner) problems.push(`cityId ${wasOwner} → ${nowOwner}`);
+
+  const hadDevices = new Set([...was.matchAll(/<Var\s+name="deviceId"\s+v="([^"]*)"/gi)].map((m) => m[1]!));
+  for (const [, d] of now.matchAll(/<Var\s+name="deviceId"\s+v="([^"]*)"/gi)) {
+    if (d && !hadDevices.has(d)) problems.push(`deviceId ${d}`);
+  }
+
+  const hadUsers = new Set([...was.matchAll(/\buser="([^"]*)"/gi)].map((m) => m[1]!));
+  const ours = declaredIds(was);
+  for (const [, u] of now.matchAll(/\buser="([^"]*)"/gi)) {
+    // Ids this save claims for itself count as ours: a record rewritten to
+    // point at us is ours even when it carried no user= of its own before.
+    if (u && !hadUsers.has(u) && !ours.has(u)) problems.push(`user id ${u}`);
+  }
+
+  const mpWas = (was.match(/name="mainPlayer"/gi) ?? []).length;
+  const mpNow = (now.match(/name="mainPlayer"/gi) ?? []).length;
+  if (mpNow > mpWas) problems.push(`mainPlayer +${mpNow - mpWas}`);
+
+  const friendId = s.friendXml ? parseOwnMeta(s.friendXml).cityId : "";
+  if (friendId && !ours.has(friendId)) {
+    const a = was.split(friendId).length - 1;
+    const b = now.split(friendId).length - 1;
+    if (b > a) problems.push(`thành phố của bạn cũ ${friendId} (+${b - a})`);
+  }
+
+  if (problems.length) {
+    throw new Error(
+      `Không đẩy file lên máy — save đang mang danh tính của người khác: ${problems.join(", ")}. ` +
+        "Đây chính là nguyên nhân gây khóa tài khoản Playrix tức thì.",
+    );
+  }
+}
+
 function encodeSave(s: Session): string | null {
   if (!s.rawXml) return null;
+  assertPushSafe(s);
   // v1.15 client behavior: after Load/Decode and edits, the payload sent to
   // the desktop is the decoded XML itself. The desktop writes those bytes
   // directly to /data/data/<package>/saves/mGameInfo.xml (and .bak).
@@ -274,6 +333,7 @@ export type SavePayload = {
   unbanMode?: "inicial" | "completo" | "novo";
   decorFragments?: boolean;
   decorClone?: boolean;
+  townClone?: boolean;
   decorMaxAll?: boolean;
   upgrades?: {
     factory?: Record<string, number>;
@@ -293,6 +353,9 @@ export function applySave(p: SavePayload) {
   if (!s.rawXml) throw new Error("Load mGameInfo trước");
   const revealed = revealSave(p);
   const parts: string[] = [];
+  // Kept so an edit the push gate later refuses can be undone: the session
+  // must never be left holding a save that can never be written to the device.
+  const prevXml = s.rawXml;
 
   // Apply compound operations first so every UI change is committed in one save.
   if (p.unbanMode) {
@@ -305,6 +368,11 @@ export function applySave(p: SavePayload) {
     if (!s.friendXml) throw new Error("FetchCity friend trước khi Clone Decor");
     s.rawXml = cloneDecorOnly(s.rawXml, s.friendXml).xml;
     parts.push("decor-clone");
+  }
+  if (p.townClone) {
+    if (!s.friendXml) throw new Error("FetchCity bạn trước khi Clone bố cục thành phố");
+    s.rawXml = cloneTownLayout(s.rawXml, s.friendXml).xml;
+    parts.push("town-clone");
   }
   if (p.regatta) {
     s.rawXml = injectRegata(s.rawXml, 105, 135);
@@ -489,8 +557,18 @@ export function applySave(p: SavePayload) {
   if (!parts.length) throw new Error("Nothing selected");
   const malformed = findUnbalancedTag(s.rawXml);
   if (malformed) throw new Error(`Save XML không hợp lệ (${malformed}) — hủy để tránh hỏng file`);
+  let fileB64: string | null;
+  try {
+    fileB64 = encodeSave(s);
+  } catch (e) {
+    // The push gate refused this file. Undo the edit and leave the log clean
+    // so the session stays usable instead of failing the same way forever.
+    s.rawXml = prevXml;
+    s.log.push(`Save rejected by identity gate: ${parts.join(", ")}`);
+    throw e;
+  }
   s.log.push(`Save applied: ${parts.join(", ")}`);
-  return { ...snapshot(s), parts, xml: s.rawXml, fileB64: encodeSave(s) };
+  return { ...snapshot(s), parts, xml: s.rawXml, fileB64 };
 }
 
 export function applyRegatta(token: string, sessionId: string) {
