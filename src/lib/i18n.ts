@@ -348,10 +348,18 @@ const vi = {
   regattaWindow: "Thời gian regatta",
   regattaGuards:
     "Mỗi task được sao chép nguyên vẹn từ một task thật đã có trong save (type, target, need, score, ver...), chỉ đổi thời gian. Thời gian luôn nằm trong khoảng của regatta và luôn ở quá khứ. Không bao giờ tạo regatta mới, không ghi đè bộ đếm lifetime, không đổi danh tính save.",
-  regattaCount: "Số task muốn thêm",
-  regattaCountHint: "Một tuần thật thường có 10-15 task. Tối đa 15.",
+  regattaCount: "Tổng task trong tuần",
+  regattaCountHint:
+    "Số task bạn muốn tuần này có sau khi áp dụng (không phải số thêm vào). Tuần thật thường có 10-15 task và tool không bao giờ vượt 15.",
   regattaAdd: "Thêm vào Lưu & đẩy",
   regattaQueued: "✓ Đã xếp hàng",
+  regattaWhyNoRegatta:
+    "Nút bị tắt vì save chưa có tuần regatta nào đang chạy. Township chỉ ghi khối <Regata> khi một tuần đang mở - vào regatta trong game rồi kết nối lại. Tool không bao giờ tự tạo khối đó, vì Playrix đối chiếu cửa sổ thời gian của nó.",
+  regattaWhyNoTemplate:
+    "Nút bị tắt vì save chưa có task regatta thật nào để sao chép. Chơi một task regatta trong game trước rồi thử lại.",
+  regattaWhyFull: "Nút bị tắt vì tuần này đã có {count} task và tool không bao giờ đẩy một tuần vượt {max} task - không còn gì để thêm.",
+  regattaWhyWindow:
+    "Nút bị tắt vì tuần regatta chưa mở đủ lâu để đặt thời gian an toàn cho task. Thử lại sau ít phút.",
 };
 
 const en: typeof vi = {
@@ -679,10 +687,18 @@ const en: typeof vi = {
   regattaWindow: "Regatta window",
   regattaGuards:
     "Every task is copied whole from a real record already in your save (type, target, need, score, ver ...) and only its timestamps move. Those always fall inside the regatta window and always in the past. It never creates a regatta, never rewrites a lifetime counter, and never touches your save's identity.",
-  regattaCount: "Tasks to add",
-  regattaCountHint: "A real week has 10-15 tasks. Maximum 15.",
+  regattaCount: "Total tasks this week",
+  regattaCountHint:
+    "How many tasks the week should hold once applied (not how many more to add). A real week has 10-15 tasks, and this tool never goes past 15.",
   regattaAdd: "Add to Save & push",
   regattaQueued: "✓ Queued",
+  regattaWhyNoRegatta:
+    "Disabled: this save has no regatta week running. Township only writes the <Regata> block while a week is live - start or join one in game, then reconnect. We never create that block ourselves: Playrix checks its time window.",
+  regattaWhyNoTemplate:
+    "Disabled: this save has no real completed regatta task to copy from. Play one regatta task in game first, then try again.",
+  regattaWhyFull: "Disabled: this week already has {count} tasks, and this tool never pushes a week past {max} - there is nothing left to add.",
+  regattaWhyWindow:
+    "Disabled: the regatta week has not been open long enough to place safe timestamps. Try again in a few minutes.",
 };
 
 function overlay(p: Partial<typeof en>): typeof en {

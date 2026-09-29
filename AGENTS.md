@@ -246,25 +246,120 @@ positions); the sidebar *Tools* button was removed, leaving Season there.
   and not the whole document. Basing it on the template re-issued numbers the
   block already held (`…3,4,1,2`), a step backwards in a field that only ever
   grows; restarting it per template id let two ids interleave out of order.
+- **`RegataCenter > Regata > Vars` counts the records in that same block, and
+  the batch has to move those too.** Measured on **7/7 real saves**:
+  `taskCounter == takeConfirm == count(<MyOldTask>)` exactly (`1, 14, 20, 1, 1,
+  1, 1`), with `takeAttempts >= takeConfirm` every time (`1/1`, `17/14`,
+  `39/20`). Growing the records without moving them wrote a save that
+  disagreed with itself in three fields a server reads for free — and, if the
+  game counts a week from `taskCounter`, is the reason an injected batch can
+  register as nothing at all. `bumpRegattaTaskVars()` raises the two counters
+  by the batch and lifts `takeAttempts` if the batch would push it under. Same
+  rule as `RegataTasksCompleted`: **only what the block already declares** —
+  a `<Regata>` with no `<Vars>` gains no fabricated counter (guard rail:
+  `regata never invents a counter the block never had`).
+- **New records are inserted after the last `<MyOldTask>` / immediately before
+  `<Vars>`** (`placeNewTasks`), not appended at the end of the block. Every
+  untouched save orders the block `FreeTask* / TakenTask* / MyOldTask* / Vars /
+  Team / …`; appending parked the batch after `<Vars>` and `<Team>`, a shape no
+  real save has. Guard rail: `regata puts new records where real saves keep
+  them`.
+- **`nTasks` is the week's *target total*, not "+N more"** — `injectRegata`
+  computes `need = want - current`. The badge (`current / N`) and the hint say
+  so; the label used to read "tasks to add", which promised a delta the server
+  never performed. Do not "fix" the semantics by making it a delta without
+  changing both, or the badge starts lying.
 - The batch is capped at `REGATTA_MAX_TASKS = 15` (a strong week), default
   `REGATTA_DEFAULT_TASKS = 12`. `SavePayload.regattaTasks` is clamped on the
   server; the zod bound in `studio-api.ts` duplicates it because that module is
   bundled for the browser and cannot import a server constant.
-- `applySave` rolls `s.rawXml` **and** `s.unban` back on refusal: a restore
+- `applySave` rolls `s.rawXml` **and `s.unban` back on refusal: a restore
   queued in the same batch has already rewritten `s.rawXml`, so leaving it in
   place while reporting a failure would make the next push apply it twice.
   `applyRegatta` is now a one-line delegate to `applySave`, so the identity
   gate, the balance check and the rollback are shared rather than duplicated.
 
+### Why the Add button looked broken
+
+The button is `disabled={busy || pendingRegatta || regattaState !== "ok"}`, and
+`regattaState` is computed in the tab from **the count the user actually
+picked**. It used to read `session.regattaInfo.reason` straight off the
+snapshot — but `snapshot()` calls `inspectRegatta(rawXml)` with the **default
+12**, because it cannot know which number the user is about to type. Two
+symptoms, both reported as "the button is not clickable":
+
+- save holding 12 tasks, user raises the count to 15 → badge says *already has
+  enough*, button dead, though 15 would have worked;
+- save holding 5 tasks, user drops the count to 3 → badge says ready, button
+  live, and `injectRegata` then throws `already_full`.
+
+`src/lib/regatta.ts` holds `regattaWant` / `regattaBounds` / `regattaReason`
+and the two constants — **pure and browser-safe (no fs, no server imports)**.
+The server's `inspectRegatta` and the tab's `regattaState` both call it, so
+"pressable" and "will succeed" are one decision instead of two that drift. The
+tab re-runs it on every keystroke of the count field, and a disabled button now
+prints the reason *in place* (`REGATTA_WHY_KEY`, under the button) instead of
+only as a badge two panels above it. The badge's colour and icon follow
+`regattaState` too.
+
+Even with the shared helper, a **real** save can still be legitimately
+un-injectable: `mGameInfo.current.xml` has **no `<Regata>` block at all** →
+`no_active_regatta` → correctly disabled. That is not a bug, and the hint line
+is what tells the user so.
+
 Guard rails: `xml-edit.test.mts` proves field-for-field cloning, in-window
 ordered past timestamps, the monotonic lifetime counter, self-closing-block
-expansion (not a rival second block) and every refusal;
+expansion (not a rival second block), every refusal, **the block counters
+staying in step with the records**, **no invented counter**, **placement
+before `<Vars>`**, and **`inspectRegatta(xml, n).reason === "ok"` ⟺
+`injectRegata(xml, n)` does not throw** over a matrix of saves × counts;
 `studio-pipeline.test.ts` adds `a refused regatta does not leave a half-applied
-restore behind` alongside the existing identity and push-gate tests.
+restore behind` alongside the existing identity and push-gate tests;
+`ui-regressions.test.mts` greps the tab source so the button can never go back
+to reading `session.regattaInfo.reason`.
 
-The happy path can only be proven against a synthetic fixture: **no real sample
-save currently carries a live `<Regata>` window**, so in-game confirmation still
+The happy path can also be proven against a real save: a **supplied** sample
+(not checked into the repo — the fixtures stay the durable guard rail) carried a
+live window of `2026-09-28 → 2026-10-05`, and `injectRegata` on it passed
+balanced-XML, both counters, placement, in-window strictly-past distinct
+timestamps, monotonic `RegataTasksCompleted`, unchanged identity and
+"everything outside `<Regata>` byte-identical". In-game confirmation still
 needs a throwaway account on your device — never your main.
+
+### What the competitors actually do (research, 2026-09-29)
+
+The reference tools were reverse-engineered rather than guessed at, because the
+obvious claim — "everyone has regatta, copy them" — turned out to be false:
+
+- **TWN** (`twndesban2.pyc`, disassembled with `marshal` + `dis`; its docstring
+  reads *"Regata fixa: 105 tarefas de 135 pontos"*) implements `processar_regata`
+  as: find `<Regata…>`, **`re.sub` away every existing `<MyOldTask/>`**, take the
+  *first* `<FreeTask>` id starting with `match3_`, then emit `total` records that
+  all reuse **that one id**, with `num = i+6`, `takenCounter = i+2`,
+  `score="135"` on every record and `realEndTime = 1764536400 + i*28800` — a
+  **fixed base date of 2025-12-01 stepping 8 hours**, entirely independent of the
+  week's real window. It never touches `taskCounter` / `takeConfirm`.
+  That is precisely the fabricated approach this repo already rejected as the
+  ban risk, and it is detectable three separate ways: uniform score, duplicate
+  ids, timestamps outside the window. Our save (`mGameInfo.current.xml`) holds
+  105 such records (`match3_12`…`match3_104`, every `score="135"`, all
+  `realEndTime` on a single day) — the old injector's output, kept as an
+  anti-reference.
+- **TS Lite / TS Vip / TWN**: zero regatta implementation in the other builds
+  (their dex, `images.dat` and dumps have no `Regata`/`MyOldTask` beyond the
+  stat-alias field `f_reg: "Regata Tasks"`). There is no competitor design to
+  copy — the clone-based approach here is the only safe one.
+- The "Choose League — Wood 6 / Copper 9 / Steel 11 / Silver 13 / Gold 15 /
+  Infinite 100" picker seen in a demo video is **not** in the TWN build on file
+  (`Choose League`, `Copper`, `league` are 0 hits across the whole extraction),
+  so it is a different/newer build. Its 100-task option is the same fabrication
+  with a preset in front of it.
+- Real weeks hold far more than 15 if you only look at `<PrevRegata>`
+  (`36, 36, 73` measured, spanning 4–7 days of `realEndTime`), while *current*
+  blocks measure `1, 14, 20`. `REGATTA_MAX_TASKS = 15` stays a ceiling on what
+  **one batch** writes, not a claim about what a week can contain — and the save
+  still refuses `already_full` when it already holds ≥ the requested total, so
+  the tool never pushes a week *down* or rewrites it.
 
 ## Factory / upgrade levels
 

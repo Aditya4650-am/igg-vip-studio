@@ -117,3 +117,30 @@ test("factory and train/island tabs are gone", () => {
   const src = read("server/studio.server.ts");
   assert.ok(src.includes("factories") || src.includes("upgrades"), "studio.server must expose upgrades");
 });
+
+test("the regatta button answers for the count on screen, not the default batch", () => {
+  const tsx = read("../components/studio-app.tsx");
+  const tab = tsx.slice(tsx.indexOf('{tab === "regatta" &&'), tsx.indexOf('{tab === "barn" &&'));
+  assert.ok(tab.length > 0, "could not locate the regatta tab markup");
+
+  // snapshot() cannot know which number the user is about to pick, so
+  // `regattaInfo.reason` is decided for the default 12. Reading it straight
+  // into `disabled` is what let a save holding 12 show a dead button with the
+  // count raised to 15, and a save holding 5 show a live button with the count
+  // dropped to 3 — a push the server then refused.
+  assert.ok(!tab.includes("session.regattaInfo.reason"), "the button must not read the default-batch reason");
+  assert.ok(tab.includes('regattaState !== "ok"'), "the button must gate on the count-aware state");
+  assert.ok(tsx.includes("regattaReason("), "the tab must re-run the server's own reason helper");
+
+  // A greyed-out button with a badge two panels above it reads as "broken".
+  // The refusal is now spelled out where the user is actually looking.
+  assert.ok(tab.includes("REGATTA_WHY_KEY"), "the disabled button must explain itself in place");
+
+  const i18n = read("i18n.ts");
+  for (const key of ["regattaWhyNoRegatta", "regattaWhyNoTemplate", "regattaWhyWindow", "regattaWhyFull"]) {
+    const m = new RegExp(`\\b${key}:\\s*"([^"]*)"`).exec(i18n);
+    assert.ok(m, `${key} must exist in the dictionary`);
+    assert.ok(m[1].length > 20, `${key} must say what to do, got: ${m[1]}`);
+  }
+  assert.ok(/\bregattaWhyFull:\s*"[^"]*\{count\}[^"]*\{max\}/.test(i18n), "regattaWhyFull must name the count and the ceiling");
+});

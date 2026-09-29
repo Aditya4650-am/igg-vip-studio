@@ -15,6 +15,7 @@ import { AVATAR_MAX, avatarEmoji, avatarGroupId, avatarIconPath, avatarsInRange,
 import { MUSEUM_IDS, artifactEmoji, artifactIconPath, museumLabel } from "@/lib/museum";
 import { CARD_GROUPS, cardIconPath, cardNumber } from "@/lib/cards";
 import { iconForBarn, iconForDecorLabel, iconForGem, iconForGroup, iconForItemLabel, iconForProfileLabel, iconForSkin, iconForStat, iconForSticker, iconForUpgradeLabel, iconForZoo } from "@/lib/game-icon-map";
+import { REGATTA_MAX_TASKS, regattaReason, type RegattaReason } from "@/lib/regatta";
 import {
   connectLoad,
   fetchCity,
@@ -162,6 +163,16 @@ const REGATTA_REASON_KEY = {
   no_template: "regattaNoTemplate",
   window_closed: "regattaNoWindow",
   already_full: "regattaFull",
+} as const;
+
+/** Shown directly under the disabled button. The badge above only names the
+ *  state, and a greyed-out button with a badge somewhere else reads as "this
+ *  thing is broken" — this says what is wrong and what to do about it. */
+const REGATTA_WHY_KEY = {
+  no_active_regatta: "regattaWhyNoRegatta",
+  no_template: "regattaWhyNoTemplate",
+  window_closed: "regattaWhyWindow",
+  already_full: "regattaWhyFull",
 } as const;
 
 /** Why the Cards tab will (or will not) accept a send batch. Mirrors
@@ -1894,6 +1905,25 @@ export function StudioApp() {
     return () => window.removeEventListener("keydown", onKey);
   }, [save]);
 
+  // The snapshot's `regattaInfo.reason` is computed for the *default* batch of
+  // 12 — `snapshot()` cannot know which number the user is about to pick. The
+  // button has to answer for the count on screen: a save already holding 12
+  // read "enough tasks" with the count raised to 15 (dead button, but 15 would
+  // have worked), and a save holding 5 read "ready" with the count dropped to
+  // 3 (live button, then the push threw `already_full`). Both look like a
+  // broken button. Re-running the server's own helper here makes "pressable"
+  // and "will succeed" the same decision.
+  const regattaState: RegattaReason = session
+    ? regattaReason(
+        {
+          window: session.regattaInfo.window,
+          templates: session.regattaInfo.templates,
+          current: session.regattaInfo.current,
+        },
+        regattaTasks,
+      )
+    : "no_active_regatta";
+
   const tool = (kind: "regatta" | "season") => {
     if (kind === "regatta") {
       setPendingRegatta(true);
@@ -3369,17 +3399,17 @@ export function StudioApp() {
                         <span
                           className={cn(
                             "state-badge rounded-full px-2.5 py-1 text-xs font-medium",
-                            session.regattaInfo.reason === "ok" ? "state-badge--ready" : "bg-input text-muted",
+                            regattaState === "ok" ? "state-badge--ready" : "bg-input text-muted",
                           )}
                         >
                           <GameIcon
-                            name={session.regattaInfo.reason === "ok" ? "success" : "regatta"}
+                            name={regattaState === "ok" ? "success" : "regatta"}
                             className="size-3.5"
                           />
-                          {tr(REGATTA_REASON_KEY[session.regattaInfo.reason])}
+                          {tr(REGATTA_REASON_KEY[regattaState])}
                         </span>
                         <span className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums">
-                          {tr("regattaDone")} {session.regattaInfo.current} / {Math.min(regattaTasks, 15)}
+                          {tr("regattaDone")} {session.regattaInfo.current} / {Math.min(regattaTasks, REGATTA_MAX_TASKS)}
                         </span>
                         <span className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums">
                           {tr("regattaTemplates")} {session.regattaInfo.templates}
@@ -3420,7 +3450,7 @@ export function StudioApp() {
                           size="sm"
                           className="tool-action tool-action--regatta"
                           variant="purple"
-                          disabled={busy || pendingRegatta || session.regattaInfo.reason !== "ok"}
+                          disabled={busy || pendingRegatta || regattaState !== "ok"}
                           onClick={() => void tool("regatta")}
                         >
                           <GameIcon name="regatta" className="size-4" />
@@ -3432,6 +3462,13 @@ export function StudioApp() {
                           </Button>
                         ) : null}
                       </div>
+                      {!pendingRegatta && regattaState !== "ok" ? (
+                        <p className="mt-2 text-xs text-amber">
+                          {tr(REGATTA_WHY_KEY[regattaState])
+                            .replace("{count}", String(session.regattaInfo.current))
+                            .replace("{max}", String(REGATTA_MAX_TASKS))}
+                        </p>
+                      ) : null}
                     </section>
                   </div>
                 )}

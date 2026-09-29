@@ -208,6 +208,102 @@ test("regata never tops a save up past its own ceiling", () => {
   assert.equal(inspectRegatta(out).reason, "already_full");
 });
 
+// <Regata>'s own <Vars> counts the records in that same block. Measured on all
+// seven real saves available: taskCounter == takeConfirm == count(<MyOldTask>)
+// exactly (1/1, 14/14, 20/20, 1/1, 1/1, 1/1, 1/1) and takeAttempts >=
+// takeConfirm (1/1, 17/14, 39/20, 1/1, …). A batch that grows the records
+// without moving them writes a save that disagrees with itself in three fields.
+function countedRegattaSave(count: number) {
+  const now = Math.floor(Date.now() / 1000);
+  const start = now - 4 * 86400;
+  const end = now + 4 * 86400;
+  const task = (i: number) =>
+    `<MyOldTask id="trains_${i}" type="trains" user="MECITY1" num="${i}" ver="1" score="100" ` +
+    `takeTime="${start + 300 + i}" completeTime="${start + 900 + i}" endTime="${start + 1000 + i}" ` +
+    `realEndTime="${start + 1000 + i}"/>`;
+  return (
+    `<Global><Var name="cityId" v="MECITY1" t="s"/>` +
+    `<RegataCenter>` +
+    `<Regata id="507" startTime="${start}" endTime="${end}" score="100" scoreUpd="${start + 900}">` +
+    `<FreeTask id="trains_1" num="1" ver="1"/>` +
+    Array.from({ length: count }, (_, i) => task(i + 1)).join("") +
+    `<Vars><Var name="taskCounter" v="${count}" t="i"/>` +
+    `<Var name="takeConfirm" v="${count}" t="i"/>` +
+    `<Var name="takeAttempts" v="${count + 6}" t="i"/>` +
+    `<Var name="UnrelatedCounter" v="7" t="i"/></Vars>` +
+    `<Team clanId="x"></Team>` +
+    `</Regata></RegataCenter></Global>`
+  );
+}
+
+const varNum = (xml: string, name: string): number | null => {
+  const m = new RegExp(`<Var\\b[^>]*\\bname="${name}"[^>]*>`, "i").exec(xml);
+  const v = m ? /v="(\d+)"/.exec(m[0]) : null;
+  return v ? Number(v[1]) : null;
+};
+
+const regattaInner = (xml: string) => /<Regata\b[^>]*>([\s\S]*?)<\/Regata\s*>/i.exec(xml)?.[1] ?? "";
+
+test("regata keeps the block's own counters in step with the records it grew", () => {
+  const out = injectRegata(countedRegattaSave(2), 6); // 2 present, so 4 are added
+  wellFormed(out);
+
+  const inner = regattaInner(out);
+  const tasks = (inner.match(/<MyOldTask\b/g) ?? []).length;
+  assert.equal(tasks, 6, "the batch lands in the block");
+  assert.equal(varNum(inner, "taskCounter"), 6, "taskCounter must equal the records the block holds");
+  assert.equal(varNum(inner, "takeConfirm"), 6, "takeConfirm tracks the same records");
+  assert.ok(
+    (varNum(inner, "takeAttempts") ?? 0) >= 6,
+    `takeAttempts must never trail takeConfirm, got ${varNum(inner, "takeAttempts")}`,
+  );
+  assert.equal(varNum(inner, "UnrelatedCounter"), 7, "a Var that is not a task count stays put");
+});
+
+test("regata never invents a counter the block never had", () => {
+  // `liveRegattaSave`'s <Regata> carries no <Vars> at all: a block that never
+  // tracked a count gains none, exactly like RegataTasksCompleted.
+  const out = injectRegata(liveRegattaSave(), 3);
+  assert.ok(!/<Var\b[^>]*\bname="taskCounter"/.test(out), "no fabricated taskCounter");
+  assert.ok(!/<Var\b[^>]*\bname="takeConfirm"/.test(out), "no fabricated takeConfirm");
+});
+
+test("regata puts new records where real saves keep them", () => {
+  const out = injectRegata(countedRegattaSave(1), 4);
+  const inner = regattaInner(out);
+  const lastTask = inner.lastIndexOf("<MyOldTask");
+  const vars = inner.indexOf("<Vars");
+  assert.ok(lastTask > 0, "the batch must be inside the block");
+  assert.ok(vars > lastTask, `records belong before <Vars>; real saves read FreeTask/TakenTask/MyOldTask/Vars, got: ${inner.slice(0, 160)}`);
+  assert.ok(inner.indexOf("<Team") > vars, "<Team> keeps following <Vars>");
+});
+
+test("the status shown for a batch size is the decision the server makes for it", () => {
+  const saves = [
+    ["one task", liveRegattaSave()],
+    ["no template", liveRegattaSave({ hasTask: false })],
+    ["two tasks", countedRegattaSave(2)],
+    ["nine tasks", countedRegattaSave(9)],
+  ] as const;
+
+  for (const [label, xml] of saves) {
+    for (const n of [1, 3, 12, 15, 99]) {
+      const reason = inspectRegatta(xml, n).reason;
+      let threw = false;
+      try {
+        injectRegata(xml, n);
+      } catch {
+        threw = true;
+      }
+      assert.equal(
+        reason === "ok",
+        !threw,
+        `${label}: inspectRegatta says "${reason}" for ${n} tasks but injectRegata ${threw ? "refused" : "accepted"} it`,
+      );
+    }
+  }
+});
+
 test("building stash handles paired Building elements", () => {
   const paired = maxBuildingsStash(
     '<Global><BuildingsStash><Building id="A" count="2"></Building></BuildingsStash></Global>',

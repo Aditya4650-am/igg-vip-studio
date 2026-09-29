@@ -1,3 +1,11 @@
+import {
+  REGATTA_DEFAULT_TASKS,
+  REGATTA_MAX_TASKS,
+  regattaBounds,
+  regattaReason,
+  regattaWant,
+  type RegattaReason,
+} from "../../regatta";
 import { writeVar } from "./vars.server";
 import { SKINS_CATALOG } from "./skins-catalog.server";
 import { attrValue, insertInsideRoot } from "./xml-edit.server";
@@ -381,8 +389,9 @@ function resolveRegataUser(text: string): string {
   return "0";
 }
 
-/** Why a save cannot receive regatta tasks. `ok` means it can. */
-export type RegattaReason = "ok" | "no_active_regatta" | "no_template" | "window_closed" | "already_full";
+// The decision lives in ../../regatta: the tab re-runs it for the batch size
+// the user actually chose, so it must be the same code the server runs.
+export type { RegattaReason };
 
 export interface RegattaState {
   reason: RegattaReason;
@@ -401,10 +410,9 @@ export interface RegattaState {
   window: { start: number; end: number } | null;
 }
 
-/** A strong player clears roughly 15 tasks in a week. Past that a batch stops
- *  looking like play and starts looking like a tool, so 15 is a hard ceiling. */
-export const REGATTA_MAX_TASKS = 15;
-export const REGATTA_DEFAULT_TASKS = 12;
+// Re-exported so every existing call site keeps its import path; the values
+// now live next to the reason function that must agree with them.
+export { REGATTA_DEFAULT_TASKS, REGATTA_MAX_TASKS };
 
 const REGATTA_ERR = {
   no_active_regatta:
@@ -508,19 +516,75 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
   const scores = [...block.inner.matchAll(/<MyOldTask\b[^>]*\bscore="(\d+)"/g)].map((m) => Number(m[1]));
   const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
   const active = !!win && now >= win.start && now <= win.end;
-  const want = Math.max(1, Math.min(REGATTA_MAX_TASKS, Math.floor(Number(nTasks) || 0)));
-  const hi = win ? Math.min(win.end, now) - 60 : 0;
-  const lo = win ? win.start + Math.floor((hi - win.start) * 0.35) : 0;
-
-  let reason: RegattaReason = "ok";
-  if (!active) reason = "no_active_regatta";
-  else if (!templates.length) reason = "no_template";
-  else if (want <= current) reason = "already_full";
-  // Same two floors `injectRegata` applies, so the status the tab shows is the
-  // decision the server will actually make for that batch size.
-  else if (hi - win!.start < 600 || hi - lo < (want - current) * 60) reason = "window_closed";
+  // Exactly what `injectRegata` will decide for this batch size, in the same
+  // order — now shared with the tab, which re-runs it for the count the user
+  // actually picked instead of trusting this default-12 answer.
+  const reason = regattaReason({ window: win, templates: templates.length, current }, nTasks, now);
 
   return { reason, active, current, templates: templates.length, pool, avgScore, user, window: win };
+}
+
+/**
+ * Where new records go inside `<Regata>`.
+ *
+ * Every untouched save orders the block `FreeTask* / TakenTask* / MyOldTask* /
+ * Vars / Team / …`. Appending at the end would park the batch *after* `<Vars>`
+ * and `<Team>` — a shape no real save has, and the cheapest thing to spot when
+ * comparing two weeks side by side. So: straight after the last record of its
+ * own kind, otherwise immediately before `<Vars>`, otherwise at the end.
+ */
+function placeNewTasks(inner: string, body: string): string {
+  let idx = -1;
+  for (const m of inner.matchAll(/<MyOldTask\b[^>]*\/?>/gi)) idx = m.index + m[0].length;
+  if (idx < 0) {
+    const vars = /<Vars\b/i.exec(inner);
+    idx = vars ? vars.index : inner.length;
+  }
+  return inner.slice(0, idx) + body + inner.slice(idx);
+}
+
+/**
+ * `<Regata>`'s own `<Vars>` counts the records sitting in that same block. On
+ * all seven real saves examined, `taskCounter == takeConfirm ==
+ * count(<MyOldTask>)` exactly (1/1, 14/14, 20/20, 1/1, 1/1, 1/1, 1/1), and
+ * `takeAttempts >= takeConfirm` (1/1, 17/14, 39/20, 1/1, …).
+ *
+ * Growing the block without moving them leaves a save that disagrees with
+ * itself in three fields a server can read for free — and, if the game counts
+ * a week from `taskCounter`, is why an injected batch registers as nothing.
+ * Same rule as `RegataTasksCompleted` and `<Regata score>`: move what is
+ * already there, never invent a counter the block never had.
+ */
+function bumpRegattaTaskVars(varsInner: string, added: number): string {
+  let out = varsInner;
+  const findTag = (name: string): string | null =>
+    new RegExp(`<Var\\b[^>]*\\bname="${name}"[^>]*>`, "i").exec(out)?.[0] ?? null;
+  const read = (tag: string): number | null => {
+    const m = /\bv="([^"]*)"/i.exec(tag);
+    return m && /^\d+$/.test(m[1]) ? Number(m[1]) : null;
+  };
+  const set = (tag: string, value: number): void => {
+    out = out.replace(tag, () => setTagAttr(tag, "v", String(value)));
+  };
+
+  const counterTag = findTag("taskCounter");
+  const confirmTag = findTag("takeConfirm");
+  const counter = counterTag ? read(counterTag) : null;
+  const confirm = confirmTag ? read(confirmTag) : null;
+  const nextCounter = counter !== null ? counter + added : null;
+  const nextConfirm = confirm !== null ? confirm + added : null;
+
+  if (counterTag && nextCounter !== null) set(counterTag, nextCounter);
+  if (confirmTag && nextConfirm !== null) set(confirmTag, nextConfirm);
+
+  // `takeAttempts` never trails `takeConfirm` in a real save, so raise it to
+  // the new count when the batch would otherwise push it under.
+  const attemptsTag = findTag("takeAttempts");
+  const attempts = attemptsTag ? read(attemptsTag) : null;
+  if (attemptsTag && attempts !== null && nextConfirm !== null && attempts < nextConfirm) {
+    set(attemptsTag, nextConfirm);
+  }
+  return out;
 }
 
 /**
@@ -537,7 +601,7 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
  */
 export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): string {
   const text0 = asText(xml).replace(/^\uFEFF/, "");
-  const want = Math.max(1, Math.min(REGATTA_MAX_TASKS, Math.floor(Number(nTasks) || 0)));
+  const want = regattaWant(nTasks);
 
   const block = regattaBlock(text0);
   const win = block ? regattaWindow(block.attrs) : null;
@@ -558,8 +622,7 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   // Timestamps must sit inside the regatta window AND in the past. A completion
   // dated in the future, or outside the window the server is holding, is the
   // single easiest anomaly to spot.
-  const hi = Math.min(win.end, now) - 60;
-  const lo = win.start + Math.floor((hi - win.start) * 0.35);
+  const { hi, lo } = regattaBounds(win, now);
   // Both floors matter: the first keeps `lo` clear of `win.start + 122` below,
   // so task times never collapse onto one another, and the second leaves each
   // task at least a minute of its own.
@@ -611,7 +674,7 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   const body = tasks.join("");
   let text = text0;
   if (block.close) {
-    text = text.replace(/(<Regata\b[^>]*>)([\s\S]*?)(<\/Regata\s*>)/i, (_f, o, inner, c) => `${o}${inner}${body}${c}`);
+    text = text.replace(/(<Regata\b[^>]*>)([\s\S]*?)(<\/Regata\s*>)/i, (_f, o, inner, c) => `${o}${placeNewTasks(inner, body)}${c}`);
   } else {
     const selfRe = /<Regata\b[^>]*\/>/i;
     const self = text.match(selfRe);
@@ -646,7 +709,7 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
     if (rawUpd !== null && /^\d+$/.test(rawUpd) && newest > Number(rawUpd)) {
       attrs = putAttr(attrs, "scoreUpd", String(newest));
     }
-    text = text.replace(after[0], () => `${open[1]}${attrs}${open[3]}${after[2]}${after[3]}`);
+    text = text.replace(after[0], () => `${open[1]}${attrs}${open[3]}${bumpRegattaTaskVars(after[2], need)}${after[3]}`);
   }
 
   return text;
