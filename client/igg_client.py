@@ -45,11 +45,17 @@ if sys.stderr is None:
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
-APP_VERSION = "1.1.19"
+APP_VERSION = "1.1.20"
 
 # Where the app UI comes from. Override with env IGG_VIP_URL or
 # %APPDATA%\IGG-VIP-Studio\server.txt
-DEFAULT_SERVER_URL = "https://igg-vip-studio-46.onrender.com"
+#
+# The old service (igg-vip-studio-46) was suspended by Render for exceeding
+# the 750 free instance hours the *workspace* gets each month. Since the EXE
+# has no bundled copy of the UI, a suspended origin leaves the window on
+# Render's notice page instead of the tool - which reads as "the EXE will not
+# open". `server.txt` still overrides this without rebuilding.
+DEFAULT_SERVER_URL = "https://igg-vip-studio-491.onrender.com"
 
 # Render serves every service through a wildcard record, so a name that the
 # local resolver rejects is a resolver fault, not a missing service. When the

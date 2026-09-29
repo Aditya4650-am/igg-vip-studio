@@ -2,8 +2,8 @@
 # Version resource for the IGG VIP Studio client EXE.
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 1, 19, 0),
-    prodvers=(1, 1, 19, 0),
+    filevers=(1, 1, 20, 0),
+    prodvers=(1, 1, 20, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -19,11 +19,11 @@ VSVersionInfo(
           [
             StringStruct("CompanyName", "IGG VIP"),
             StringStruct("FileDescription", "IGG VIP TOOL - Desktop Client"),
-            StringStruct("FileVersion", "1.1.19.0"),
+            StringStruct("FileVersion", "1.1.20.0"),
             StringStruct("InternalName", "IGG VIP TOOL"),
             StringStruct("OriginalFilename", "IGG VIP TOOL.exe"),
             StringStruct("ProductName", "IGG VIP TOOL"),
-            StringStruct("ProductVersion", "1.1.19.0"),
+            StringStruct("ProductVersion", "1.1.20.0"),
           ],
         )
       ]
