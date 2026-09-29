@@ -7,12 +7,19 @@
  * The flat `FullCardCollections` counter is display-only — the game does not
  * read it, so writing it reports success while changing nothing in game.
  *
- * Canonical ids are `card_01..card_09` then `card_10..card_150`: every real
+ * Canonical ids are `card_01..card_09` then `card_10..card_151`: every real
  * city writes single digits zero-padded (no real city ever held unpadded
  * `card_1..card_9` — those rows are tool-created lookalikes the game keeps
  * but never counts toward a set). Inputs in either form are normalized to
  * canonical, and stale unpadded lookalikes are removed when their canonical
  * twin is granted.
+ *
+ * The catalog ends at 151 because a genuinely fetched city (`event_city`) holds
+ * `card_01..card_151` contiguous with no gaps, and its `card_151` row is
+ * field-for-field identical to its neighbours (`generatedCount="1"`
+ * `inStockCount="1"` `isNew="false"` `maxInStockCount="1"`) — an ordinary
+ * collection row the game itself wrote. Stopping at 150 left the last real card
+ * unobtainable from *Unlock all*.
  *
  * Three things in here exist because a grant can otherwise look like a fraud
  * pattern to a server reading the save:
@@ -31,7 +38,7 @@
  */
 
 export const CARD_IDS: readonly string[] = Object.freeze(
-  Array.from({ length: 150 }, (_, i) => {
+  Array.from({ length: 151 }, (_, i) => {
     const n = i + 1;
     return n < 10 ? `card_0${n}` : `card_${n}`;
   }),
@@ -50,8 +57,8 @@ const KNOWN: ReadonlySet<string> = new Set(CARD_IDS);
  *   in any save (1 / 0 / 0 / 0 / 0 / 3 / 1) while `totalSendCards` reached 13.
  *   It is a short rolling history, so a longer array would be unprecedented.
  *   The counters carry the real total, exactly as real saves do.
- * - `CARD_SEND_MAX_PER_RUN`: every card, once, in one push — the largest
- *   batch that stays inside the catalog instead of inventing a number.
+ * - `CARD_SEND_MAX_PER_RUN`: a round batch ceiling just under the catalog, so
+ *   one push is effectively a whole collection without ever inventing a number.
  */
 export const CARD_STOCK_MAX = 4;
 export const CARD_SEND_HISTORY_MAX = 3;
@@ -62,7 +69,7 @@ function canonical(id: string): string | null {
   const m = /^card_0*(\d+)$/.exec(id.trim());
   if (!m) return null;
   const n = Number(m[1]);
-  if (n < 1 || n > 150) return null;
+  if (n < 1 || n > 151) return null;
   return n < 10 ? `card_0${n}` : `card_${n}`;
 }
 
@@ -353,7 +360,7 @@ export function cardProblems(block: string): string[] {
   for (const id of ids) {
     const m = /^card_(\d{1,3})$/.exec(id);
     const n = m ? Number(m[1]) : NaN;
-    if (!Number.isInteger(n) || n < 1 || n > 150 || (n < 10 && !/^card_0\d$/.test(id))) {
+    if (!Number.isInteger(n) || n < 1 || n > CARD_IDS.length || (n < 10 && !/^card_0\d$/.test(id))) {
       out.add("card-id-grammar");
       break;
     }
@@ -392,7 +399,7 @@ export function cardProblems(block: string): string[] {
         const m = /^card_0*(\d+)$/.exec(id);
         if (!m) continue;
         const n = Number(m[1]);
-        if (n < 1 || n > 150) continue;
+        if (n < 1 || n > CARD_IDS.length) continue;
         const s = Math.ceil(n / 10);
         if (!bySet.has(s)) bySet.set(s, new Set());
         bySet.get(s)!.add(n);

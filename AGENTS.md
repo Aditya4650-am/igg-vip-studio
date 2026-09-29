@@ -460,6 +460,20 @@ Measured on 7 real saves (629 `OwnedCards` entries): `1 <= inStockCount <= 4`,
 `maxInStockCount >= inStockCount`, canonical zero-padded ids, no duplicates,
 and `trackedUniqueCollectedCards == distinct`.
 
+- **The catalog is `card_01..card_151`, not 150.** A genuinely fetched city
+  (`event_city`) holds `card_01..card_151` contiguous with no gaps, and its
+  `card_151` row is field-for-field identical to its neighbours
+  (`generatedCount="1"` `inStockCount="1"` `isNew="false"`
+  `maxInStockCount="1"`) - an ordinary collection row the game itself wrote.
+  `CARD_IDS`, `cardNumber`, `CARD_GROUPS`, `canonical()` and the push gate's
+  `card-id-grammar` all read `CARD_IDS.length` so they move together: they
+  were five independent copies of `150`, which is what made the gate refuse
+  the very card the picker had just written.
+  `card_152` is deliberately *not* added - no save has ever shown it, and the
+  catalog stops where the evidence stops. `CARD_SEND_MAX_PER_RUN` stays
+  **150** on purpose: it is a round batch ceiling just under the catalog, not
+  a copy of the catalog size.
+
 - `CARD_STOCK_MAX = 4`. The input used to let you type 12 and write
   `inStockCount="12"` — a value no city the server has ever seen can hold. The
   UI clamps at the field, at *Fill all*, and at the payload; the server clamps
@@ -539,6 +553,30 @@ run against 4 real saves (clean, event-closed, and the tool-edited
 the game's own avatar index. `AVATAR_ICON_MAX` (349) is the count of shipped
 artwork and `AVATAR_MAX` (398) is the highest avatar the game offers, so avatars
 350-398 have no picture.
+
+`AVATAR_MAX` must stay **398**. Commit `b92941e` raised it to 500 claiming it
+"matches current game version" while leaving its own comment above it at 398,
+and nothing ever supported 500. Four independent sources agree on 398:
+
+- every genuinely fetched save tops out at 398, and the only ids past it are
+  1390/1391 - which *every* save already carries;
+- a save holding a complete collection has exactly **400** vars
+  (`1..398 + 1390 + 1391`), in several unrelated files;
+- the reference tool unlocks exactly `range(1, 399)`;
+- `AVATAR_EMOJIS` is sized for the 49 slots past the artwork (398-349).
+
+At 500 the picker offered - and `unlockAllAvatars` wrote -
+`Unlocked_ava399..500`: 102 vars no city on the server contains, a shape a
+server reads for free. `injectAvatars` was worse: it accepted `1..9999`
+regardless of its own `maxAva`, because the bound was written
+`Math.max(maxAva, 9999)` - the parameter could never constrain anything.
+`unlockAllAvatars` also had an EOF-append fallback that wrote past `</root>`
+when `</Global>` was missing; it now goes through `insertBeforeRoot`.
+
+Guard rail: `studio-pipeline.test.ts` pins `AVATAR_MAX === 398`, proves 398 is
+written while 399/400/500/999/1390 are refused outright, and that
+`unlockAllAvatars(doc, 9999)` still stops at the ceiling with no var created
+in the `399..1389` window.
 
 `avatarIconPath(n)` returns the artwork URL only for 1..349 and `null` past that;
 `avatarEmoji(n)` returns a distinct face from `AVATAR_EMOJIS` (50 entries, 49
@@ -735,3 +773,44 @@ almost certainly real. `SP2`/`SP5` are also confirmed rendering in-game.
 supplied so far, so they render with the group emoji. Icons are keyed by the
 short picker label, not the id, so adding art means adding a label entry to
 `skinsByGroupLabel.TrainStation` in `game-icon-map.ts`.
+
+## Catalog ceilings cross-checked against the reference tool
+
+TWN (`twndesban2.pyc`, disassembled) was used as an *independent consistency*
+check on the id lists this repo ships - not as a source of new ids. Its own
+values are subsets of ours everywhere they overlap, which is the strongest
+signal available that our catalogs are right rather than invented.
+
+- **Profile (`PlayerProfile > Configs`) - we are a strict superset.** TWN's
+  `processar_unlock_profile` writes exactly four fields (`Badges`, `ExpRanks`,
+  `Frames`, `Styles`) with 12 / 8 / 7 / 3 ids. Our catalogs hold 16 / 20 / 12
+  / 7, every TWN id is already in ours, and every id in ours has been observed
+  in a real save (none is "never seen"). `Themes` is filtered out of the
+  profile UI by both `catalogs.server.ts` and the tab, so its contents are
+  never user-reachable and its gap (`underwater`, `autumn`, `winter`,
+  `halloween`) is not a defect.
+- **Do not expand a catalog from `fearless_city.bin`.** Its
+  `UnlockedChatEmoji` is byte-identical to TWN's unlock value, so that save
+  was written by TWN. Its 817 badges / 990 frames / 5000 exp-ranks are
+  therefore contaminated evidence and were deliberately *not* used to grow
+  anything. Its 817-badge set also contains every id the clean saves hold,
+  which is what made it look authoritative at first.
+- **Stickers: `st80` added, `desc` rejected.** `st80` appears in both TWN's
+  value and `mGameInfo_decoded.xml` and completes the contiguous `st1..st80`
+  run we already shipped as `st1..st79`. `desc` appears only in TWN, fits no
+  id family here (`st*` / `sp*` / `v*`) and appears in no save we hold - it
+  reads like a config key that leaked into their string, so copying it would
+  append a token the game does not know to a list that was valid before.
+- **The apparent `st0..st200` / `sp1..sp200` universe is an artefact.** Those
+  ids occur only in saves a tool edited (`mGameInfo.current-2` carries a
+  430-id list that also contains `sp1@`, `st@`, `b1` and bare numbers). The
+  clean saves hold 6, 14 and 107 sticker ids, and all three are inside our
+  list.
+- **`inStockCount` above 4 was seen once**, in `mGameInfo_dec.xml` (a 2026-08
+  Telegram file predating this tool). It changes nothing: `grantCards` only
+  ever raises stock (`if (stock < want)`), so a save arriving with 8 keeps 8
+  and `CARD_STOCK_MAX = 4` only bounds what a *new* grant may write.
+
+Guard rail: `studio-pipeline.test.ts` asserts the sticker id runs are
+contiguous, that `st80` is offered, and that `desc` can never become a sticker
+id.

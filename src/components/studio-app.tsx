@@ -1943,7 +1943,7 @@ export function StudioApp() {
   };
 
   const fields = useMemo(() => catalogs?.fields ?? [], [catalogs]);
-  // Cards closeup: 150 cards rotate across 5 pack arts (see cardIconPath), so
+  // Cards closeup: 151 cards rotate across 5 pack arts (see cardIconPath), so
   // the tab shows 5 pack tiles; tapping one expands its 30 cards.
   const cardPacks = useMemo(
     () =>

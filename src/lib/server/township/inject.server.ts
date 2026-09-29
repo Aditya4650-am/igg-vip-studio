@@ -7,6 +7,7 @@ import {
   type RegattaReason,
 } from "../../regatta";
 import { writeVar } from "./vars.server";
+import { AVATAR_MAX } from "../../catalogs";
 import { SKINS_CATALOG } from "./skins-catalog.server";
 import { attrValue, insertInsideRoot } from "./xml-edit.server";
 import { RAW_FACTORIES, RAW_ISLANDS, RAW_TRAINS } from "../catalogs.data.server";
@@ -31,7 +32,7 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export function getExistingAvatars(xml: string, maxAva = 500): number[] {
+export function getExistingAvatars(xml: string, maxAva = AVATAR_MAX): number[] {
   const text = asText(xml);
   const result = new Set<number>();
   const regex = /<Var\s+name="(Unlocked_ava\d+)"[^/]*\/>/gi;
@@ -49,14 +50,16 @@ export function getExistingAvatars(xml: string, maxAva = 500): number[] {
 
 export function unlockAllAvatars(
   xml: string,
-  maxAva = 500
+  maxAva = AVATAR_MAX
 ): { xml: string; created: number[]; updated: number[] } {
   let text = asText(xml);
   const created: number[] = [];
   const updated: number[] = [];
 
   maxAva = Math.max(1, Math.floor(maxAva));
-  maxAva = Math.min(maxAva, 500);
+  // Never let a caller reach past the game's own ceiling: a var the game has
+  // never issued is a shape no city on the server contains.
+  maxAva = Math.min(maxAva, AVATAR_MAX);
   const existing = getExistingAvatars(text, maxAva);
   const existingSet = new Set(existing);
 
@@ -86,12 +89,12 @@ export function unlockAllAvatars(
     const insert = missing
       .map((id) => `<Var name="Unlocked_ava${id}" v="1" t="b"/>`)
       .join("\n");
-    const globalRegex = /<\/Global\s*>/i;
-    if (globalRegex.test(text)) {
-      text = text.replace(globalRegex, `${insert}\n$&`);
-    } else {
-      text = text + "\n" + insert;
-    }
+    // `insertBeforeRoot` lands the block before `</Global>` — the game-data
+    // container — and, if the save has no `</Global>`, inside the root. The
+    // inline `text + insert` fallback this replaces appended past `</root>`,
+    // which is well-formed-looking XML the game silently discards: a success
+    // that changes nothing in game.
+    text = insertBeforeRoot(text, insert);
     created.push(...missing);
   }
 
@@ -151,14 +154,14 @@ export function injectSeason(xml: string, premium = "1", score = "1002") {
   return insertBeforeRoot(text, `<SeasonTicket premium="${premium}" score="${score}"/>`);
 }
 
-export function injectAvatars(xml: string, selection: string[], maxAva = 398) {
+export function injectAvatars(xml: string, selection: string[], maxAva = AVATAR_MAX) {
   let text = asText(xml);
   const indices = new Set<number>();
   for (const raw of selection) {
     const m = String(raw).match(/(\d+)/);
     if (!m) continue;
     const n = Number(m[1]);
-    if (n >= 1 && n <= Math.max(maxAva, 9999)) indices.add(n);
+    if (n >= 1 && n <= maxAva) indices.add(n);
   }
   const list = [...indices].sort((a, b) => a - b);
   if (!list.length) return text;

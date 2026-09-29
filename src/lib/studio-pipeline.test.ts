@@ -15,9 +15,12 @@ const { iconForZoo } = await import("./game-icon-map.ts");
 const { iconForUpgradeLabel } = await import("./game-icon-map.ts");
 const { ZOO_REQUIREMENTS } = await import("./server/township/zoo.server.ts");
 const { readdirSync, existsSync, readFileSync } = await import("node:fs");
-const { injectRegata } = await import("./server/township/inject.server.ts");
+const { injectRegata, injectAvatars, getExistingAvatars, unlockAllAvatars } =
+  await import("./server/township/inject.server.ts");
 const { assertCardCollectionsSafe, cardProblems, CARD_IDS, CARD_STOCK_MAX } =
   await import("./server/township/cards.server.ts");
+const { CARD_GROUPS, cardNumber, CARD_COUNT } = await import("./cards.ts");
+const { CHAT_EMOJI_IDS } = await import("./server/township/chat-emoji.server.ts");
 
 const { token } = verifyLicenseKey("IGG-OWNER-TESTKEY", "TEST-DEVICE-0001");
 
@@ -603,6 +606,84 @@ test("cards: a grant clamps stock to the measured ceiling and leaves the progres
   assert.equal(seen, 2, "the counter the game reads must not move either");
   assert.deepEqual(cardProblems(cardCollections(out.xml!)), [], "the push gate must accept the result");
   balanced(out.xml!);
+});
+
+test("cards: the catalog ends where the evidence stops — card_151 in, card_152 out", () => {
+  // A genuinely fetched city holds card_01..card_151 contiguous, and its
+  // card_151 row is field-for-field identical to its neighbours. Stopping at
+  // 150 left the last real card unobtainable from *Unlock all*; going past
+  // 151 would invent an id no save has ever shown.
+  assert.equal(CARD_IDS.length, 151, "one row past 150, and no further");
+  assert.ok(CARD_IDS.includes("card_151"), "the last real card must be grantable");
+  assert.equal(cardNumber("card_151"), 151, "the picker must be able to name it");
+  assert.equal(cardNumber("card_152"), null, "no save has ever shown card_152");
+
+  // The picker and the server catalog must be the same set, or *Fill all*
+  // quietly stops short of what the server would happily grant.
+  assert.equal(CARD_COUNT, CARD_IDS.length, "client and server must share one ceiling");
+  const flat = CARD_GROUPS.flatMap((g) => g.items).map((i) => i.id);
+  assert.equal(new Set(flat).size, flat.length, "no duplicate rows in the picker");
+  assert.deepEqual([...flat].sort(), [...CARD_IDS].sort(), "every catalog card is pickable, and nothing else is");
+  assert.equal(flat.filter((x) => x === "card_151").length, 1, "card_151 appears exactly once");
+});
+
+test("cards: granting the 151st card produces a row the push gate accepts", () => {
+  const snap = loadLiveCards();
+  assert.deepEqual(cardProblems(cardCollections(readXml(snap))), [], "the fixture must start clean");
+
+  const out = studio.applySave({ token, sessionId: snap.sessionId, cards: { card_151: 1 } });
+  assert.match(cardBlock(out.xml!, "card_151"), /name="cardId"[^>]*value="card_151"/, "the row must be created");
+  assert.match(cardBlock(out.xml!, "card_151"), /name="inStockCount"[^>]*value="1"/, "at the quantity asked for");
+  assert.match(cardBlock(out.xml!, "card_151"), /name="maxInStockCount"[^>]*value="1"/, "cap follows stock");
+  assert.deepEqual(cardProblems(cardCollections(out.xml!)), [], "the push gate must accept the result");
+  balanced(out.xml!);
+});
+
+test("avatars: no code path may write an id the game has never issued", () => {
+  // Four independent sources pin the ceiling at 398: every genuinely fetched
+  // save tops out there, a complete collection is exactly 400 vars
+  // (1..398 + 1390 + 1391), the reference tool unlocks range(1, 399), and
+  // AVATAR_EMOJIS is sized for the 49 slots past the artwork. A build once
+  // raised this to 500 "matching the current game version" and wrote 102 vars
+  // no city on the server has ever contained.
+  assert.equal(AVATAR_MAX, 398, "398 is the highest avatar any save or tool has ever shown");
+
+  const doc = '<root><Global><Var name="Unlocked_ava1" v="1" t="b"/></Global><GameInfoPatcher/></root>';
+  const avaIds = (x: string) => [...x.matchAll(/<Var\s+name="Unlocked_ava(\d+)"/gi)].map((m) => Number(m[1]));
+
+  // The last real avatar is accepted; every id past it is refused outright.
+  assert.match(injectAvatars(doc, ["398"]), /<Var name="Unlocked_ava398" v="1" t="b"\/>/, "398 is in range");
+  for (const n of [399, 400, 500, 999, 1390]) {
+    const out = injectAvatars(doc, [String(n)]);
+    assert.equal(out.includes(`Unlocked_ava${n}`), false, `avatar ${n} must be refused, not silently written`);
+  }
+
+  // "Unlock everything" stops at the ceiling too, whatever a caller asks for.
+  const all = unlockAllAvatars(doc, 9999);
+  const ids = avaIds(all.xml);
+  assert.equal(Math.max(...ids), AVATAR_MAX, "unlock-all must stop at the ceiling");
+  assert.equal(
+    ids.filter((n) => n > AVATAR_MAX && n < 1390).length,
+    0,
+    "no var may be created in the 399..1389 window no save contains",
+  );
+  assert.equal(getExistingAvatars(all.xml).length, AVATAR_MAX, "every avatar 1..398 is now present");
+});
+
+test("stickers: the id list is contiguous and carries no token the game does not know", () => {
+  const nums = (p: string) =>
+    CHAT_EMOJI_IDS.filter((x) => new RegExp(`^${p}\\d+$`).test(x)).map((x) => Number(x.slice(p.length))).sort((a, b) => a - b);
+  // `st80` completes the run — a fetched city and the reference tool both
+  // carry it, and stopping at 79 left one real sticker unobtainable.
+  assert.deepEqual(nums("st"), Array.from({ length: 80 }, (_, i) => i + 1), "st1..st80 contiguous");
+  assert.deepEqual(nums("sp"), Array.from({ length: 29 }, (_, i) => i + 1), "sp1..sp29 contiguous");
+  assert.deepEqual(nums("v"), [1, 2, 3], "v1..v3");
+  assert.equal(new Set(CHAT_EMOJI_IDS).size, CHAT_EMOJI_IDS.length, "no duplicate ids");
+  assert.ok(CHAT_EMOJI_IDS.includes("st80"), "the 80th sticker must be offered");
+  // `desc` is a config key that leaked into the reference tool's string — it
+  // appears in no save we hold and fits no id family here. Copying it would
+  // append a token the game does not know to a list that was valid before.
+  assert.equal(CHAT_EMOJI_IDS.includes("desc"), false, "a leaked config key must never become a sticker id");
 });
 
 test("cards: the push gate refuses an invariant no real city breaks, but not one it arrived with", () => {

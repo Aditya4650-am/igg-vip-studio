@@ -3,7 +3,19 @@ export type Group = { id: string; label: string; emoji?: string; items: Item[] }
 export type StatField = { id: string; key?: string; emoji: string; labelEn: string; labelVi: string };
 
 // The game allows selecting avatars up to 398; only 1..349 ship with artwork.
-export const AVATAR_MAX = 500;
+//
+// 398 is the ceiling, not a guess — four independent sources agree:
+//   * every genuinely fetched save tops out at 398, and the only ids past it
+//     are 1390/1391, which *every* save already carries;
+//   * a save holding a complete collection has exactly 400 vars —
+//     1..398 + 1390 + 1391 — in several unrelated files;
+//   * the reference tool unlocks exactly `range(1, 399)`;
+//   * `AVATAR_EMOJIS` is sized for the 49 slots past the artwork (398-349).
+// A commit once raised this to 500 "matching the current game version" while
+// leaving the comment above it at 398; nothing in any save or tool ever
+// showed 399..500, and writing them puts 102 vars in the save that no city
+// the server has seen contains.
+export const AVATAR_MAX = 398;
 export const AVATAR_ICON_MAX = 349;
 export const AVATAR_CHUNK = 50;
 
