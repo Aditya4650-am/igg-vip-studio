@@ -16,6 +16,8 @@ const { iconForUpgradeLabel } = await import("./game-icon-map.ts");
 const { ZOO_REQUIREMENTS } = await import("./server/township/zoo.server.ts");
 const { readdirSync, existsSync, readFileSync } = await import("node:fs");
 const { injectRegata } = await import("./server/township/inject.server.ts");
+const { assertCardCollectionsSafe, cardProblems, CARD_IDS, CARD_STOCK_MAX } =
+  await import("./server/township/cards.server.ts");
 
 const { token } = verifyLicenseKey("IGG-OWNER-TESTKEY", "TEST-DEVICE-0001");
 
@@ -396,7 +398,13 @@ function loadCards() {
 function cardBlock(xml: string, id: string) {
   const m = xml.match(new RegExp(`<DataElem\\b[^>]*\\bname="cardId"[^>]*\\bvalue="${id}"[^>]*>`, "i"));
   assert.ok(m, `${id} must be present`);
-  return xml.slice(Math.max(0, (m.index ?? 0) - 60), (m.index ?? 0) + 600);
+  const at = m.index ?? 0;
+  // Exactly this card's own entry. A fixed-width window would reach into the
+  // neighbour and let an assertion pass on the *next* card's field instead.
+  const start = xml.lastIndexOf('<DataElem type="dataStore">', at);
+  const end = xml.indexOf("</DataElem>", at);
+  assert.ok(start >= 0 && end > start, `${id} must sit in its own entry`);
+  return xml.slice(start, end + "</DataElem>".length);
 }
 
 test("cards: missing stock is granted and absent cards are inserted, unknowns dropped", () => {
@@ -405,9 +413,14 @@ test("cards: missing stock is granted and absent cards are inserted, unknowns dr
   const out = studio.applySave({ token, sessionId: snap.sessionId, cards: { card_1: 1, card_02: 1, card_3: 2, card_999: 1 } });
   assert.ok(out.parts.some((p) => p.startsWith("cards(")), "the run must be reported in parts");
   assert.match(cardBlock(out.xml!, "card_01"), /name="inStockCount"[^>]*value="1"/, "card_01 stock must reach 1");
-  assert.match(cardBlock(out.xml!, "card_01"), /name="isNew"[^>]*value="true"/, "card_01 must be marked new");
+  // An existing card keeps isNew=false. Flipping it would break the relation
+  // every real save satisfies — count(isNew=="false") ==
+  // lastSeenCollectionProgress — leaving the counter behind at 0 while the
+  // save still says 137.
+  assert.match(cardBlock(out.xml!, "card_01"), /name="isNew"[^>]*value="false"/, "an existing card must stay known");
   assert.match(cardBlock(out.xml!, "card_01"), /name="generatedCount"[^>]*value="1"/, "generatedCount must survive untouched");
   assert.match(cardBlock(out.xml!, "card_03"), /name="inStockCount"[^>]*value="2"/, "absent card_03 must be inserted with asked copies");
+  assert.match(cardBlock(out.xml!, "card_03"), /name="isNew"[^>]*value="true"/, "a brand-new card starts new, which moves no existing counter");
   assert.doesNotMatch(out.xml!, /card_999/, "unknown ids must be dropped, never written");
   assert.match(out.xml!, /name="trackedUniqueCollectedCards"[^>]*value="3"/, "unique counter must follow the array");
   balanced(out.xml!);
@@ -461,6 +474,271 @@ test("cards: snapshot exposes the real owned count for display", () => {
   const snap = loadCards();
   assert.equal(snap.cardsOwned, 2, "two owned entries in the fixture");
   assert.equal(load().cardsOwned, 0, "no CardCollections block means zero");
+});
+
+/* --- Cards: the ban guard and sending ---------------------------------- */
+
+const nowSec = () => Math.floor(Date.now() / 1000);
+
+/**
+ * The smallest structurally clean save on which every send rule can fire: a
+ * *live* card event, a real roster, owned cards and the send counters. Every
+ * counter satisfies an invariant measured on 7 real cities —
+ * `count(isNew=="false") == lastSeenCollectionProgress == sum(LastSeenSetProgress)`
+ * and `totalSendCards >= totalSendCardsCurrentStage`.
+ */
+function liveCardsSave(start = nowSec() - 86400, end = nowSec() + 86400) {
+  return [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    "<Global>",
+    // A plain stat so an *unrelated* edit has something real to write to —
+    // proving the card gate does not charge other features for its work.
+    '<Var name="experience" v="3138" t="i"/>',
+    '<DataElem type="dataStore"><DataElem name="first" type="string" value="RememberTime"/>',
+    '<DataElem name="second" type="dataStore"><DataElem name="ptr" type="dataStore">',
+    '<DataElem name="configId" type="string" value="CardCollections_1"/>',
+    `<DataElem name="endTime" type="int64" value="${end}"/>`,
+    `<DataElem name="startTime" type="int64" value="${start}"/>`,
+    "</DataElem></DataElem></DataElem>",
+    '<DataElem name="Friends" type="dataStore"><DataElem name="FriendsList" type="array">',
+    '<DataElem type="string" value="AbCdEfGh12"/>',
+    '<DataElem type="string" value="ZyXwVuTs98"/>',
+    "</DataElem></DataElem>",
+    '<DataElem name="CardCollections" type="dataStore"><DataElem name="DataLogic" type="dataStore">',
+    '<DataElem name="CompletedSets" type="dataStore"/>',
+    '<DataElem name="OwnedCards" type="array">',
+    cardEntry("card_01", 1, 1, false, 1),
+    cardEntry("card_02", 2, 2, false, 2),
+    cardEntry("card_03", 1, 1, true, 1),
+    "</DataElem>",
+    '<DataElem name="LastSeenSetProgress" type="array">',
+    '<DataElem name="set_01" type="int" value="1"/><DataElem name="set_02" type="int" value="1"/>',
+    "</DataElem>",
+    '<DataElem name="givenBasicRewards" type="array"/>',
+    '<DataElem name="trackedUniqueCollectedCards" type="int" value="3"/>',
+    '<DataElem name="trackedMaxCollectedCards" type="int" value="3"/>',
+    '<DataElem name="lastSeenCollectionProgress" type="int" value="2"/>',
+    '<DataElem name="totalSendCards" type="int" value="7"/>',
+    '<DataElem name="totalSendCardsCurrentStage" type="int" value="3"/>',
+    '<DataElem name="lastSentCards" type="array"/>',
+    "</DataElem></DataElem>",
+    "</Global>",
+  ].join("");
+}
+
+function loadLiveCards(start?: number, end?: number) {
+  return studio.connectLoad(
+    token,
+    "test-device",
+    undefined,
+    undefined,
+    Buffer.from(liveCardsSave(start, end)).toString("base64"),
+  );
+}
+
+const readXml = (snap: { sessionId: string }) =>
+  Buffer.from(studio.exportCurrent(token, snap.sessionId).fileB64, "base64").toString("utf8");
+
+/** Independent depth-walk used only here, so the guard rail does not prove a
+ *  helper against itself. */
+function cardCollections(xml: string) {
+  const m =
+    xml.match(/<DataElem\b[^>]*\bname="CardCollections"[^>]*\btype="dataStore"[^>]*>/i) ??
+    xml.match(/<DataElem\b[^>]*\btype="dataStore"[^>]*\bname="CardCollections"[^>]*>/i);
+  assert.ok(m, "the fixture must carry a CardCollections block");
+  let depth = 1;
+  let pos = (m.index ?? 0) + m[0].length;
+  const openEnd = pos;
+  while (depth > 0 && pos < xml.length) {
+    const rest = xml.slice(pos);
+    const o = rest.search(/<DataElem\b/i);
+    const c = rest.search(/<\/DataElem\s*>/i);
+    if (c < 0) throw new Error("unclosed CardCollections");
+    if (o >= 0 && o < c) {
+      const abs = pos + o;
+      const gt = xml.indexOf(">", abs);
+      if (gt >= 0 && xml[gt - 1] !== "/") depth++;
+      pos = gt >= 0 ? gt + 1 : abs + 9;
+    } else {
+      const absC = pos + c;
+      depth--;
+      if (depth === 0) return xml.slice(openEnd, absC);
+      pos = absC + 11;
+    }
+  }
+  throw new Error("unclosed CardCollections");
+}
+
+test("cards: the tab says what the server would say before anything is pressed", () => {
+  assert.equal(loadLiveCards().cardsInfo.reason, "ok", "a live event with friends is ready");
+  assert.equal(load().cardsInfo.reason, "no_event", "a save without the event says so up front");
+  assert.equal(
+    loadLiveCards(nowSec() - 86400 * 10, nowSec() - 86400).cardsInfo.reason,
+    "window_closed",
+    "a closed event says so up front",
+  );
+  const snap = loadLiveCards();
+  assert.equal(snap.cardsInfo.owned, 3, "three owned cards");
+  assert.deepEqual(snap.cardsInfo.ownedIds, ["card_01", "card_02", "card_03"], "canonical ids, sorted");
+  assert.equal(snap.cardFriends.length, 2, "both roster members are offered");
+  assert.equal(snap.cardsInfo.history, 0, "nothing sent yet");
+});
+
+test("cards: a grant clamps stock to the measured ceiling and leaves the progress counters exact", () => {
+  const snap = loadLiveCards();
+  assert.deepEqual(cardProblems(cardCollections(readXml(snap))), [], "the fixture must start clean");
+
+  const out = studio.applySave({ token, sessionId: snap.sessionId, cards: { card_01: 12, card_04: 6 } });
+
+  assert.match(cardBlock(out.xml!, "card_01"), /name="inStockCount"[^>]*value="4"/, "12 must clamp to the ceiling no real save exceeds");
+  assert.match(cardBlock(out.xml!, "card_01"), /name="maxInStockCount"[^>]*value="4"/, "the per-card cap follows stock");
+  assert.match(cardBlock(out.xml!, "card_01"), /name="isNew"[^>]*value="false"/, "an existing card stays known");
+  assert.match(cardBlock(out.xml!, "card_04"), /name="inStockCount"[^>]*value="4"/, "a new card is capped the same way");
+  assert.match(cardBlock(out.xml!, "card_04"), /name="isNew"[^>]*value="true"/, "a brand-new card starts new");
+
+  // sum(LastSeenSetProgress) == lastSeenCollectionProgress == count(isNew=="false")
+  const known = (out.xml!.match(/name="isNew"[^>]*value="false"/g) ?? []).length;
+  const seen = Number(out.xml!.match(/name="lastSeenCollectionProgress"[^>]*value="(\d+)"/)?.[1]);
+  assert.equal(known, 2, "the grant must not flip a card the save already held");
+  assert.equal(seen, 2, "the counter the game reads must not move either");
+  assert.deepEqual(cardProblems(cardCollections(out.xml!)), [], "the push gate must accept the result");
+  balanced(out.xml!);
+});
+
+test("cards: the push gate refuses an invariant no real city breaks, but not one it arrived with", () => {
+  const clean = liveCardsSave();
+  const stockBroken = clean.replace(
+    'value="1"/><DataElem name="isNew" type="bool" value="false"/>',
+    `value="9"/><DataElem name="isNew" type="bool" value="false"/>`,
+  );
+  assert.notEqual(stockBroken, clean, "the mutation must actually land on card_01's stock");
+  assert.deepEqual(cardProblems(cardCollections(stockBroken)), ["stock-range"], "and it must be the only rule it breaks");
+
+  assert.doesNotThrow(() => assertCardCollectionsSafe(clean, clean), "an untouched save is never refused");
+  assert.throws(
+    () => assertCardCollectionsSafe(clean, stockBroken),
+    /Card Collections/,
+    "a stock no real save holds must be refused on push",
+  );
+
+  // A city that already looked like this on arrival is not ours to refuse —
+  // only a rule *this tool* broke counts.
+  const alsoBroken = stockBroken.replace('name="totalSendCards" type="int" value="7"', 'name="totalSendCards" type="int" value="8"');
+  assert.notEqual(alsoBroken, stockBroken, "the second variant must differ");
+  assert.doesNotThrow(
+    () => assertCardCollectionsSafe(stockBroken, alsoBroken),
+    "a defect the save already had is never blocked",
+  );
+
+  // The block itself cannot vanish behind a feature's back either.
+  assert.throws(
+    () => assertCardCollectionsSafe(clean, clean.replace('<DataElem name="CardCollections"', '<DataElem name="Gone"')),
+    /Card Collections/,
+    "a block that disappears must be refused",
+  );
+});
+
+test("cards: a push that never touches cards pays nothing for the card gate", () => {
+  const snap = loadLiveCards();
+  const before = readXml(snap);
+  const idOf = (key: string) => studio.catalogs().fields.find((f) => f.key === key)!.id;
+
+  // An unrelated feature, on a save that *does* carry a full card block.
+  const out = studio.applySave({ token, sessionId: snap.sessionId, stats: { [idOf("xpr")]: "987654" } });
+  assert.match(out.xml!, /name="experience"[^>]*v="987654"/, "the other feature must still write");
+  assert.equal(cardCollections(out.xml!), cardCollections(before), "an unrelated edit must leave the card block byte-identical");
+  assert.doesNotThrow(
+    () => assertCardCollectionsSafe(before, out.xml!),
+    "the card gate must never refuse another feature's edit",
+  );
+  balanced(out.xml!);
+});
+
+test("cards: a send is recorded exactly the way a real save records one", () => {
+  const snap = loadLiveCards();
+  const out = studio.applySave({
+    token,
+    sessionId: snap.sessionId,
+    cardSends: [{ cardId: "card_01", toUserId: "AbCdEfGh12" }],
+  });
+  assert.ok(out.parts.some((p) => p.startsWith("card-sends(")), "the run must be reported in parts");
+  assert.match(
+    out.xml!,
+    /<DataElem name="lastSentCards" type="array"><DataElem type="dataStore"><DataElem name="cardId" type="string" value="card_01"\/><DataElem name="sendTime" type="int64" value="\d+"\/><DataElem name="toUserId" type="string" value="AbCdEfGh12"\/><\/DataElem><\/DataElem>/,
+    "one entry with the three fields, in the order every real save uses",
+  );
+  const t = Number(out.xml!.match(/name="sendTime" type="int64" value="(\d+)"/)?.[1]);
+  assert.ok(t <= nowSec(), "a send time is never in the future");
+  assert.ok(t >= nowSec() - 86400, "and never outside the live window");
+  assert.match(out.xml!, /name="totalSendCards" type="int" value="8"/, "the lifetime counter rises by the sends recorded");
+  assert.match(out.xml!, /name="totalSendCardsCurrentStage" type="int" value="4"/, "the stage counter rises with it, so >= still holds");
+  assert.match(cardBlock(out.xml!, "card_01"), /name="inStockCount"[^>]*value="1"/, "sending never spends the card");
+  assert.equal(out.cardsInfo.history, 1, "the tab reports the new history length");
+  assert.equal(out.cardsInfo.sent, 8, "and the new lifetime total");
+  assert.deepEqual(cardProblems(cardCollections(out.xml!)), [], "the push gate must accept the result");
+  balanced(out.xml!);
+});
+
+test("cards: a send keeps only the history length real saves ever hold", () => {
+  const snap = loadLiveCards();
+  const ids = CARD_IDS.slice(0, 20);
+  const out = studio.applySave({
+    token,
+    sessionId: snap.sessionId,
+    cards: Object.fromEntries(ids.map((id) => [id, 1])),
+    cardSends: ids.map((id) => ({ cardId: id, toUserId: "AbCdEfGh12" })),
+  });
+  const tail = out.xml!.slice(out.xml!.indexOf('name="lastSentCards"'));
+  const entries = (tail.match(/name="toUserId"/g) ?? []).length;
+  assert.equal(entries, 3, "lastSentCards never grew past 3 in any real save");
+  assert.equal(out.cardsInfo.sent, 27, "the counters still carry every send recorded");
+  assert.equal(out.cardsInfo.history, 3, "the history reports only what it kept");
+  assert.deepEqual(cardProblems(cardCollections(out.xml!)), [], "the push gate must accept the result");
+  balanced(out.xml!);
+});
+
+test("cards: a send refuses what a real save could never contain, and leaves nothing behind", () => {
+  const snap = loadLiveCards();
+  const before = readXml(snap);
+
+  assert.throws(
+    () => studio.applySave({ token, sessionId: snap.sessionId, cardSends: [{ cardId: "card_01", toUserId: "StrangerXY1" }] }),
+    /danh sách bạn bè/,
+    "a recipient outside this save's own roster must be refused",
+  );
+  assert.throws(
+    () => studio.applySave({ token, sessionId: snap.sessionId, cardSends: [{ cardId: "card_07", toUserId: "AbCdEfGh12" }] }),
+    /chưa có thẻ/,
+    "you cannot give a card you do not hold",
+  );
+  assert.equal(readXml(snap), before, "a refused send must roll the whole batch back");
+
+  const many = CARD_IDS.flatMap((id) => [
+    { cardId: id, toUserId: "AbCdEfGh12" },
+    { cardId: id, toUserId: "ZyXwVuTs98" },
+  ]);
+  assert.throws(
+    () => studio.applySave({ token, sessionId: snap.sessionId, cardSends: many }),
+    /tối đa 150/,
+    "one push is bounded by the whole catalog",
+  );
+  assert.equal(readXml(snap), before, "an over-large batch must roll back too");
+});
+
+test("cards: a send is refused while the collection event is closed", () => {
+  const snap = studio.connectLoad(
+    token,
+    "test-device",
+    undefined,
+    undefined,
+    Buffer.from(liveCardsSave(nowSec() - 86400 * 10, nowSec() - 86400)).toString("base64"),
+  );
+  assert.equal(snap.cardsInfo.reason, "window_closed", "the tab must say so first");
+  assert.throws(
+    () => studio.applySave({ token, sessionId: snap.sessionId, cardSends: [{ cardId: "card_01", toUserId: "AbCdEfGh12" }] }),
+    /đã đóng/,
+    "a sendTime outside the window would be the cheapest thing a server could catch",
+  );
 });
 
 const zooDoc = {

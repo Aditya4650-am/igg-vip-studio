@@ -74,6 +74,9 @@ const saveSchema = z.object({
   sticker: z.array(z.string()).optional(),
   museum: z.array(z.string()).optional(),
   cards: z.record(z.string(), z.number()).optional(),
+  // Recipient ids are the player's own friends; the server re-validates every
+  // pair against the save's FriendsList and OwnedCards regardless of this.
+  cardSends: z.array(z.object({ cardId: z.string().max(32), toUserId: z.string().max(32) })).optional(),
   zoo: z.array(z.string()).optional(),
   barnUpgrades: z.number().optional(),
   barnItems: z.record(z.string(), z.number()).optional(),

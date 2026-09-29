@@ -164,6 +164,22 @@ const REGATTA_REASON_KEY = {
   already_full: "regattaFull",
 } as const;
 
+/** Why the Cards tab will (or will not) accept a send batch. Mirrors
+ *  `CardsInfo.reason` in cards.server.ts so the refusal the server would
+ *  give is the one the user reads before pressing anything. */
+const CARDS_REASON_KEY = {
+  ok: "cardsReady",
+  no_event: "cardsNoEvent",
+  window_closed: "cardsWindowClosed",
+  no_friends: "cardsNoFriends",
+} as const;
+
+/**
+ * `CARD_STOCK_MAX` from `cards.server.ts`, duplicated because that module is
+ * server-only and cannot be imported here. The server clamps regardless —
+ * this only keeps the input from *asking* for a number no real city holds.
+ */
+const CARD_STOCK_MAX = 4;
 
 function groupIcon(id: string): GameIconName {
   const value = id.toLowerCase();
@@ -1251,6 +1267,12 @@ export function StudioApp() {
   const zooSel = useSetMap();
   const [cardsQty, setCardsQty] = useState<Record<string, number>>({});
   const [cardsFill, setCardsFill] = useState("1");
+  // Queued card sends: one entry per (card, friend). Validated server-side
+  // against the save's own FriendsList + OwnedCards, then written into
+  // lastSentCards exactly the way a real save records them.
+  const [cardSends, setCardSends] = useState<{ cardId: string; toUserId: string }[]>([]);
+  const [sendCard, setSendCard] = useState("card_01");
+  const [sendFriend, setSendFriend] = useState("");
   const [openPack, setOpenPack] = useState<string | null>("pack-1");
   const [decorSel, setDecorSel] = useState<Set<string>>(new Set());
   const [stickerSel, setStickerSel] = useState<Set<string>>(new Set());
@@ -1612,6 +1634,7 @@ export function StudioApp() {
       skinSel.clear();
       itemSel.clear();
       setCardsQty({});
+      setCardSends([]);
       zooSel.clear();
       setDecorSel(new Set());
       setStickerSel(new Set());
@@ -1648,7 +1671,7 @@ export function StudioApp() {
   const cardsCount = useMemo(() => Object.values(cardsQty).filter((v) => v > 0).length, [cardsQty]);
 
   const pending =
-    profileSel.count + avatarSel.count + skinSel.count + itemSel.count + cardsCount + zooSel.count + decorSel.size + stickerSel.size + museumSel.size +
+    profileSel.count + avatarSel.count + skinSel.count + itemSel.count + cardsCount + cardSends.length + zooSel.count + decorSel.size + stickerSel.size + museumSel.size +
     upgradeFactorySel.count + upgradeTrainSel.count + upgradeIslandSel.count +
     (barnDirty ? 1 : 0) + (pendingRegatta ? 1 : 0) + (pendingSeason ? 1 : 0) + (pendingUnban ? 1 : 0) +
     (pendingDecorFragments ? 1 : 0) + (pendingDecorClone ? 1 : 0) + (pendingDecorMaxAll ? 1 : 0) +
@@ -1673,7 +1696,9 @@ export function StudioApp() {
       const itemIds = Object.values(itemSel.asRecord()).flat();
       const changedCards: Record<string, number> = {};
       for (const [k, v] of Object.entries(cardsQty)) {
-        if (v > 0) changedCards[k] = Math.floor(v);
+        // Clamped here too: the server enforces it, the input should not
+        // offer a stock count no city the server has ever seen can hold.
+        if (v > 0) changedCards[k] = Math.min(CARD_STOCK_MAX, Math.floor(v));
       }
       const changedBarn: Record<string, number> = {};
       for (const [k, v] of Object.entries(barnItems)) {
@@ -1789,6 +1814,7 @@ export function StudioApp() {
           skins: skinSel.asRecord(),
           items: Object.fromEntries(itemIds.map((id) => [id, qty])),
           cards: Object.keys(changedCards).length ? changedCards : undefined,
+          cardSends: cardSends.length ? cardSends : undefined,
           zoo: Object.values(zooSel.asRecord()).flat(),
           decor: [...decorSel],
           decorQty: parseDecorQty(),
@@ -1831,6 +1857,7 @@ export function StudioApp() {
       skinSel.clear();
       itemSel.clear();
       setCardsQty({});
+      setCardSends([]);
       zooSel.clear();
       profileSel.clear();
       setDecorSel(new Set());
@@ -1854,7 +1881,7 @@ export function StudioApp() {
     } finally {
       setBusy(false);
     }
-  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, cardsQty, zooSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, regattaTasks, pendingSeason, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingTownClone, pendingDecorMaxAll, parseDecorQty, tr, device, upgradeFactorySel, upgradeTrainSel, upgradeIslandSel, upgradeTargetLevel]);
+  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, cardsQty, cardSends, zooSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, regattaTasks, pendingSeason, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingTownClone, pendingDecorMaxAll, parseDecorQty, tr, device, upgradeFactorySel, upgradeTrainSel, upgradeIslandSel, upgradeTargetLevel]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1900,6 +1927,39 @@ export function StudioApp() {
       }),
     [],
   );
+
+  // Send-cards panel. A card can be sent only if the save already holds it or
+  // this same push is about to grant it (grants run first on the server), and
+  // only to someone on this save's own FriendsList — both rules are re-checked
+  // server-side; this just keeps the picker from offering a combination the
+  // save would then refuse.
+  const cardLabelOf = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const g of CARD_GROUPS) for (const it of g.items) m.set(it.id, it.label);
+    return m;
+  }, []);
+  const cardsInfo = session?.cardsInfo ?? null;
+  const cardFriends = session?.cardFriends ?? [];
+  const sendableIds = useMemo(() => {
+    const set = new Set<string>(session?.cardsInfo?.ownedIds ?? []);
+    for (const [id, n] of Object.entries(cardsQty)) if (n > 0) set.add(id);
+    return [...set].sort();
+  }, [session, cardsQty]);
+  const sendFriendValue = cardFriends.some((f) => f.id === sendFriend)
+    ? sendFriend
+    : (cardFriends[0]?.id ?? "");
+  const queueSend = (ids: string[]) => {
+    if (!sendFriendValue) return;
+    setCardSends((prev) => {
+      const next = [...prev];
+      for (const id of ids) {
+        if (!next.some((x) => x.cardId === id && x.toUserId === sendFriendValue)) {
+          next.push({ cardId: id, toUserId: sendFriendValue });
+        }
+      }
+      return next;
+    });
+  };
 
   const zooGroups: Group[] = useMemo(    () =>
       (session?.zoo ?? []).map((p) => ({
@@ -2772,7 +2832,7 @@ export function StudioApp() {
                     <Bar
                       hint={tr("cardsHint")}
                       onAll={() => {
-                        const n = Math.max(1, Number.parseInt(cardsFill, 10) || 1);
+                        const n = Math.min(CARD_STOCK_MAX, Math.max(1, Number.parseInt(cardsFill, 10) || 1));
                         const next: Record<string, number> = {};
                         for (const g of CARD_GROUPS) for (const it of g.items) next[it.id] = n;
                         setCardsQty(next);
@@ -2838,7 +2898,7 @@ export function StudioApp() {
                               type="button"
                               className="h-8 px-2 text-xs text-muted hover:text-primary"
                               onClick={() => {
-                                const n = Math.max(1, Number.parseInt(cardsFill, 10) || 1);
+                                const n = Math.min(CARD_STOCK_MAX, Math.max(1, Number.parseInt(cardsFill, 10) || 1));
                                 setCardsQty((prev) => {
                                   const next = { ...prev };
                                   for (const it of pack.items) next[it.id] = n;
@@ -2901,7 +2961,12 @@ export function StudioApp() {
                                 value={cardsQty[it.id] ?? 0}
                                 onChange={(e) => {
                                   const n = Number.parseInt(e.target.value.replace(/[^\d]/g, ""), 10);
-                                  setCardsQty((prev) => ({ ...prev, [it.id]: Number.isFinite(n) ? n : 0 }));
+                                  // Never let the field hold a stock count no real
+                                  // city has ever carried — the server clamps too.
+                                  setCardsQty((prev) => ({
+                                    ...prev,
+                                    [it.id]: Number.isFinite(n) ? Math.min(CARD_STOCK_MAX, n) : 0,
+                                  }));
                                 }}
                               />
                             </label>
@@ -2911,6 +2976,116 @@ export function StudioApp() {
                       </section>
                       );
                     })}
+
+                    {/* Send cards to friends: queued into Save & push like every
+                        other edit, so a refusal rolls the whole batch back. */}
+                    <section className="panel space-y-3">
+                      <div>
+                        <h3 className="text-xs font-bold tracking-wider uppercase">{tr("sendTitle")}</h3>
+                        <p className="mt-1 text-xs text-muted">{tr("sendHint")}</p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <span
+                          className={cn(
+                            "rounded px-2 py-1",
+                            cardsInfo?.reason === "ok" ? "bg-success/15 text-success" : "bg-amber/15 text-amber",
+                          )}
+                        >
+                          {tr(CARDS_REASON_KEY[cardsInfo?.reason ?? "no_event"])}
+                        </span>
+                        <span className="text-muted tabular-nums">
+                          {tr("sendStatOwned")} {cardsInfo?.owned ?? 0} · {tr("sendStatFriends")} {cardFriends.length} ·{" "}
+                          {tr("sendStatSent")} {cardsInfo?.sent ?? 0} · {tr("sendStatHistory")}{" "}
+                          {cardsInfo?.history ?? 0}
+                        </span>
+                      </div>
+
+                      {!cardFriends.length ? (
+                        <p className="text-xs text-amber">{tr("sendNoFriends")}</p>
+                      ) : !sendableIds.length ? (
+                        <p className="text-xs text-amber">{tr("sendNothing")}</p>
+                      ) : (
+                        <div className="flex flex-wrap items-end gap-2">
+                          <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-muted">
+                            {tr("sendFriend")}
+                            <select
+                              className="field"
+                              aria-label={tr("sendFriend")}
+                              value={sendFriendValue}
+                              onChange={(e) => setSendFriend(e.target.value)}
+                            >
+                              {cardFriends.map((f) => (
+                                <option key={f.id} value={f.id}>
+                                  {f.name === f.id ? f.id : `${f.name} · ${f.id}`}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-muted">
+                            {tr("sendCard")}
+                            <select
+                              className="field"
+                              aria-label={tr("sendCard")}
+                              value={sendableIds.includes(sendCard) ? sendCard : sendableIds[0]}
+                              onChange={(e) => setSendCard(e.target.value)}
+                            >
+                              {sendableIds.map((id) => (
+                                <option key={id} value={id}>
+                                  {cardLabelOf.get(id) ?? id}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            disabled={busy || cardsInfo?.reason !== "ok"}
+                            onClick={() => queueSend([sendableIds.includes(sendCard) ? sendCard : (sendableIds[0] ?? sendCard)])}
+                          >
+                            {tr("sendAdd")}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn"
+                            disabled={busy || cardsInfo?.reason !== "ok"}
+                            onClick={() => queueSend(sendableIds)}
+                          >
+                            {tr("sendAddAll")} ({sendableIds.length})
+                          </button>
+                        </div>
+                      )}
+
+                      {cardSends.length ? (
+                        <ul className="max-h-56 space-y-1 overflow-y-auto pr-1">
+                          {cardSends.map((s) => (
+                            <li
+                              key={`${s.cardId}|${s.toUserId}`}
+                              className="flex items-center gap-2 rounded bg-input px-2 py-1 text-xs"
+                            >
+                              <span className="truncate">{cardLabelOf.get(s.cardId) ?? s.cardId}</span>
+                              <span className="text-muted">→ {s.toUserId}</span>
+                              <button
+                                type="button"
+                                className="ml-auto h-7 px-2 text-muted hover:text-primary"
+                                onClick={() =>
+                                  setCardSends((prev) =>
+                                    prev.filter((x) => !(x.cardId === s.cardId && x.toUserId === s.toUserId)),
+                                  )
+                                }
+                              >
+                                ✕
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                      {cardSends.length ? (
+                        <p className="text-xs text-muted">
+                          {tr("sendQueueNote")} · {cardSends.length}
+                        </p>
+                      ) : null}
+                    </section>
                   </div>
                 )}
 

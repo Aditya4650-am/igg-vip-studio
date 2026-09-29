@@ -340,25 +340,102 @@ came from. Static candidates remain as a fallback for unrooted devices, where
 stderr on stdout, so error text must never be accepted as file content (see
 `_is_probably_file`).
 
-## Removed: card collections
+## Card collections
 
-The card-collections tab was deleted. It wrote `FullCardCollections` through
-`STAT_ALIASES.crd`, the write round-tripped, and the reported success was real —
-but the game does not read that counter from the save, so nothing changed in
-game. A feature that reports success while doing nothing is worse than a missing
-one, so it was taken out rather than left in place.
+Two mechanisms coexist, deliberately:
 
-Removed with it: the tab and its i18n table in `studio-app.tsx`, the `crd` field
-from the stat catalogue and `FIELD_MAP`, the `crd` alias group, the `Cards` entry
-in `STAT_TAGS`, `Session.friendCards` and its reads in `fetchFriendCity` /
-`attachFriendXml` / `snapshot`, the `cards-*` CSS, and the `cards` GameIcon.
-`INICIAL_VARS` in `desban.server.ts` intentionally still lists
-`FullCardCollections`: that is the unban restore list and must mirror the game's
-own reset exactly, so it is not part of this feature.
+- `crd` in the Stats tab writes the flat `FullCardCollections` Var exactly as
+  the original zip did (single Var, `FIELD_MAP`). It round-trips. It is a
+  display counter — it is **not** what the game counts a collection from. It
+  was removed once for that reason and then restored, so the Stats tab behaves
+  the way someone who knows the original zip expects it to.
+- The **Cards tab** is the real edit. `cards.server.ts` writes `OwnedCards`
+  inside `DataStoreCollection > CardCollections`, and the send feature also
+  writes `lastSentCards` plus the two send counters.
 
-Guard rails: `studio-pipeline.test.ts` asserts `crd` is absent from the catalogue
-and that the friend snapshot exposes no card counter, so the feature cannot
-return silently.
+`Session.friendCards` is still absent: `fetchFriendCity` / `attachFriendXml` /
+`snapshot` expose no card counter for the friend. `INICIAL_VARS` in
+`desban.server.ts` intentionally still lists `FullCardCollections` — the unban
+restore list must mirror the game's own reset exactly, so it is not part of
+this feature.
+
+### Grants: what a real city can hold
+
+Measured on 7 real saves (629 `OwnedCards` entries): `1 <= inStockCount <= 4`,
+`maxInStockCount >= inStockCount`, canonical zero-padded ids, no duplicates,
+and `trackedUniqueCollectedCards == distinct`.
+
+- `CARD_STOCK_MAX = 4`. The input used to let you type 12 and write
+  `inStockCount="12"` — a value no city the server has ever seen can hold. The
+  UI clamps at the field, at *Fill all*, and at the payload; the server clamps
+  again regardless.
+- **`isNew` is never flipped on a card the save already holds.** Every real
+  save satisfies `sum(LastSeenSetProgress) == lastSeenCollectionProgress ==
+  count(isNew=="false")` (137 = 137 = 137 on one city). Turning known cards
+  "new" broke all three at once and read in game as nothing changing.
+  A brand-new row still starts `isNew="true"`, which moves no counter.
+- New rows get `generatedCount = want`, matching the gen=stock pattern real
+  saves show.
+- `trackedUniqueCollectedCards` is *current state*, so it follows the array in
+  both directions: a grant raises it, and removing a stale unpadded lookalike
+  (`card_1` beside `card_01`) lowers it. Letting it drift downwards-only is
+  what made a tool-edited city fail `trackedUnique == distinct` on push.
+  `trackedMaxCollectedCards` is the lifetime high-water mark and only ever
+  rises.
+
+### The ban guard
+
+`cardProblems(block)` returns invariant **keys** (not messages) so the gate can
+diff the save as it was loaded against the save about to leave;
+`assertCardCollectionsSafe(loaded, pushed)` runs inside `encodeSave`, right
+after `assertPushSafe`. It fails only on a rule **this tool newly broke** — a
+city that already looked odd on arrival is never blocked for that same reason,
+and it returns on a straight string compare of the `CardCollections` block, so
+no other feature pays for it. A block that vanishes or appears from nowhere is
+refused outright: no feature here creates one.
+
+The message contains "card" on purpose, same grep-able convention as the
+regatta reasons.
+
+### Sending cards to friends
+
+No proven Playrix write API exists (the competitor tool fakes it with 0 hits
+for `OwnedCards`/`inStockCount`/`lastSentCards`/`toUserId`), so `sendCards`
+writes only what real saves demonstrably hold when a card has been sent:
+
+- one `lastSentCards` entry per distinct (card, friend), three fields in the
+  observed order (`cardId`, `sendTime`, `toUserId`), array capped at
+  `CARD_SEND_HISTORY_MAX = 3` — never longer in any real save while
+  `totalSendCards` reached 13, i.e. it is a short rolling history;
+- `totalSendCards` and `totalSendCardsCurrentStage` raised **together** by the
+  number of sends recorded, never invented, never lowered;
+- **never** `inStockCount` (every sent card in every real save still sits in
+  `OwnedCards` with stock >= 1), never `CardsSent` / `totalGivenCards`
+  (neither reconciles with `totalSendCards` in any save, so there is no
+  relation to preserve), never gift / token / set fields.
+
+Refusals throw with a Vietnamese reason instead of skipping silently: no card
+block, no parseable or closed `RememberTime` window for `CardCollections_`,
+recipient not in the save's own `FriendsList`, card not in `OwnedCards`, or a
+batch above `CARD_SEND_MAX_PER_RUN = 150`. A refusal rolls the whole batch
+back (`s.rawXml` restored), so a queued restore is not applied twice.
+
+**Delivery is not proven.** The save-side record is proven against real saves;
+whether Township then hands the card to the friend is decided by the game when
+it syncs, and that needs a friend confirming receipt. The UI hint says so
+rather than claiming success.
+
+The event window is read from **the** `RememberTime` pair whose `configId` /
+`eventId` starts with `CardCollections` — a real city keeps 15 pairs and the
+first is an empty leftover (`configId=""`, both times 0), so taking the first
+pair read every save as "closed".
+
+Guard rails: `studio-pipeline.test.ts` asserts the clamp, that `isNew` and the
+progress counters survive a full grant, every send refusal plus its rollback,
+the 3-entry history ceiling, and that `assertCardCollectionsSafe` refuses a
+broken block but not one the save arrived with. `verify.mts`-style checks were
+run against 4 real saves (clean, event-closed, and the tool-edited
+`mGameInfo.current.xml`) with zero failures.
 
 ## Avatar icons
 
