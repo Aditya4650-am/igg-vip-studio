@@ -1,6 +1,6 @@
 import { writeVar } from "./vars.server";
 import { SKINS_CATALOG } from "./skins-catalog.server";
-import { insertInsideRoot } from "./xml-edit.server";
+import { attrValue, insertInsideRoot } from "./xml-edit.server";
 import { RAW_FACTORIES, RAW_ISLANDS, RAW_TRAINS } from "../catalogs.data.server";
 
 function asText(xml: string | Buffer) {
@@ -381,66 +381,274 @@ function resolveRegataUser(text: string): string {
   return "0";
 }
 
-export function injectRegata(xml: string, nTasks = 105, score = 135) {
-  let text = asText(xml);
-  text = writeVar(text, "RegataTasksCompleted", String(nTasks));
+/** Why a save cannot receive regatta tasks. `ok` means it can. */
+export type RegattaReason = "ok" | "no_active_regatta" | "no_template" | "window_closed" | "already_full";
 
-  const patterns = [
-    /(<Regata\b[^>]*>[\s\S]*?<\/Regata\s*>)/i,
-    /(<Regatta\b[^>]*>[\s\S]*?<\/Regatta\s*>)/i,
-    /(<regata\b[^>]*>[\s\S]*?<\/regata\s*>)/i,
-  ];
-  let m: RegExpMatchArray | null = null;
-  for (const pat of patterns) {
-    m = text.match(pat);
-    if (m) break;
+export interface RegattaState {
+  reason: RegattaReason;
+  /** A live <Regata> block: it has a window and the save sits inside it. */
+  active: boolean;
+  /** <MyOldTask> already completed in the current regatta. */
+  current: number;
+  /** Records usable as templates anywhere in the save. */
+  templates: number;
+  /** Distinct <FreeTask> ids the game is offering. */
+  pool: number;
+  /** Mean score of the tasks already in the block (what the badge shows). */
+  avgScore: number;
+  /** What new tasks would be attributed to. */
+  user: string;
+  window: { start: number; end: number } | null;
+}
+
+/** A strong player clears roughly 15 tasks in a week. Past that a batch stops
+ *  looking like play and starts looking like a tool, so 15 is a hard ceiling. */
+export const REGATTA_MAX_TASKS = 15;
+export const REGATTA_DEFAULT_TASKS = 12;
+
+const REGATTA_ERR = {
+  no_active_regatta:
+    "Save chưa có regatta đang diễn ra. Vào regatta trong game trước rồi thử lại - không thêm task ngoài một regatta đang mở, vì Playrix đối chiếu cửa sổ thời gian.",
+  no_template:
+    "Save chưa có task regatta thật nào để làm mẫu. Không tạo task giả.",
+  window_closed: "Khoảng thời gian regatta hiện tại chưa đủ để thêm task an toàn.",
+  already_full: "Regatta này đã có đủ task (%s) - không thêm nữa.",
+} as const;
+
+/**
+ * Every field a real completed task carries, measured on untouched reference
+ * saves (both the Match3 and the trains record shapes). A record missing one
+ * of these cannot be cloned safely: the game then reads that value from
+ * nothing, which is how the old injector produced tasks the loader discarded.
+ */
+const TASK_TEMPLATE_FIELDS = [
+  "id",
+  "type",
+  "user",
+  "num",
+  "ver",
+  "score",
+  "takeTime",
+  "completeTime",
+  "realEndTime",
+];
+
+/** Attribute string of a single tag: `<X a="1" b="2"/>` -> ` a="1" b="2"`. */
+function tagAttrs(tag: string): string {
+  const m = tag.match(/^<[A-Za-z][\w:.-]*\s*([\s\S]*?)\/?>$/);
+  return m ? m[1] : "";
+}
+
+/** Set an attribute on a whole tag (open or self-closing), keeping it well formed. */
+function setTagAttr(tag: string, name: string, value: string): string {
+  const re = new RegExp(`(\\s${name}\\s*=\\s*)("[^"]*"|'[^']*'|[^\\s/>]+)`, "i");
+  if (re.test(tag)) return tag.replace(re, `$1"${value}"`);
+  return tag.replace(/(\s*\/?>)$/, ` ${name}="${value}"$1`);
+}
+
+/**
+ * The current regatta block. `<RegataCenter>` and `<PrevRegata>` must not
+ * match: the `\b` after `Regata` excludes `RegataCenter`, and the `<` anchor
+ * excludes `PrevRegata`, so a finished week's archive is never mistaken for a
+ * live one. `close === null` means the block is self-closing (no tasks yet).
+ */
+function regattaBlock(text: string): { attrs: string; inner: string; close: string | null } | null {
+  const paired = text.match(/(<Regata\b[^>]*>)([\s\S]*?)(<\/Regata\s*>)/i);
+  if (paired) {
+    const m = paired[1].match(/^(<Regata\b)([^>]*)(>)$/i);
+    if (!m) return null;
+    return { attrs: m[2], inner: paired[2], close: m[3] };
+  }
+  const self = text.match(/<Regata\b([^>]*?)\/>/i);
+  if (self) return { attrs: self[1]!, inner: "", close: null };
+  return null;
+}
+
+function regattaWindow(attrs: string): { start: number; end: number } | null {
+  const start = Number(attrValue(attrs, "startTime"));
+  const end = Number(attrValue(attrs, "endTime"));
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  if (start <= 0 || end <= start) return null;
+  return { start, end };
+}
+
+/** Completed records safe to clone: all required fields present, not expired. */
+function regattaTemplates(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/<MyOldTask\b[^>]*?\/?>/gi)) {
+    const attrs = tagAttrs(m[0]);
+    if (!attrs) continue;
+    if (!TASK_TEMPLATE_FIELDS.every((f) => attrValue(attrs, f) !== null)) continue;
+    const expired = attrValue(attrs, "expired");
+    if (expired && expired !== "0") continue;
+    out.push(m[0]);
+  }
+  return out;
+}
+
+function regattaPool(text: string): number {
+  return new Set([...text.matchAll(/<FreeTask\b[^>]*\bid="([^"]*)"/gi)].map((m) => m[1]!)).size;
+}
+
+/** Read-only status so the UI can say *why* a save cannot take tasks before
+ *  the user presses anything. Mirrors `injectRegata`'s checks exactly for the
+ *  batch size it is given, and never throws. */
+export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): RegattaState {
+  const text = asText(xml).replace(/^\uFEFF/, "");
+  const templates = regattaTemplates(text);
+  const pool = regattaPool(text);
+  const user = resolveRegataUser(text);
+  const block = regattaBlock(text);
+  const base = { templates: templates.length, pool, avgScore: 0, user, window: null };
+  if (!block) return { ...base, reason: "no_active_regatta", active: false, current: 0 };
+
+  const win = regattaWindow(block.attrs);
+  const now = Math.floor(Date.now() / 1000);
+  const current = (block.inner.match(/<MyOldTask\b/gi) ?? []).length;
+  const scores = [...block.inner.matchAll(/<MyOldTask\b[^>]*\bscore="(\d+)"/g)].map((m) => Number(m[1]));
+  const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+  const active = !!win && now >= win.start && now <= win.end;
+  const want = Math.max(1, Math.min(REGATTA_MAX_TASKS, Math.floor(Number(nTasks) || 0)));
+  const hi = win ? Math.min(win.end, now) - 60 : 0;
+  const lo = win ? win.start + Math.floor((hi - win.start) * 0.35) : 0;
+
+  let reason: RegattaReason = "ok";
+  if (!active) reason = "no_active_regatta";
+  else if (!templates.length) reason = "no_template";
+  else if (want <= current) reason = "already_full";
+  // Same two floors `injectRegata` applies, so the status the tab shows is the
+  // decision the server will actually make for that batch size.
+  else if (hi - win!.start < 600 || hi - lo < (want - current) * 60) reason = "window_closed";
+
+  return { reason, active, current, templates: templates.length, pool, avgScore, user, window: win };
+}
+
+/**
+ * Add completed tasks to a regatta the save is genuinely taking part in.
+ *
+ * Every field of a new task is copied from a record this save already holds
+ * (`regattaTemplates`), so nothing is invented: `type`, `eventType`, `target`,
+ * `need`, `have`, `score`, `regataCash` and `anlLimit` are proven to reconcile
+ * with that id. Only the counters and the timestamps move.
+ *
+ * Refuses (rather than reporting a success the game ignores) when the save has
+ * no live `<Regata>`, no real task to clone, no usable window, or already has
+ * enough tasks. Throws, so `applySave` surfaces the reason instead of ticking.
+ */
+export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): string {
+  const text0 = asText(xml).replace(/^\uFEFF/, "");
+  const want = Math.max(1, Math.min(REGATTA_MAX_TASKS, Math.floor(Number(nTasks) || 0)));
+
+  const block = regattaBlock(text0);
+  const win = block ? regattaWindow(block.attrs) : null;
+  const now = Math.floor(Date.now() / 1000);
+  if (!block || !win || now < win.start || now > win.end) throw new Error(REGATTA_ERR.no_active_regatta);
+
+  const templates = regattaTemplates(text0);
+  if (!templates.length) throw new Error(REGATTA_ERR.no_template);
+
+  const current = (block.inner.match(/<MyOldTask\b/gi) ?? []).length;
+  const need = want - current;
+  if (need <= 0) throw new Error(REGATTA_ERR.already_full.replace("%s", `${current}/${want}`));
+
+  // The save's own id, never a fresh one: a save that hands its records a
+  // second identity is exactly what a server notices when it is looking.
+  const user = resolveRegataUser(text0);
+
+  // Timestamps must sit inside the regatta window AND in the past. A completion
+  // dated in the future, or outside the window the server is holding, is the
+  // single easiest anomaly to spot.
+  const hi = Math.min(win.end, now) - 60;
+  const lo = win.start + Math.floor((hi - win.start) * 0.35);
+  // Both floors matter: the first keeps `lo` clear of `win.start + 122` below,
+  // so task times never collapse onto one another, and the second leaves each
+  // task at least a minute of its own.
+  if (hi - win.start < 600 || hi - lo < need * 60) throw new Error(REGATTA_ERR.window_closed);
+  const gap = need > 1 ? Math.floor((hi - lo) / (need - 1)) : 0;
+
+  // `takenCounter` runs monotonically across the `MyOldTask` list of a single
+  // block: a real save's archived week reads 2,3,…,37 in document order, and
+  // the new week restarts at 2 — the counter is per regatta, so it must be
+  // read against the block we are appending to, not the whole document.
+  // Basing it on the template's own value re-issued numbers the block already
+  // holds (appending 3 after the block's 4), and restarting it per template id
+  // let two ids interleave out of order: both are steps backwards in a field
+  // that only ever grows, and exactly what a server can read for free.
+  let maxTaken = -1;
+  for (const m of block.inner.matchAll(/<MyOldTask\b[^>]*\btakenCounter="(\d+)"/g)) {
+    const v = Number(m[1]);
+    if (Number.isFinite(v) && v > maxTaken) maxTaken = v;
   }
 
-  if (!m || m.index === undefined) {
-    const user = resolveRegataUser(text);
-    // Insert a fresh block inside the root, then operate on it in place. The
-    // previous version appended at EOF when no root closer matched, which left
-    // the new element outside the document (and unreachable by the game).
-    const block = `<Regata user="${user}"><FreeTask id="match3_1"/></Regata>`;
-    text = insertBeforeRoot(text, block);
-    m = text.match(patterns[0]);
-    if (!m || m.index === undefined) {
-      // The insert did not produce a matchable open/close pair; fall back to a
-      // self-closing element rather than emitting mismatched tags.
-      return insertBeforeRoot(text, `<Regata user="${user}"/>`);
-    }
-  }
-
-  const block = m[1]!;
-  // The block's own completed tasks decide the id (the reference tool reads it
-  // the same way); then the block attribute, then whatever this save already
-  // uses elsewhere. Never invent one.
-  const user =
-    block.match(/<MyOldTask\b[^>]*\buser="([^"]*)"/i)?.[1] ??
-    block.match(/\buser="([^"]*)"/i)?.[1] ??
-    resolveRegataUser(text);
-  // FreeTask ids come from inside the block; when the block has too few (or
-  // none), top up from the document so every generated MyOldTask gets a
-  // distinct id. Repeating one id across 105 tasks makes them collide.
-  const freeIds = [...block.matchAll(/<FreeTask\b[^>]*\bid="([^"]*)"/gi)].map((x) => x[1]!);
-  for (const x of text.matchAll(/<FreeTask\b[^>]*\bid="([^"]*)"/gi)) {
-    if (!freeIds.includes(x[1]!)) freeIds.push(x[1]!);
-  }
-
-  let clean = block.replace(/<MyOldTask\b[^>]*\/>/gi, "").replace(/<MyOldTask\b[^>]*>[\s\S]*?<\/MyOldTask\s*>/gi, "");
-  const baseTime = Math.floor(Date.now() / 1000) + 3600;
   const tasks: string[] = [];
-  for (let i = 0; i < nTasks; i++) {
-    const tid = freeIds[i] ?? `match3_${i + 1}`;
-    const endTime = baseTime + i * 90;
-    tasks.push(
-      `<MyOldTask id="${tid}" type="event_order" eventType="Match3" target="${tid}" user="${user}" num="${i + 1}" ver="1" takenCounter="1" score="${score}" realEndTime="${endTime}"/>`,
-    );
+  let addedScore = 0;
+
+  for (let i = 0; i < need; i++) {
+    const tpl = templates[i % templates.length]!;
+    const a = tagAttrs(tpl);
+    // Real records keep takeTime < completeTime < endTime strictly, and all
+    // three inside the window. The floors below hold that ordering even when
+    // the regatta has only just opened.
+    const endTime = Math.max(lo + i * gap, win.start + 122);
+    const complete = Math.max(win.start + 1, endTime - 120);
+    const take = Math.max(win.start, Math.min(complete - 1, complete - 1800));
+
+    let tag = setTagAttr(tpl, "user", user);
+    tag = setTagAttr(tag, "takeTime", String(take));
+    tag = setTagAttr(tag, "completeTime", String(complete));
+    tag = setTagAttr(tag, "realEndTime", String(endTime));
+    if (attrValue(a, "endTime") !== null) tag = setTagAttr(tag, "endTime", String(endTime));
+    const anlLimit = Number(attrValue(a, "anlLimit") ?? 0);
+    if (Number.isFinite(anlLimit) && anlLimit > 0) tag = setTagAttr(tag, "anlNumber", String((i % anlLimit) + 1));
+    if (maxTaken >= 0 && attrValue(a, "takenCounter") !== null) {
+      tag = setTagAttr(tag, "takenCounter", String(maxTaken + 1 + i));
+    }
+
+    tasks.push(tag);
+    addedScore += Number(attrValue(a, "score") ?? 0);
   }
-  if (tasks.length) {
-    clean = clean.replace(/<\/(Regata|Regatta|regata)\s*>/i, `${tasks.join("")}</$1>`);
+
+  const body = tasks.join("");
+  let text = text0;
+  if (block.close) {
+    text = text.replace(/(<Regata\b[^>]*>)([\s\S]*?)(<\/Regata\s*>)/i, (_f, o, inner, c) => `${o}${inner}${body}${c}`);
+  } else {
+    const selfRe = /<Regata\b[^>]*\/>/i;
+    const self = text.match(selfRe);
+    if (!self) throw new Error(REGATTA_ERR.no_active_regatta);
+    text = text.replace(selfRe, self[0].replace(/\/>$/, `>${body}</Regata>`));
   }
-  text = text.slice(0, m.index) + clean + text.slice(m.index + m[0].length);
+
+  // Lifetime counter: bump what is already there, never overwrite it. Writing
+  // the batch size over it moved a lifetime stat backwards - a counter that
+  // goes down after months of going up is about the cheapest anomaly there is.
+  const life =
+    text.match(/<Var\b[^>]*\bname="RegataTasksCompleted"[^>]*\bv="(\d+)"/i) ??
+    text.match(/<Var\b[^>]*\bv="(\d+)"[^>]*\bname="RegataTasksCompleted"/i);
+  if (life?.[1]) text = writeVar(text, "RegataTasksCompleted", String(Number(life[1]) + need));
+
+  // <Regata score> counts the tasks it holds and scoreUpd is the newest
+  // completeTime in the block (both verified on untouched reference saves).
+  // They are rewritten together so the block never contradicts itself.
+  const after = text.match(/(<Regata\b[^>]*>)([\s\S]*?)(<\/Regata\s*>)/i);
+  const open = after ? after[1].match(/^(<Regata\b)([^>]*)(>)$/i) : null;
+  if (after && open) {
+    let attrs = open[2];
+    const times = [...after[2].matchAll(/\bcompleteTime="(\d+)"/g)].map((x) => Number(x[1]));
+    const newest = times.length ? Math.max(...times) : 0;
+    // Only touch an attribute the block already declares: adding one the save
+    // never carried is a shape change the loader has no reason to accept.
+    const rawScore = attrValue(attrs, "score");
+    if (rawScore !== null && /^\d+$/.test(rawScore) && Number.isFinite(addedScore)) {
+      attrs = putAttr(attrs, "score", String(Number(rawScore) + addedScore));
+    }
+    const rawUpd = attrValue(attrs, "scoreUpd");
+    if (rawUpd !== null && /^\d+$/.test(rawUpd) && newest > Number(rawUpd)) {
+      attrs = putAttr(attrs, "scoreUpd", String(newest));
+    }
+    text = text.replace(after[0], () => `${open[1]}${attrs}${open[3]}${after[2]}${after[3]}`);
+  }
+
   return text;
 }
 

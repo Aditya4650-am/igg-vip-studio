@@ -316,6 +316,24 @@ const vi = {
   copyDecorQueued: "Đã chọn Sao chép trang trí + bố cục - bấm Lưu & đẩy để áp dụng",
   copyCity: "Toàn bộ thành phố",
   copyCityQueued: "Đã chọn Sao chép toàn bộ thành phố - bấm Lưu & đẩy để áp dụng",
+  regattaHint:
+    "Thêm task regatta đã hoàn thành vào save. Chỉ chạy khi save đang trong một regatta đang mở và đã có task thật để làm mẫu; nếu chưa có thì tool từ chối thay vì báo thành công mà game bỏ qua.",
+  regattaState: "Trạng thái save",
+  regattaReady: "Sẵn sàng thêm task",
+  regattaNoRegatta: "Chưa có regatta đang diễn ra",
+  regattaNoTemplate: "Chưa có task thật để làm mẫu",
+  regattaNoWindow: "Cửa sổ thời gian regatta chưa đủ",
+  regattaFull: "Đã đủ task",
+  regattaDone: "Đã hoàn thành",
+  regattaTemplates: "Mẫu:",
+  regattaPool: "Danh sách task:",
+  regattaWindow: "Thời gian regatta",
+  regattaGuards:
+    "Mỗi task được sao chép nguyên vẹn từ một task thật đã có trong save (type, target, need, score, ver...), chỉ đổi thời gian. Thời gian luôn nằm trong khoảng của regatta và luôn ở quá khứ. Không bao giờ tạo regatta mới, không ghi đè bộ đếm lifetime, không đổi danh tính save.",
+  regattaCount: "Số task muốn thêm",
+  regattaCountHint: "Một tuần thật thường có 10-15 task. Tối đa 15.",
+  regattaAdd: "Thêm vào Lưu & đẩy",
+  regattaQueued: "✓ Đã xếp hàng",
 };
 
 const en: typeof vi = {
@@ -611,6 +629,24 @@ const en: typeof vi = {
   copyDecorQueued: "Decoration + town copy queued - press Save & push to apply",
   copyCity: "Complete city",
   copyCityQueued: "Complete city copy queued - press Save & push to apply",
+  regattaHint:
+    "Adds completed regatta tasks to your save. It only runs when the save is in a live regatta and already holds a real task to copy from; otherwise it refuses instead of reporting a success the game would ignore.",
+  regattaState: "Save status",
+  regattaReady: "Ready to add tasks",
+  regattaNoRegatta: "No regatta running right now",
+  regattaNoTemplate: "No real task to copy from",
+  regattaNoWindow: "The regatta window is too short",
+  regattaFull: "Already has enough tasks",
+  regattaDone: "Completed",
+  regattaTemplates: "Templates:",
+  regattaPool: "Task pool:",
+  regattaWindow: "Regatta window",
+  regattaGuards:
+    "Every task is copied whole from a real record already in your save (type, target, need, score, ver ...) and only its timestamps move. Those always fall inside the regatta window and always in the past. It never creates a regatta, never rewrites a lifetime counter, and never touches your save's identity.",
+  regattaCount: "Tasks to add",
+  regattaCountHint: "A real week has 10-15 tasks. Maximum 15.",
+  regattaAdd: "Add to Save & push",
+  regattaQueued: "✓ Queued",
 };
 
 function overlay(p: Partial<typeof en>): typeof en {

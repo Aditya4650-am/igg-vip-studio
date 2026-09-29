@@ -202,6 +202,70 @@ reporting a success the game would silently ignore.
 `pendingDecorClone` was never set to `true` anywhere. Both now sit in one
 panel and queue into *Save & push*.
 
+## Regatta: clone-based tasks (own tab)
+
+The first `injectRegata` (commit `3c3b03a`) **fabricated** every field: ids
+`match3_1`…`match3_105` (the game only ever issues 43 `FreeTask` ids), 90-second
+deltas, `takenCounter="1"`, `num` 1..105, `score="135"` on all of them, a
+`<Regata user="…">` block that a real `<Regata>` never carries, and
+`RegataTasksCompleted` **overwritten** with the batch size — moving a lifetime
+counter *backwards*. Every one of those is something a server can read for
+free, and the game discards a record it cannot reconcile without saying so,
+which is a silent no-op dressed as a green tick.
+
+It is rebuilt on top of what the save already holds. **Regatta now has its own
+tab** (`"regatta"`, index 8 in `TABS` so the eight primary tabs keep their
+positions); the sidebar *Tools* button was removed, leaving Season there.
+
+- `injectRegata(xml, nTasks)` clones an existing completed `MyOldTask`
+  wholesale and moves only the counters and the timestamps. `type`,
+  `eventType`, `target`, `need`, `have`, `score`, `regataCash`, `ver` and
+  `anlLimit` are therefore provably consistent with that id, because they came
+  from it. `regattaTemplates()` accepts only records carrying
+  `TASK_TEMPLATE_FIELDS` and no `expired`.
+- `inspectRegatta(xml, nTasks)` is the read-only twin, and its
+  `RegattaReason` is exactly what the tab shows **before** the user presses
+  anything: `no_active_regatta` (no `<Regata>` with a window, or `now` outside
+  it), `no_template`, `window_closed`, `already_full`.
+- Refusals **throw** with a Vietnamese message rather than reporting a success
+  the game would ignore. There is no code path that invents a `<Regata>`.
+- Timestamps: `hi = min(end, now) - 60`, `lo = start + 0.35 * (hi - start)`,
+  spaced by `gap`. Two floors — `hi - start >= 600` and `hi - lo >= need * 60` —
+  keep them inside the window, strictly in the past, strictly
+  `takeTime < completeTime < realEndTime`, and all distinct.
+- `RegataTasksCompleted` is **bumped only when already present**; a save that
+  never tracked it gains no fabricated counter. `<Regata score>` gets the
+  *delta* (a team aggregate) and `scoreUpd` is raised to the newest
+  `completeTime` — both only if the block already declares them, and always
+  rewritten together.
+- `takenCounter` continues **above the target block's own highest**, never the
+  template's own number. Measured on a real save (`CsKEeUDtYh`): an archived
+  week reads `2,3,…,37` in document order inside `<PrevRegata>`, the week's
+  `<MyTask>` is `38`, and the *current* `<Regata>` starts over at `2` — the
+  counter is per regatta, so it is read against the block being appended to
+  and not the whole document. Basing it on the template re-issued numbers the
+  block already held (`…3,4,1,2`), a step backwards in a field that only ever
+  grows; restarting it per template id let two ids interleave out of order.
+- The batch is capped at `REGATTA_MAX_TASKS = 15` (a strong week), default
+  `REGATTA_DEFAULT_TASKS = 12`. `SavePayload.regattaTasks` is clamped on the
+  server; the zod bound in `studio-api.ts` duplicates it because that module is
+  bundled for the browser and cannot import a server constant.
+- `applySave` rolls `s.rawXml` **and** `s.unban` back on refusal: a restore
+  queued in the same batch has already rewritten `s.rawXml`, so leaving it in
+  place while reporting a failure would make the next push apply it twice.
+  `applyRegatta` is now a one-line delegate to `applySave`, so the identity
+  gate, the balance check and the rollback are shared rather than duplicated.
+
+Guard rails: `xml-edit.test.mts` proves field-for-field cloning, in-window
+ordered past timestamps, the monotonic lifetime counter, self-closing-block
+expansion (not a rival second block) and every refusal;
+`studio-pipeline.test.ts` adds `a refused regatta does not leave a half-applied
+restore behind` alongside the existing identity and push-gate tests.
+
+The happy path can only be proven against a synthetic fixture: **no real sample
+save currently carries a live `<Regata>` window**, so in-game confirmation still
+needs a throwaway account on your device — never your main.
+
 ## Factory / upgrade levels
 
 The **Factories** tab (`tab === "factory"`) raises `<Upgrade version="4">`

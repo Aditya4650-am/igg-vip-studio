@@ -39,6 +39,44 @@ const friendSave = [
   "</Global>",
 ].join("");
 
+// Regatta only ever writes into a save that is genuinely taking part in a
+// regatta, so its tests need a live one: a window four days either side of
+// now plus the single real completed record the save owns. Everything the
+// injector produces has to be derivable from that record.
+const R_NOW = Math.floor(Date.now() / 1000);
+const R_START = R_NOW - 4 * 86400;
+const R_END = R_NOW + 4 * 86400;
+const REGATTA_TASK =
+  `<MyOldTask id="match3_bomb_999" type="event_order" eventType="Match3" target="create_bonus_bomb" ` +
+  `need="100" have="100" user="MECITY1" num="4" ver="1" takenCounter="1" score="135" ` +
+  `takeTime="${R_START + 300}" completeTime="${R_START + 900}" endTime="${R_START + 1000}" ` +
+  `realEndTime="${R_START + 1000}" regataCash="17" anlNumber="1" anlLimit="10"/>`;
+const REGATTA_SAVE = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  "<Global>",
+  '<Var name="cityId" v="MECITY1" t="s"/>',
+  `<Regata id="507" startTime="${R_START}" endTime="${R_END}" score="135" scoreUpd="${R_START + 900}">`,
+  '<FreeTask id="match3_bomb_999" num="4" ver="1"/>',
+  REGATTA_TASK,
+  "</Regata>",
+  "</Global>",
+].join("");
+
+// The same regatta with no identity anywhere in the save and a record that
+// declares an empty user: there is nothing to attribute new tasks to, so the
+// push gate has to be the one that stops it.
+const NO_ID_REGATTA_SAVE = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  "<Global>",
+  '<Var name="money" v="1" t="i"/>',
+  `<Regata id="507" startTime="${R_START}" endTime="${R_END}" score="100">`,
+  `<MyOldTask id="trains_3" type="trains" user="" num="1" ver="1" score="100" ` +
+    `takeTime="${R_START + 300}" completeTime="${R_START + 900}" endTime="${R_START + 1000}" ` +
+    `realEndTime="${R_START + 1000}"/>`,
+  "</Regata>",
+  "</Global>",
+].join("");
+
 function load() {
   return studio.connectLoad(
     token,
@@ -149,13 +187,22 @@ test("decoration: a save that already has a self-closing stash is updated in pla
   assert.equal((pushed.match(/<BuildingsStash/g) ?? []).length, 1);
 });
 
-test("regatta: repeated apply keeps XML balanced", () => {
-  const { sessionId } = load();
-  const first = studio.applyRegatta(token, sessionId);
+test("regatta: repeated apply stays balanced and the second run refuses", () => {
+  const snap = townSession(REGATTA_SAVE);
+  const first = studio.applyRegatta(token, snap.sessionId);
   balanced(first.xml!);
-  const second = studio.applyRegatta(token, sessionId);
-  balanced(second.xml!);
-  assert.ok((second.xml!.match(/<Regata\b/g)?.length ?? 0) >= 1);
+  balanced(Buffer.from(first.fileB64!, "base64").toString("utf8"));
+  assert.equal(
+    (Buffer.from(first.fileB64!, "base64").toString("utf8").match(/<MyOldTask\b/g) ?? []).length,
+    12,
+    "one task the save already had plus eleven added",
+  );
+
+  // Running it again has nothing left to add. It must say so rather than
+  // double the batch or tick green over a file that did not change.
+  assert.throws(() => studio.applyRegatta(token, snap.sessionId), /regatta/i);
+  const after = studio.exportCurrent(token, snap.sessionId);
+  assert.equal(after.fileB64, first.fileB64, "a refused run must leave the save untouched");
 });
 
 test("fetch city: validates input before touching python", async () => {
@@ -817,14 +864,8 @@ test("regatta never hands one save a second identity", () => {
   // A save whose completed tasks already use a user id other than its cityId
   // Var must not get a third: injected tasks reuse the id the save's own
   // records already carry instead of minting one.
-  const xml = [
-    '<?xml version="1.0" encoding="utf-8"?>',
-    "<Global>",
-    '<Var name="cityId" v="CITYAAAAA" t="s"/>',
-    '<PrevRegata><MyOldTask id="t1" score="135" user="PREVCITY1"/></PrevRegata>',
-    "</Global>",
-  ].join("");
-  const out = injectRegata(xml, 4, 135);
+  const xml = REGATTA_SAVE.replace('user="MECITY1"', 'user="PREVCITY1"');
+  const out = injectRegata(xml, 4);
   const users = [...new Set([...out.matchAll(/<MyOldTask[^>]*\buser="([^"]*)"/g)].map((m) => m[1]))];
   assert.deepEqual(users, ["PREVCITY1"], "injected tasks must reuse the save's own user id");
   balanced(out);
@@ -836,12 +877,7 @@ test("the push gate rolls back instead of leaving an unpushable save", () => {
   // back exactly as it was — otherwise every later action fails the same way
   // and the user is stuck holding a save that can never be written to the
   // device, which looks like the whole tool has stopped working.
-  const bare = [
-    '<?xml version="1.0" encoding="utf-8"?>',
-    "<Global>",
-    '<Var name="money" v="1" t="i"/>',
-    "</Global>",
-  ].join("");
+  const bare = NO_ID_REGATTA_SAVE;
   const snap = townSession(bare);
   assert.throws(
     () => studio.applySave({ token, sessionId: snap.sessionId, regatta: true }),
@@ -853,5 +889,34 @@ test("the push gate rolls back instead of leaving an unpushable save", () => {
     Buffer.from(after.fileB64, "base64").toString("utf8"),
     bare,
     "the refused edit must be undone, not left half-applied",
+  );
+});
+
+test("a refused regatta does not leave a half-applied restore behind", () => {
+  // A restore rewrites s.rawXml before Regatta ever runs, so a refusal
+  // afterwards has to undo it too. The user is told the batch failed, so
+  // nothing from it may stick: keeping the restore while reporting an error
+  // would mean the next Save & push applies it a second time.
+  const solo = townSession(ownSave);
+  studio.attachFriendXml(token, solo.sessionId, friendSave);
+  const applied = studio.applySave({ token, sessionId: solo.sessionId, unbanMode: "completo" });
+  assert.match(
+    Buffer.from(applied.fileB64!, "base64").toString("utf8"),
+    /<Var name="levelup"\s+v="42"/,
+    "the restore on its own must really rewrite the file, or the check below passes for the wrong reason",
+  );
+
+  const snap = townSession(ownSave);
+  studio.attachFriendXml(token, snap.sessionId, friendSave);
+  const before = studio.exportCurrent(token, snap.sessionId).fileB64;
+  assert.throws(
+    () => studio.applySave({ token, sessionId: snap.sessionId, unbanMode: "completo", regatta: true }),
+    /regatta/i,
+    "this save has no regatta, so Regatta must refuse",
+  );
+  assert.equal(
+    studio.exportCurrent(token, snap.sessionId).fileB64,
+    before,
+    "the whole batch must be undone, not just the part that failed",
   );
 });

@@ -7,7 +7,7 @@ import { applyStatChanges, parseStats, readAnyVar, STAT_ALIASES } from "./townsh
 import { shellErrorMessage } from "./township/save-decode.server";
 import { findUnbalancedTag } from "./township/xml-edit.server";
 import { applyBarnCapacity, applyBarnItems, barnInfo, ensureBarnCapacity } from "./township/barn.server";
-import { injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, injectUpgradeLevels, parseProfileUnlocked, upgradeMaxLevel, discoverUpgrades, UPGRADE_REF_CAP } from "./township/inject.server";
+import { injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, injectUpgradeLevels, inspectRegatta, parseProfileUnlocked, upgradeMaxLevel, discoverUpgrades, REGATTA_DEFAULT_TASKS, REGATTA_MAX_TASKS, UPGRADE_REF_CAP } from "./township/inject.server";
 import { grantArtifacts } from "./township/museum.server";
 import { grantCards, countOwnedCards } from "./township/cards.server";
 import { completeZoo, discoverZoo, type ZooPaddock } from "./township/zoo.server";
@@ -329,6 +329,9 @@ export type SavePayload = {
   barnUpgrades?: number;
   barnItems?: Record<string, number>;
   regatta?: boolean;
+  /** How many completed tasks the Regatta tab should reach. Clamped to
+   *  [1, REGATTA_MAX_TASKS] on the server, never trusted from the client. */
+  regattaTasks?: number;
   season?: boolean;
   unbanMode?: "inicial" | "completo" | "novo";
   decorFragments?: boolean;
@@ -356,6 +359,8 @@ export function applySave(p: SavePayload) {
   // Kept so an edit the push gate later refuses can be undone: the session
   // must never be left holding a save that can never be written to the device.
   const prevXml = s.rawXml;
+  const prevUnban = s.unban;
+  const prevRegatta = s.regatta;
 
   // Apply compound operations first so every UI change is committed in one save.
   if (p.unbanMode) {
@@ -375,9 +380,25 @@ export function applySave(p: SavePayload) {
     parts.push("town-clone");
   }
   if (p.regatta) {
-    s.rawXml = injectRegata(s.rawXml, 105, 135);
-    s.regatta = { tasks: 105, score: 135 };
-    parts.push("regatta-105x135");
+    const want = Math.max(
+      1,
+      Math.min(REGATTA_MAX_TASKS, Math.floor(Number(p.regattaTasks ?? REGATTA_DEFAULT_TASKS) || REGATTA_DEFAULT_TASKS)),
+    );
+    try {
+      s.rawXml = injectRegata(s.rawXml, want);
+    } catch (e) {
+      // A refusal must leave the session exactly as it was. Earlier queued
+      // edits (a restore, a clone) have already touched s.rawXml by this
+      // point, and leaving them in while reporting a failure would mean the
+      // next Save & push applies them a second time.
+      s.rawXml = prevXml;
+      s.unban = prevUnban;
+      s.regatta = prevRegatta;
+      throw e;
+    }
+    const st = inspectRegatta(s.rawXml);
+    s.regatta = { tasks: st.current, score: st.avgScore };
+    parts.push(`regatta-${want}`);
   }
   if (p.season) {
     s.rawXml = injectSeason(s.rawXml, "1", "1002");
@@ -572,12 +593,9 @@ export function applySave(p: SavePayload) {
 }
 
 export function applyRegatta(token: string, sessionId: string) {
-  const s = requireSession(sessionId, token);
-  s.regatta = { tasks: 105, score: 135 };
-  if (s.rawXml) s.rawXml = injectRegata(s.rawXml, 105, 135);
-  s.log.push("Regatta 105×135 injected");
-  return { ...snapshot(s), xml: s.rawXml, fileB64: encodeSave(s) };
-}
+  // One path only: the tab, this helper and every guard rail (identity gate,
+  // XML balance, rollback) go through applySave.
+  return applySave({ token, sessionId, regatta: true });}
 
 export function applySeason(token: string, sessionId: string) {
   const s = requireSession(sessionId, token);
@@ -761,6 +779,7 @@ export function snapshot(s: Session) {
     },
     season: s.season,
     regatta: s.regatta,
+    regattaInfo: inspectRegatta(s.rawXml ?? ""),
     zoo: s.zoo,
     cardsOwned: countOwnedCards(s.rawXml ?? ""),
     friends: s.friends,

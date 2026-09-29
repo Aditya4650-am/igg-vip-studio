@@ -35,7 +35,7 @@ import {
   restoreFreshStart,
 } from "@/lib/studio-api";
 
-type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "barn" | "museum" | "cards" | "zoo" | "upgrades" | "newgame";
+type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "regatta" | "barn" | "museum" | "cards" | "zoo" | "upgrades" | "newgame";
 type SessionSnap = Awaited<ReturnType<typeof connectLoad>>;
 type Catalogs = Awaited<ReturnType<typeof getCatalogs>>;
 type UnbanMode = "inicial" | "completo" | "novo";
@@ -111,7 +111,9 @@ function downloadText(name: string, text: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "barn", "museum", "cards", "zoo", "upgrades", "newgame"];
+// "regatta" sits at index 8, the first overflow slot, so the eight primary
+// tabs keep their exact positions and only the second row gains a member.
+const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "regatta", "barn", "museum", "cards", "zoo", "upgrades", "newgame"];
 // Premium tab bar: 8 primary slots + a "More" overflow for the rest, so
 // labels never compress or wrap. Derived from TABS — one source of truth.
 const PRIMARY_TABS: Tab[] = TABS.slice(0, 8);
@@ -125,6 +127,7 @@ const TAB_KEY: Record<Tab, keyof Dict> = {
   decor: "tabDecor",
   sticker: "tabSticker",
   items: "tabItems",
+  regatta: "regatta",
   barn: "tabBarn",
   museum: "tabMuseum",
   cards: "tabCards",
@@ -141,6 +144,7 @@ const TAB_EMOJI: Record<Tab, string> = {
   decor: "🖼️",
   sticker: "💬",
   items: "📦",
+  regatta: "⛵",
   barn: "🌾",
   museum: "🏛️",
   cards: "🃏",
@@ -148,6 +152,17 @@ const TAB_EMOJI: Record<Tab, string> = {
   upgrades: "⚙️",
   newgame: "🎮",
 };
+
+/** Why the Regatta tab will (or will not) accept a task batch. Mirrors
+ *  `RegattaReason` in inject.server.ts so the reason the server would give is
+ *  the one the user reads before pressing anything. */
+const REGATTA_REASON_KEY = {
+  ok: "regattaReady",
+  no_active_regatta: "regattaNoRegatta",
+  no_template: "regattaNoTemplate",
+  window_closed: "regattaNoWindow",
+  already_full: "regattaFull",
+} as const;
 
 
 function groupIcon(id: string): GameIconName {
@@ -1241,6 +1256,9 @@ export function StudioApp() {
   const [stickerSel, setStickerSel] = useState<Set<string>>(new Set());
   const [museumSel, setMuseumSel] = useState<Set<string>>(new Set());
   const [pendingRegatta, setPendingRegatta] = useState(false);
+  // How many completed tasks the Regatta tab should reach (10-15 is the range a
+  // real week produces; the server clamps to REGATTA_MAX_TASKS regardless).
+  const [regattaTasks, setRegattaTasks] = useState(12);
   const [pendingSeason, setPendingSeason] = useState(false);
   const [pendingUnban, setPendingUnban] = useState<UnbanMode | null>(null);
   const [pendingDecorFragments, setPendingDecorFragments] = useState(false);
@@ -1779,6 +1797,7 @@ export function StudioApp() {
           barnUpgrades: barnTier && barnTier !== activeSession.barn.upgrades ? barnTier : undefined,
           barnItems: Object.keys(changedBarn).length ? changedBarn : undefined,
           regatta: pendingRegatta,
+          regattaTasks: pendingRegatta ? regattaTasks : undefined,
           season: pendingSeason,
           unbanMode: pendingUnban ?? undefined,
           decorFragments: pendingDecorFragments,
@@ -1835,7 +1854,7 @@ export function StudioApp() {
     } finally {
       setBusy(false);
     }
-  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, cardsQty, zooSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, pendingSeason, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingTownClone, pendingDecorMaxAll, parseDecorQty, tr, device, upgradeFactorySel, upgradeTrainSel, upgradeIslandSel, upgradeTargetLevel]);
+  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, cardsQty, zooSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, regattaTasks, pendingSeason, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingTownClone, pendingDecorMaxAll, parseDecorQty, tr, device, upgradeFactorySel, upgradeTrainSel, upgradeIslandSel, upgradeTargetLevel]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -2094,6 +2113,7 @@ export function StudioApp() {
     decor: decorSel.size,
     sticker: stickerSel.size,
     items: itemSel.count,
+    regatta: pendingRegatta ? regattaTasks : 0,
     barn: barnDirty ? 1 : 0,
     museum: museumSel.size,
     cards: cardsCount,
@@ -2419,12 +2439,6 @@ export function StudioApp() {
           <div className="sidebar-tools">
             <p className="kicker mb-2">{tr("tools")}</p>
             <div className="flex flex-col gap-2">
-              <Button className="tool-action tool-action--regatta w-full" variant="purple" disabled={!session || busy} onClick={() => void tool("regatta")}>
-                <span className="tool-asset" aria-hidden="true">
-                  <img src="/game-icons/Regatta_Token.png" alt="" className="tool-asset-img" draggable={false} />
-                </span>
-                {tr("regatta")}
-              </Button>
               <Button className="tool-action tool-action--season w-full" variant="amber" disabled={!session || busy} onClick={() => void tool("season")}>
                 <span className="tool-asset" aria-hidden="true">
                   <img src="/game-icons/Season_pass.png" alt="" className="tool-asset-img" draggable={false} />
@@ -3165,6 +3179,86 @@ export function StudioApp() {
                       </label>
                     }
                   />
+                )}
+
+                {tab === "regatta" && (
+                  <div className="space-y-3">
+                    <p className="text-sm text-muted">{tr("regattaHint")}</p>
+
+                    <section className="panel">
+                      <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-cyan uppercase">
+                        <GameIcon name="regatta" className="size-4" />
+                        {tr("regattaState")}
+                      </h3>
+                      <div className="flex flex-wrap gap-2">
+                        <span
+                          className={cn(
+                            "state-badge rounded-full px-2.5 py-1 text-xs font-medium",
+                            session.regattaInfo.reason === "ok" ? "state-badge--ready" : "bg-input text-muted",
+                          )}
+                        >
+                          <GameIcon
+                            name={session.regattaInfo.reason === "ok" ? "success" : "regatta"}
+                            className="size-3.5"
+                          />
+                          {tr(REGATTA_REASON_KEY[session.regattaInfo.reason])}
+                        </span>
+                        <span className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums">
+                          {tr("regattaDone")} {session.regattaInfo.current} / {Math.min(regattaTasks, 15)}
+                        </span>
+                        <span className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums">
+                          {tr("regattaTemplates")} {session.regattaInfo.templates}
+                        </span>
+                        <span className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums">
+                          {tr("regattaPool")} {session.regattaInfo.pool}
+                        </span>
+                      </div>
+                      <p className="mt-3 text-xs text-muted">{tr("regattaGuards")}</p>
+                      {session.regattaInfo.window ? (
+                        <p className="mt-1 text-xs text-muted tabular-nums">
+                          {tr("regattaWindow")}: {new Date(session.regattaInfo.window.start * 1000).toLocaleString()} →{" "}
+                          {new Date(session.regattaInfo.window.end * 1000).toLocaleString()}
+                        </p>
+                      ) : null}
+                    </section>
+
+                    <section className="panel">
+                      <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-amber uppercase">
+                        <GameIcon name="regatta" className="size-4" />
+                        {tr("regattaCount")}
+                      </h3>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <input
+                          className="field field-qty"
+                          inputMode="numeric"
+                          aria-label={tr("regattaCount")}
+                          value={regattaTasks}
+                          onChange={(e) => {
+                            const raw = Number(e.target.value.replace(/[^\d]/g, ""));
+                            setRegattaTasks(raw > 0 ? Math.min(15, raw) : 12);
+                          }}
+                        />
+                        <span className="text-xs text-muted">{tr("regattaCountHint")}</span>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          className="tool-action tool-action--regatta"
+                          variant="purple"
+                          disabled={busy || pendingRegatta || session.regattaInfo.reason !== "ok"}
+                          onClick={() => void tool("regatta")}
+                        >
+                          <GameIcon name="regatta" className="size-4" />
+                          {pendingRegatta ? tr("regattaQueued") : tr("regattaAdd")}
+                        </Button>
+                        {pendingRegatta ? (
+                          <Button size="sm" variant="ghost" onClick={() => setPendingRegatta(false)}>
+                            {tr("clear")}
+                          </Button>
+                        ) : null}
+                      </div>
+                    </section>
+                  </div>
                 )}
 
                 {tab === "barn" && catalogs && (
