@@ -18,6 +18,13 @@ resolve hook that maps the `@/*` alias to `./src/*`. Without it, imports inside
 `src/**` fail with `ERR_MODULE_NOT_FOUND: Cannot find package '@/lib'`. Tests are
 plain `node:test` + `node:assert`; there is no vitest/jest.
 
+The globs are **double-quoted** on purpose. npm runs scripts through `cmd.exe`
+on Windows, which does not strip single quotes, so `'src/**/*.test.ts'` reached
+node as a literal path and matched nothing: `npm test` printed `# tests 0` and
+exited 0, passing vacuously while running nothing at all. Do not change them
+back to single quotes. On sh both quote styles are stripped, so CI behaves the
+same either way.
+
 ## Architecture
 
 - `src/lib/server/studio.server.ts` — session store + all mutating operations.
@@ -76,6 +83,70 @@ which the game's loader rejects).
   Rows differ in which bonus attributes they carry (`xpBonus`, `moneyBonus`,
   `timeBonus`, `shelfBonus`, `probability2/3`) and the game reads those
   independently — replace only the two values in place.
+
+## Identity: why a copy caused an instant Playrix ban
+
+Playrix checks the declared owner of a save when it is uploaded. A save that
+carries someone else's `cityId` / `deviceId` / `user=` / `mainPlayer` is
+rejected outright — that reads to the user as an instant ban, not as a
+cosmetic bug, so it must never leave the server.
+
+Measured on a real FetchCity response (`CsKEeUDtYh`): mode `novo` ("All")
+copied the donor's `DataStoreCollection` wholesale — 1.4 MB holding 38 copies
+of the friend's cityId, 58 `mainPlayer`, 161 `saveId`/`SaveId`, the
+`currentProfiles` account-switcher list and the donor's player name. That
+block is what made the save declare another player as its main player. It is
+therefore **not** in `NOVO_BLOCKS`; the reference tool copies `DSCollection`
+in the same step and never copies `DataStoreCollection` either. Every other
+block in every mode measured clean (0 identity markers).
+
+Two gates, earliest first:
+
+- `assertNoForeignIdentity(own, merged, donor)` in `desban.server.ts` runs on
+  every merge result (`applyDesban`, `cloneDecorOnly`, `cloneTownLayout`) and
+  throws *before* `s.rawXml` is assigned, so a refusal never contaminates the
+  session.
+- `assertPushSafe(s)` in `studio.server.ts`, called from `encodeSave` — the
+  single choke point every feature ends in — so stats, inject, regatta, barn,
+  upgrades, skins and profile all inherit it without each having to
+  remember. It compares `s.rawXml` against `s.loadedXml` (the save as
+  loaded), so a teammate already in our roster is never mistaken for a fresh
+  import. On refusal `applySave` restores `s.rawXml` from `prevXml` and skips
+  the success log, leaving the session usable instead of stuck refusing every
+  later action.
+
+`declaredIds(xml)` decides which ids count as ours: the declared `cityId`
+plus the id Vars older builds name differently (`SaveId` / `userId` /
+`PlayerId`). Both gates use it, so a save whose identity lives only in
+`SaveId` does not get its own features blocked for looking foreign.
+
+`injectRegata` reads the user id from the save's own `MyOldTask` records
+first (`resolveRegataUser`). Healthy saves put their own cityId there and
+teammates only on `TakenTask`, so the feature reuses the existing id rather
+than minting a second one — a save whose records disagree about their own
+owner is exactly what a server notices when it is looking.
+
+Guard rails live in `studio-pipeline.test.ts`. Re-adding
+`DataStoreCollection` to `NOVO_BLOCKS` makes
+`no restore mode copies the friend's account identity` fail; that is what
+proves the test is real rather than decorative.
+
+## Clone town layout
+
+The **Decor** tab's *Clone town layout* button (`townClone` in `SavePayload`,
+`cloneTownLayout()` in `desban.server.ts`) copies **only** the main town's
+`<TownGround>` + `<Buildings>` — no stats, no profile store, no event state,
+so there is no account identity to leak in the first place. `pickMain()` skips
+the Zoo's own pair deliberately; do not "fix" that. The donor file is only
+ever read, never merged.
+
+It throws when the donor has neither `TownGround` nor `Buildings` (not a city
+file) and when the output would equal the input (nothing changed), rather than
+reporting a success the game would silently ignore.
+
+*Clone friend city* (`decorClone`) was server-ready but had **no button**:
+`pendingDecorClone` was never set to `true` anywhere. Both now sit in one
+panel and queue into *Save & push*.
 
 ## Factory / upgrade levels
 
