@@ -779,10 +779,26 @@ windowed mode PyInstaller 6.x leaves `sys.stdout`/`sys.stderr` as `None`, so
 `igg_client.py` redirects them to `os.devnull` before importing pywebview —
 bottle prints a banner on import and would otherwise crash startup.
 
-Client auto-update (`installUpdate`) fetches `CLIENT_UPDATE_URL` over plain
-HTTP with no auth. This repository is private, so a GitHub release asset URL
-will not work for auto-update; it needs a publicly reachable URL, or a
-hosted binary on the Render service.
+Client auto-update (`installUpdate`) fetches `CLIENT_UPDATE_URL` with no auth
+and refuses to swap the EXE unless the SHA-256 matches. The repository is
+**public** — measured 2026-09-30: the API reports `"private": false` and the
+v1.1.27 asset answers HTTP 200 to an unauthenticated `HEAD` — so a GitHub
+release asset URL *does* work: `urllib` follows GitHub's 302 to
+`objects.githubusercontent.com` by itself, no token needed. Both env vars are
+required together, and the release body already prints the exact URL and hash
+to paste.
+
+An earlier revision of this note asserted "This repository is private, so a
+GitHub release asset URL will not work for auto-update". That only holds if
+the repo is made private again: the fetch then needs a token and fails as a
+plain download error, so fall back to a publicly reachable URL, or a hosted
+binary on the Render service.
+
+While `CLIENT_UPDATE_URL`/`CLIENT_UPDATE_SHA256` are unset, `getRelease` still
+answers the default `1.15.0`, and the compare at `studio-app.tsx:1458` runs
+*before* the download check — so the banner at line 2408 offers a version that
+does not exist and its button only reloads the page. Cosmetic, not a broken
+feature; setting both env vars is what makes it real.
 
 ### "decompression resulted in return code -1" = disk full
 

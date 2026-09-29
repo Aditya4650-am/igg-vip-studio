@@ -17,15 +17,17 @@ game logic stays on the server.
 
 ## Download the prebuilt EXE
 
-Grab `IGG VIP TOOL.exe` from the latest release:
+Grab `IGG.VIP.TOOL.exe` from the latest release:
 **https://github.com/Aditya4650-am/igg-vip-studio/releases/latest**
 
 It is a windowed build, so no console window appears behind the app. Runs on
 64-bit Windows 10/11.
 
-> The repository is private, so the release download requires being signed in to
-> GitHub. If you need a public link, the same EXE is attached to each build as a
-> workflow artifact (Actions → Build Windows client → Artifacts).
+> The asset is named `IGG.VIP.TOOL.exe`: GitHub replaces the spaces in the
+> local `IGG VIP TOOL.exe` when it uploads. The repository is public, so no
+> GitHub sign-in is needed — a plain download works. The same EXE is also
+> attached to each build as a workflow artifact (Actions → Build Windows
+> client → Artifacts), zipped under its original name.
 
 ## Run it
 ```
