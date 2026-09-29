@@ -131,6 +131,60 @@ Guard rails live in `studio-pipeline.test.ts`. Re-adding
 `no restore mode copies the friend's account identity` fail; that is what
 proves the test is real rather than decorative.
 
+### Identity: why the guard refused a clean copy
+
+`assertNoForeignIdentity` counts every appearance of the donor's cityId, and
+that count is deliberately blunt — but a cityId is not only an ownership claim.
+A train order stores the city it went to as `orderFriend_1_city_id`, a gift box
+stores `"city_id"`, and air orders and regatta tasks carry the same string;
+every save already holds dozens of those for its friends. `COMPLETO_BLOCKS`
+copies `Trains`, so `completo`/`novo` added exactly **one** occurrence on a
+perfectly clean save and aborted with
+`thành phố của bạn cũ <id> (+1)` — a copy that had imported none of the
+friend's account, reported as a ban risk. `inicial` never failed, because it
+returns before any block is copied.
+
+The fix **rewrites rather than whitelists**: `scrubber(src, tgt)` resolves the
+donor's id and ours *once* and returns a replacement closure, so nothing
+belonging to the donor survives any copied block and the guard stays as strict
+as ever. `cloneMain` / `cloneSimple` / `copyDataElemByName` take it as an
+optional trailing parameter (all three are file-local) and pass the one built
+by the caller. Do not resolve the ids inside a per-block or per-Var call: that
+is seven full-document regex scans each, and it is what made a matrix run
+time out — a real `applyDesban` went from ~2.7 s with one shared scrubber to
+much worse when every copy rebuilt it.
+
+Guard rail:
+`a friend-reference in a copied block is rewritten, not treated as identity theft`.
+
+### Copy feature: lives in the Unban tab now
+
+The clone panel was **removed from the Decor tab** and replaced by step 4 of
+the Unban tab (`copySection` / `copyDecor` / `copyCity`), both queued into
+*Save & push* like every other edit:
+
+- `copyDecor` sets **both** `townClone` and `decorClone` in one payload —
+  `applySave` applies them in sequence, so decoration + town is one click.
+- `copyCity` sets `unbanMode: "novo"`, the same operation as *Restore all*.
+
+Multi-friend is **pick → fetch → copy, repeat**: `applySave` never touches
+`s.friendXml`, and `refreshOwnSave` explicitly restores it, so friend 2 only
+needs FetchCity again.
+
+Decorating is **cumulative, not replacement**. `cloneDecorOnly` reads our stash
+ids first (`stashIds`) and hands them back to `maxBuildingsStash` after the
+donor's `BuildingsStash` lands, so friend 2 adds to friend 1. Without that the
+last friend copied won and every earlier one vanished behind a green tick.
+`TownGround`/`Buildings` still *replace* — a town is one layout, not a union,
+pinned by `clone town layout: only the town moves`.
+
+Guard rail: `copying a second friend keeps the first friend's decorations`.
+
+`cloneSection` / `cloneTown` / `cloneNeedFetch` / `decorClone` are now unused
+but still shipped: the dictionary is `const en: typeof vi` plus
+`Partial<typeof en>` overlays across 18 locale packs, so dropping a key means
+auditing every overlay.
+
 ## Clone town layout
 
 The **Decor** tab's *Clone town layout* button (`townClone` in `SavePayload`,

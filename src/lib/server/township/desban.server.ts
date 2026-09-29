@@ -303,11 +303,34 @@ export function assertNoForeignIdentity(own: string, merged: string, donor: stri
   }
 }
 
-function cloneMain(src: string, tgt: string, tag: string): { xml: string; action: string } {
+/**
+ * Build a scrubber for one operation.
+ *
+ * Rewriting the reference keeps the identity guard strict *and* the copy
+ * usable: the block still parses, the reference now points at us (which is
+ * what a clone means), and no string belonging to the donor survives. Because
+ * it rewrites rather than whitelists, it covers a layout nobody has seen yet —
+ * any place the id turns up is handled, not just the ones we know about.
+ *
+ * Both ids are resolved **once** and captured in the closure: `applyDesban`
+ * calls the scrubber once per copied Var, and re-deriving the ids each time
+ * meant seven full-document regex scans per Var — slow enough to time out a
+ * real save.
+ */
+function scrubber(src: string, tgt: string): (text: string) => string {
+  const donor = parseOwnMeta(src).cityId;
+  if (!donor) return (text) => text;
+  // Already guaranteed distinct from `donor` by the predicate below.
+  const ours = [...declaredIds(tgt)].find((id) => id && id !== donor);
+  if (!ours) return (text) => text;
+  return (text) => (text.includes(donor) ? text.split(donor).join(ours) : text);
+}
+
+function cloneMain(src: string, tgt: string, tag: string, scrub = scrubber(src, tgt)): { xml: string; action: string } {
   const srcBlk = pickMain(src, tag);
   if (!srcBlk) return { xml: tgt, action: "missing_src" };
   const tgtBlk = pickMain(tgt, tag);
-  const block = reattribute(srcBlk.block, src, tgt);
+  const block = scrub(reattribute(srcBlk.block, src, tgt));
   if (tgtBlk) return { xml: tgt.slice(0, tgtBlk.start) + block + tgt.slice(tgtBlk.end), action: "replace" };
   const z = zooEnd(tgt);
   if (z >= 0) return { xml: tgt.slice(0, z) + "\n" + block + tgt.slice(z), action: "insert" };
@@ -317,10 +340,10 @@ function cloneMain(src: string, tgt: string, tag: string): { xml: string; action
   return { xml: tgt + "\n" + block, action: "insert" };
 }
 
-function cloneSimple(src: string, tgt: string, tag: string): { xml: string; action: string } {
+function cloneSimple(src: string, tgt: string, tag: string, scrub = scrubber(src, tgt)): { xml: string; action: string } {
   const srcList = findAllBlocks(src, tag);
   if (!srcList.length) return { xml: tgt, action: "missing_src" };
-  const block = srcList[0]!.block;
+  const block = scrub(srcList[0]!.block);
   const tgtList = findAllBlocks(tgt, tag);
   if (tgtList.length) {
     const t = tgtList[0]!;
@@ -360,15 +383,16 @@ function findDataElemBlock(xml: string, name: string) {
   return null;
 }
 
-function copyDataElemByName(src: string, tgt: string, name: string) {
+function copyDataElemByName(src: string, tgt: string, name: string, scrub = scrubber(src, tgt)) {
   const srcBlk = findDataElemBlock(src, name);
   if (!srcBlk) return tgt;
+  const block = scrub(srcBlk.block);
   const tgtBlk = findDataElemBlock(tgt, name);
-  if (tgtBlk) return tgt.slice(0, tgtBlk.start) + srcBlk.block + tgt.slice(tgtBlk.end);
+  if (tgtBlk) return tgt.slice(0, tgtBlk.start) + block + tgt.slice(tgtBlk.end);
   for (const c of ["</Global>", "</root>", "</Root>"]) {
-    if (tgt.includes(c)) return tgt.replace(c, srcBlk.block + "\n" + c);
+    if (tgt.includes(c)) return tgt.replace(c, block + "\n" + c);
   }
-  return tgt + "\n" + srcBlk.block;
+  return tgt + "\n" + block;
 }
 
 function isTutorialName(name: string) {
@@ -891,29 +915,51 @@ export function declaredIds(xml: string): Set<string> {
   return out;
 }
 
+/**
+ * Every decoration id already in our stash, in document order.
+ *
+ * Copying a friend replaces the stash outright. That is right for a first copy
+ * and wrong for every one after it: the next friend's file would silently drop
+ * the friend copied before, and the user would still see a green tick. Reading
+ * our ids up front lets `maxBuildingsStash` put back whatever the donor's
+ * stash lacked, so the collection grows across friends instead of being
+ * swapped out each time.
+ */
+function stashIds(xml: string): string[] {
+  const block = xml.match(/<BuildingsStash\b[^>]*>[\s\S]*?<\/BuildingsStash\s*>/i)?.[0];
+  if (!block) return [];
+  return [...block.matchAll(/<Building\b[^>]*?\bid="([^"]+)"/g)].map((m) => m[1]!);
+}
+
 export function cloneDecorOnly(ownXml: string, friendXml: string) {
   let own = ownXml.replace(/^\uFEFF/, "");
   const before = own;
   const fr = friendXml.replace(/^\uFEFF/, "");
+  const scrub = scrubber(fr, own);
   const blocks: string[] = [];
   const vars: string[] = [];
   for (const tag of ["BuildingsStash", "FragmentedBeautyManager", "ArtInfo"]) {
-    const r = cloneSimple(fr, own, tag);
+    const r = cloneSimple(fr, own, tag, scrub);
     own = r.xml;
     if (r.action !== "missing_src") blocks.push(`${tag}:${r.action}`);
   }
   const em = readVarLoose(fr, "UnlockedChatEmoji");
   if (em != null) {
-    own = writeVar(own, "UnlockedChatEmoji", em);
+    own = writeVar(own, "UnlockedChatEmoji", scrub(em));
     vars.push("UnlockedChatEmoji");
   } else {
     own = unlockEmoji(own);
     vars.push("UnlockedChatEmoji:full");
   }
   for (const m of fr.matchAll(/<Var\s+name="((?:skin_|Skin_|decor_|Decor_)[^"]+)"\s+v="([^"]*)"/gi)) {
-    own = writeVar(own, m[1]!, m[2]!);
+    own = writeVar(own, m[1]!, scrub(m[2]!));
     vars.push(m[1]!);
   }
+  // The donor's stash replaced ours wholesale. Hand back any decoration they
+  // did not have, so copying a second friend adds to the collection instead of
+  // discarding the first friend's.
+  const ours = stashIds(before);
+  if (ours.length) own = maxBuildingsStash(own, ours, 10);
   own = maxBuildingsStash(own, [], 10);
   own = maxFragments(own);
   assertNoForeignIdentity(before, own, fr);
@@ -932,9 +978,10 @@ export function cloneTownLayout(ownXml: string, friendXml: string) {
   const before = ownXml.replace(/^\uFEFF/, "");
   let own = before;
   const fr = friendXml.replace(/^\uFEFF/, "");
+  const scrub = scrubber(fr, own);
   const blocks: string[] = [];
   for (const tag of ["TownGround", "Buildings"]) {
-    const r = cloneMain(fr, own, tag);
+    const r = cloneMain(fr, own, tag, scrub);
     own = r.xml;
     blocks.push(`${tag}:${r.action}`);
   }
@@ -952,12 +999,13 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
   let own = ownXml.replace(/^\uFEFF/, "");
   const before = own;
   const fr = friendXml.replace(/^\uFEFF/, "");
+  const scrub = scrubber(fr, own);
   for (const name of INICIAL_VARS) {
     const val = readVarLoose(fr, name);
-    if (val != null) own = writeVar(own, name, val);
+    if (val != null) own = writeVar(own, name, scrub(val));
   }
   for (const m of fr.matchAll(/<Var\s+name="(Achievement_[^"]+)"\s+v="([^"]*)"/gi)) {
-    own = writeVar(own, m[1]!, m[2]!);
+    own = writeVar(own, m[1]!, scrub(m[2]!));
   }
   if (mode === "inicial") {
     own = skipTutorials(own, fr);
@@ -965,25 +1013,25 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
     return own;
   }
 
-  for (const tag of ["TownGround", "Buildings"]) own = cloneMain(fr, own, tag).xml;
-  for (const tag of COMPLETO_BLOCKS) own = cloneSimple(fr, own, tag).xml;
+  for (const tag of ["TownGround", "Buildings"]) own = cloneMain(fr, own, tag, scrub).xml;
+  for (const tag of COMPLETO_BLOCKS) own = cloneSimple(fr, own, tag, scrub).xml;
 
-  for (const m of fr.matchAll(/<Var\s+name="(Unlocked_ava\d+)"\s+v="([^"]*)"/gi)) own = writeVar(own, m[1]!, m[2]!);
+  for (const m of fr.matchAll(/<Var\s+name="(Unlocked_ava\d+)"\s+v="([^"]*)"/gi)) own = writeVar(own, m[1]!, scrub(m[2]!));
   const emoji = readVarLoose(fr, "UnlockedChatEmoji");
-  if (emoji != null) own = writeVar(own, "UnlockedChatEmoji", emoji);
+  if (emoji != null) own = writeVar(own, "UnlockedChatEmoji", scrub(emoji));
   for (const m of fr.matchAll(/<Var\s+name="((?:skin_|Skin_|decor_|Decor_)[^"]+)"\s+v="([^"]*)"/gi)) {
-    own = writeVar(own, m[1]!, m[2]!);
+    own = writeVar(own, m[1]!, scrub(m[2]!));
   }
 
   if (mode === "novo") {
-    for (const tag of NOVO_BLOCKS) own = cloneSimple(fr, own, tag).xml;
+    for (const tag of NOVO_BLOCKS) own = cloneSimple(fr, own, tag, scrub).xml;
   }
 
   // v1.15 also restores the profile/config DataElem blocks for every full
   // restore mode. These are distinct from the Unlocked* profile CSV fields
   // handled by the normal Profile tool.
-  own = copyDataElemByName(fr, own, "PlayerProfile");
-  own = copyDataElemByName(fr, own, "Configs");
+  own = copyDataElemByName(fr, own, "PlayerProfile", scrub);
+  own = copyDataElemByName(fr, own, "Configs", scrub);
 
   own = skipTutorials(own, fr);
   assertNoForeignIdentity(before, own, fr);

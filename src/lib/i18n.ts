@@ -308,6 +308,14 @@ const vi = {
     "Hai nút này chỉ đọc file city đã FetchCity — cityId, phiên và thiết bị của bạn không bị đụng tới. Bố cục thành phố chỉ ghép TownGround + Buildings; Clone thành phố bạn chỉ ghép bộ sưu tập trang trí.",
   cloneNeedFetch: "Cần FetchCity một thành phố trước khi Clone",
   cloneTown: "Clone bố cục thành phố",
+  copySection: "Sao chép từ thành phố này",
+  copySectionHint:
+    "Sao chép từ thành phố bạn vừa FetchCity. cityId, phiên và thiết bị của bạn không bị đụng tới, và mọi tham chiếu đến thành phố bị sao chép đều được đổi trỏ về thành phố của bạn, nên không còn dấu vết của họ trong save.",
+  copyNeedFetch: "Cần FetchCity một thành phố trước khi Sao chép",
+  copyDecor: "Trang trí + bố cục",
+  copyDecorQueued: "Đã chọn Sao chép trang trí + bố cục - bấm Lưu & đẩy để áp dụng",
+  copyCity: "Toàn bộ thành phố",
+  copyCityQueued: "Đã chọn Sao chép toàn bộ thành phố - bấm Lưu & đẩy để áp dụng",
 };
 
 const en: typeof vi = {
@@ -595,6 +603,14 @@ const en: typeof vi = {
     "Both buttons only read the city you already fetched — your cityId, session and device are never touched. Town layout merges just TownGround + Buildings; Clone friend city merges only the decoration inventory.",
   cloneNeedFetch: "FetchCity a city before cloning",
   cloneTown: "Clone town layout",
+  copySection: "Copy from this city",
+  copySectionHint:
+    "Copies from the city you just fetched. Your own cityId, session and device are never touched, and every reference to the copied city is rewritten to point at yours, so nothing of theirs survives in your save.",
+  copyNeedFetch: "FetchCity a city before copying",
+  copyDecor: "Decorations + town",
+  copyDecorQueued: "Decoration + town copy queued - press Save & push to apply",
+  copyCity: "Complete city",
+  copyCityQueued: "Complete city copy queued - press Save & push to apply",
 };
 
 function overlay(p: Partial<typeof en>): typeof en {

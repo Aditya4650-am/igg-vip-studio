@@ -645,6 +645,40 @@ test("no restore mode copies the friend's account identity", () => {
   }
 });
 
+// The friend's cityId also appears in perfectly ordinary social records: a
+// train order stores the city it went to as `orderFriend_1_city_id`, a gift
+// box stores `"city_id"`, and every save already holds dozens of those for
+// its friends. Counting them as identity theft is what made "Restore all"
+// abort with `(+1)` on a copy that had imported none of the friend's account
+// — measured on a real save, restoring `Trains` alone was enough to trip it.
+const FRIEND_TRAIN_XML = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  "<Global>",
+  '<Var name="cityId" v="FRD123456" t="s"/>',
+  '<Var name="money" v="999999" t="i"/>',
+  "<Trains>",
+  '<train v="{&quot;orderFriend_1_city_id&quot;:&quot;FRD123456&quot;}"/>',
+  "</Trains>",
+  "</Global>",
+].join("");
+
+test("a friend-reference in a copied block is rewritten, not treated as identity theft", () => {
+  const { sessionId } = load();
+  studio.attachFriendXml(token, sessionId, FRIEND_TRAIN_XML);
+  const out = studio.applyUnban(token, sessionId, "completo");
+  const xml = Buffer.from(out.fileB64!, "base64").toString("utf8");
+  // The order record still comes across...
+  assert.ok(xml.includes("orderFriend_1_city_id"), "the train order should have been copied");
+  // ...and now names our city instead of theirs, so the guard is never
+  // asked to forgive anything — there is simply nothing left to forgive.
+  assert.ok(
+    xml.includes("orderFriend_1_city_id&quot;:&quot;owncity01"),
+    "the copied order must point at our own city",
+  );
+  assert.ok(!xml.includes("FRD123456"), "not one byte of the friend's cityId may survive");
+  balanced(xml);
+});
+
 test("the push gate refuses a save that declares someone else as its owner", () => {
   const mine = [
     '<?xml version="1.0" encoding="utf-8"?>',
@@ -730,6 +764,53 @@ test("clone town layout refuses a file that is not a city", () => {
   const snap = townSession(TOWN_OWN);
   studio.attachFriendXml(token, snap.sessionId, '<Global><Var name="x" v="1"/></Global>');
   assert.throws(() => studio.applySave({ token, sessionId: snap.sessionId, townClone: true }), /TownGround/);
+});
+
+const DECOR_OWN = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  "<Global>",
+  '<Var name="cityId" v="ME12345678" t="s"/>',
+  '<BuildingsStash><Building id="Mine_A" count="3"/></BuildingsStash>',
+  "</Global>",
+].join("");
+
+const DECOR_A = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  "<Global>",
+  '<Var name="cityId" v="FRDAAAAAA" t="s"/>',
+  '<BuildingsStash><Building id="FriendA_1" count="9"/></BuildingsStash>',
+  "</Global>",
+].join("");
+
+const DECOR_B = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  "<Global>",
+  '<Var name="cityId" v="FRDBBBBBB" t="s"/>',
+  '<BuildingsStash><Building id="FriendB_1" count="9"/></BuildingsStash>',
+  "</Global>",
+].join("");
+
+test("copying a second friend keeps the first friend's decorations", () => {
+  // Every copy replaced the stash outright, so the last friend copied won and
+  // each earlier one silently disappeared — a green tick over a save that had
+  // quietly dropped what the user believed they had collected. Decorating is
+  // cumulative by nature: adding a friend must add, never subtract.
+  const snap = townSession(DECOR_OWN);
+
+  studio.attachFriendXml(token, snap.sessionId, DECOR_A);
+  const first = studio.applySave({ token, sessionId: snap.sessionId, decorClone: true }).xml!;
+  assert.ok(first.includes('id="Mine_A"'), "our own decoration must survive the first copy");
+  assert.ok(first.includes('id="FriendA_1"'), "friend A's decoration should have been added");
+
+  studio.attachFriendXml(token, snap.sessionId, DECOR_B);
+  const second = studio.applySave({ token, sessionId: snap.sessionId, decorClone: true }).xml!;
+  assert.ok(second.includes('id="Mine_A"'), "our decoration must survive the second copy");
+  assert.ok(
+    second.includes('id="FriendA_1"'),
+    "friend A's decoration must survive the copy of friend B",
+  );
+  assert.ok(second.includes('id="FriendB_1"'), "friend B's decoration should have been added");
+  balanced(second);
 });
 
 test("regatta never hands one save a second identity", () => {

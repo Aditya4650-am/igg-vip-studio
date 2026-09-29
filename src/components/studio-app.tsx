@@ -3345,38 +3345,6 @@ export function StudioApp() {
                         Bỏ chọn
                       </Button>
                     </div>
-                    <div className="panel mb-3">
-                      <h3 className="mb-1 text-sm font-semibold">{tr("cloneSection")}</h3>
-                      <p className="mb-2 text-xs text-muted">{tr("cloneSectionHint")}</p>
-                      {!session?.friendCity ? (
-                        <p className="text-xs text-warning">{tr("cloneNeedFetch")}</p>
-                      ) : (
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={busy}
-                            onClick={() => {
-                              setPendingTownClone(true);
-                              toast.success(tr("cloneTown"));
-                            }}
-                          >
-                            {tr("cloneTown")}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={busy}
-                            onClick={() => {
-                              setPendingDecorClone(true);
-                              toast.success(tr("decorClone"));
-                            }}
-                          >
-                            {tr("decorClone")}
-                          </Button>
-                        </div>
-                      )}
-                    </div>
                     {decorSel.size ? (
                       <p className="mb-3 text-xs text-muted">{decorSel.size} {tr("decorSelected")} · {tr("quantity").toLowerCase()} {parseDecorQty()} · {tr("decorApplyHint")}.</p>
                     ) : null}
@@ -3484,6 +3452,16 @@ export function StudioApp() {
                         toast.error(e instanceof Error ? e.message : tr("actionFailed"));
                       } finally {
                         setBusy(false);
+                      }
+                    }}
+                    onCopy={(kind) => {
+                      if (kind === "decor") {
+                        setPendingTownClone(true);
+                        setPendingDecorClone(true);
+                        toast.success(tr("copyDecorQueued"));
+                      } else {
+                        setPendingUnban("novo");
+                        toast.success(tr("copyCityQueued"));
                       }
                     }}
                     onRestore={(mode) => {
@@ -3611,6 +3589,7 @@ function Unban({
   onRefresh,
   onFetch,
   onRestore,
+  onCopy,
 }: {
   tr: (k: keyof Dict) => string;
   session: SessionSnap;
@@ -3622,6 +3601,7 @@ function Unban({
   onRefresh: () => void;
   onFetch: () => void;
   onRestore: (m: UnbanMode) => void;
+  onCopy: (k: "decor" | "city") => void;
 }) {
   return (
     <div className="stagger-in space-y-3">
@@ -3730,6 +3710,39 @@ function Unban({
               {tr("unbanOk")} · {session.unban.mode}
             </p>
           ) : null}
+        </div>
+      </article>
+
+      <article className="panel flex gap-3">
+        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary/15 text-sm font-semibold text-primary">
+          4
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="font-semibold">{tr("copySection")}</h3>
+          <p className="text-sm text-muted">{tr("copySectionHint")}</p>
+          {!session.friendCity ? (
+            <p className="mt-3 text-xs text-warning">{tr("copyNeedFetch")}</p>
+          ) : (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => onCopy("decor")}
+              >
+                {tr("copyDecor")}
+              </Button>
+              <Button
+                size="sm"
+                variant="warn"
+                disabled={busy}
+                onClick={() => onCopy("city")}
+              >
+                {tr("copyCity")}
+              </Button>
+            </div>
+          )}
+          <p className="mt-2 text-xs text-muted">{tr("decorApplyHint")}</p>
         </div>
       </article>
     </div>
