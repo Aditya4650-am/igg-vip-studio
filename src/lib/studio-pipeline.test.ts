@@ -21,6 +21,8 @@ const { assertCardCollectionsSafe, cardProblems, CARD_IDS, CARD_STOCK_MAX } =
   await import("./server/township/cards.server.ts");
 const { CARD_GROUPS, cardNumber, CARD_COUNT } = await import("./cards.ts");
 const { CHAT_EMOJI_IDS } = await import("./server/township/chat-emoji.server.ts");
+const { saveShapeProblems, assertSaveShapeSafe, stripUnknownAvatars, isRealAvatarId } =
+  await import("./server/township/save-shape.server.ts");
 
 const { token } = verifyLicenseKey("IGG-OWNER-TESTKEY", "TEST-DEVICE-0001");
 
@@ -684,6 +686,183 @@ test("stickers: the id list is contiguous and carries no token the game does not
   // appears in no save we hold and fits no id family here. Copying it would
   // append a token the game does not know to a list that was valid before.
   assert.equal(CHAT_EMOJI_IDS.includes("desc"), false, "a leaked config key must never become a sticker id");
+});
+
+// ---------------------------------------------------------------------------
+// Save shape gate — avatars, sticker list, profile lists, <Upgrade> level/slx,
+// `t="i"` vars and tag balance.
+//
+// The rule is always the same and it is what keeps every other feature working:
+// `saveShapeProblems()` returns invariant **keys**, and `assertSaveShapeSafe`
+// refuses only keys that are *new*. A save that arrived with an oddity keeps
+// that key on both sides and stays pushable — the same lesson the identity
+// gate learned the hard way when it refused a perfectly clean copy.
+//
+// Every rule here was measured before it was written. Two obvious-looking ones
+// were dropped because real saves contradict them: duplicate `<Var name>`
+// occurs 0-35 times per genuine save, and `t="s"` turns out to be this tool's
+// own fingerprint rather than a game type (see `writeVar`'s comment).
+// ---------------------------------------------------------------------------
+
+const SHAPE_BASE = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  "<Global>",
+  '<Var name="Unlocked_ava7" v="1" t="b"/>',
+  '<Var name="Unlocked_ava398" v="1" t="b"/>',
+  '<Var name="Unlocked_ava431" v="1" t="b"/>',
+  '<Var name="Unlocked_ava500" v="1" t="b"/>',
+  '<Var name="Unlocked_ava1390" v="1" t="b"/>',
+  "</Global>",
+].join("");
+
+test("loading strips only the avatar ids no real city can hold", () => {
+  // 1..398 are real (a genuine fetch reaches `Unlocked_ava398`) and 1390/1391
+  // are carried by every save; 399..500 were written by a build that raised
+  // the ceiling to 500 with no evidence behind it.
+  assert.deepEqual(stripUnknownAvatars(SHAPE_BASE).removed, [431, 500], "only the fakes are removed");
+
+  const { xml, removed } = stripUnknownAvatars(SHAPE_BASE);
+  for (const keep of [7, 398, 1390]) assert.ok(xml.includes(`Unlocked_ava${keep}`), `avatar ${keep} must survive`);
+  for (const drop of [431, 500]) assert.equal(xml.includes(`Unlocked_ava${drop}`), false, `avatar ${drop} must go`);
+  balanced(xml);
+  assert.equal(removed.length, 2);
+
+  // Nothing to remove: byte-identical, so a clean save is never rewritten.
+  const clean = stripUnknownAvatars(xml);
+  assert.equal(clean.removed.length, 0, "a second pass must find nothing");
+  assert.equal(clean.xml, xml, "an untouched save comes back byte-identical");
+
+  assert.equal(isRealAvatarId(1), true);
+  assert.equal(isRealAvatarId(398), true);
+  assert.equal(isRealAvatarId(1390), true, "1390/1391 appear in every real save");
+  assert.equal(isRealAvatarId(1391), true, "1390/1391 appear in every real save");
+  for (const n of [0, -3, 399, 500, 1389, 1400]) assert.equal(isRealAvatarId(n), false, `${n} is not a real id`);
+});
+
+test("a save carrying the fake avatars is cleaned on load and pushes clean", () => {
+  const dirty = ownSave.replace(
+    "</Global>",
+    '<Var name="Unlocked_ava7" v="1" t="b"/>' +
+      '<Var name="Unlocked_ava431" v="1" t="b"/><Var name="Unlocked_ava500" v="1" t="b"/></Global>',
+  );
+  const snap = studio.connectLoad(token, "test-device", undefined, undefined, Buffer.from(dirty).toString("base64"));
+  assert.ok(
+    snap.log.some((l) => l.includes("avatar id(s) no real city has")),
+    `the log must say what it removed:\n${snap.log.join("\n")}`,
+  );
+
+  const out = studio.applySave({ token, sessionId: snap.sessionId, season: true });
+  const xml = Buffer.from(out.fileB64!, "base64").toString("utf8");
+  assert.equal(xml.includes("Unlocked_ava431"), false, "a fake avatar must never reach the device");
+  assert.equal(xml.includes("Unlocked_ava500"), false, "a fake avatar must never reach the device");
+  assert.equal(xml.includes("Unlocked_ava7"), true, "the real one is untouched");
+  balanced(xml);
+  assert.deepEqual(saveShapeProblems(xml), [], "what leaves must satisfy every rule");
+});
+
+test("the shape gate refuses what an edit introduced, never what the save arrived with", () => {
+  const base = '<root><Global><Var name="Unlocked_ava7" v="1" t="b"/></Global></root>';
+  assert.deepEqual(saveShapeProblems(base), [], "the game's own shape is clean");
+  assertSaveShapeSafe(base, base); // unchanged: one comparison, no scan needed
+
+  const withFake = base.replace("</Global>", '<Var name="Unlocked_ava431" v="1" t="b"/></Global>');
+  assert.throws(() => assertSaveShapeSafe(base, withFake), /avatar-id-out-of-range:431/, "a NEW fake is refused");
+  assertSaveShapeSafe(withFake, withFake); // already there: the save's own business
+  const edited = withFake.replace('v="1" t="b"/>', 'v="0"/>');
+  assert.doesNotThrow(
+    () => assertSaveShapeSafe(withFake, edited),
+    "an ordinary edit beside an old oddity must still push",
+  );
+});
+
+test("the sticker list must match the delimiters real saves use", () => {
+  const good = '<root><Global><Var name="UnlockedChatEmoji" v=",st1,,st2,"/></Global></root>';
+  assert.deepEqual(saveShapeProblems(good), [], "the game's own shape is clean");
+
+  // One extra trailing comma = one entry more than any city on the server holds.
+  const bad = good.replace(',st1,,st2,"', ',st1,,st2,,"');
+  assert.ok(saveShapeProblems(bad).includes("chat-emoji-shape"), "the old double comma must be caught");
+  assert.throws(() => assertSaveShapeSafe(good, bad), /chat-emoji-shape/);
+
+  // A token the game does not know — but only when the edit is what added it.
+  const unknown = good.replace(",st2,", ",st2,,desc,");
+  assert.ok(saveShapeProblems(unknown).includes("chat-emoji-unknown:desc"));
+  assert.throws(() => assertSaveShapeSafe(good, unknown), /chat-emoji-unknown:desc/);
+  assert.doesNotThrow(
+    () => assertSaveShapeSafe(unknown, unknown),
+    "an id the save already had is never a reason to refuse",
+  );
+});
+
+test("the sticker action writes a list the shape gate accepts", () => {
+  const { sessionId } = load();
+  const out = studio.applyDecorActions(token, sessionId, "emoji", ["st1", "st2"]);
+  const xml = Buffer.from(out.fileB64!, "base64").toString("utf8");
+  const v = /<Var\s+name="UnlockedChatEmoji"\s+v="([^"]*)"/.exec(xml)?.[1];
+  assert.ok(v, "the sticker var must exist");
+  assert.equal(v, ",st1,,st2,", "wrapped once at each end, `,,` between ids");
+  assert.equal(v!.split(",").length, 1 + 2 * 2, "2 ids must be 5 entries, not 6");
+  assert.deepEqual(saveShapeProblems(xml), [], "the gate must accept what the feature just wrote");
+  balanced(xml);
+});
+
+test("an <Upgrade> row whose level moved without slx is refused", () => {
+  // `slx` is not a checksum, it is `level` XOR 32162029 — measured on 241/241
+  // rows across 12 real saves. Bumping one without the other writes a save
+  // that disagrees with itself in a field the game reads for free.
+  const up = '<root><Global><Upgrade version="4"><Factory id="bakery" level="7" slx="32162026"/></Upgrade></Global></root>';
+  assert.deepEqual(saveShapeProblems(up), [], "7 ^ 32162029 = 32162026 must be accepted");
+
+  const bumped = up.replace('level="7"', 'level="8"');
+  assert.ok(saveShapeProblems(bumped).includes("upgrade-slx:Factory:bakery"));
+  assert.throws(() => assertSaveShapeSafe(up, bumped), /upgrade-slx:Factory:bakery/);
+  assert.doesNotThrow(() => assertSaveShapeSafe(bumped, bumped), "arrived that way: not our doing");
+});
+
+test("a non-integer under t=\"i\" is refused — the loader rejects the whole save", () => {
+  const ok = '<root><Global><Var name="levelup" v="10" t="i"/></Global></root>';
+  assert.deepEqual(saveShapeProblems(ok), []);
+
+  const broken = ok.replace('v="10"', 'v="abc"');
+  assert.ok(saveShapeProblems(broken).includes("var-int:levelup"));
+  assert.throws(() => assertSaveShapeSafe(ok, broken), /var-int:levelup/);
+
+  // The other way in: replacing the value of a var that already had `t="i"`.
+  const scrubbed = ok.replace('v="10"', 'v="6BwAhISdGs"');
+  assert.throws(() => assertSaveShapeSafe(ok, scrubbed), /var-int:levelup/);
+
+  // An empty value is legal, and `t="b"` / `t="s"` are not integer types.
+  assert.deepEqual(saveShapeProblems('<Global><Var name="a" v="" t="i"/></Global>'), []);
+  assert.deepEqual(saveShapeProblems('<Global><Var name="a" v="x" t="b"/></Global>'), []);
+});
+
+test("a document unbalanced by an edit is refused, one that arrived that way is not", () => {
+  const ok = '<root><Global><Var name="a" v="1"/></Global></root>';
+  const broken = '<root><Global><Var name="a" v="1"></Global></root>';
+  assert.ok(saveShapeProblems(broken).includes("xml-unbalanced"));
+  assert.throws(() => assertSaveShapeSafe(ok, broken), /xml-unbalanced/);
+  assert.doesNotThrow(
+    () => assertSaveShapeSafe(broken, broken),
+    "a save that arrived broken is not this edit's fault",
+  );
+});
+
+test("a profile id outside the catalog is refused only when this edit added it", () => {
+  const KNOWN = "UVIgUB8QfkY4NA44Bz0XVw0vCBEWXQ=="; // Badge 1 in RAW_PROFILE
+  const base = `<root><Global><Configs><DataElem name="UnlockedBadges" type="string" value="${KNOWN}"/></Configs></Global></root>`;
+  assert.deepEqual(saveShapeProblems(base), [], "a badge straight from the catalog is accepted");
+
+  const unknown = base.replace(`value="${KNOWN}"`, `value="NOT_A_REAL_BADGE,${KNOWN}"`);
+  assert.ok(saveShapeProblems(unknown).includes("profile-unknown:UnlockedBadges:NOT_A_REAL_BADGE"));
+  assert.throws(() => assertSaveShapeSafe(base, unknown), /profile-unknown/);
+  assert.doesNotThrow(
+    () => assertSaveShapeSafe(unknown, unknown),
+    "an id the save already had is never refused",
+  );
+
+  const wrapped = base.replace(`value="${KNOWN}"`, `value=",${KNOWN},"`);
+  assert.ok(saveShapeProblems(wrapped).includes("profile-shape:UnlockedBadges"), "profile lists are plain a,b,c");
+  assert.throws(() => assertSaveShapeSafe(base, wrapped), /profile-shape/);
 });
 
 test("cards: the push gate refuses an invariant no real city breaks, but not one it arrived with", () => {

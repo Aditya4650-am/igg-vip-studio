@@ -8,14 +8,24 @@ import { attrValue, findUnbalancedTag, insertInsideRoot, replaceElement } from "
 
 const wellFormed = (xml: string) => assert.equal(findUnbalancedTag(xml), null, `expected balanced XML, got: ${xml}`);
 
-test("writeVar inserts inside the root with correct type (t=i for numeric, t=s for non-numeric)", () => {
+test("writeVar inserts inside the root with the game's own type attributes", () => {
+  // The game writes a string with **no** `t` at all. The same var,
+  // `tutorial_finished_step`, carries no `t` in 14 of the 15 saves we hold;
+  // the single `t="s"` sits in a file this tool exported, so `t="s"` was our
+  // fingerprint rather than the game's. A var we create must look like one the
+  // game created.
   const out = writeVar("<Global><Var name='a' v='1'/></Global>", "NewVar", "hello");
   wellFormed(out);
-  assert.match(out, /<Var name="NewVar" v="hello" t="s"\/>/);
+  const created = /<Var name="NewVar"[^>]*>/.exec(out)![0];
+  assert.match(created, /v="hello"/);
+  assert.equal(/\bt="/.test(created), false, "a string var carries no t");
   assert.ok(out.indexOf("NewVar") < out.indexOf("</Global>"), "insert must be inside the root");
 
   const numeric = writeVar("<Global/>", "N", "42");
   assert.match(numeric, /t="i"/);
+
+  const flag = writeVar("<Global/>", "Unlocked_ava12", "0");
+  assert.match(flag, /t="b"/, "an avatar var stays a flag even at v=\"0\"");
 });
 
 test("season rewrites a paired SeasonTicket without leaving a stray closer", () => {
@@ -337,9 +347,14 @@ test("fragments activation treats zero and false as inactive", () => {
 });
 
 test("unlockEmoji merges with the delimiters the game expects", () => {
-  const out = unlockEmoji('<Global><Var name="UnlockedChatEmoji" v=",st1,,"/></Global>', ["st2"]);
+  // The shape every real save uses: `,st1,` — one comma wrapped at each end,
+  // `,,` between ids, so n ids split into exactly 1 + 2n entries.
+  const out = unlockEmoji('<Global><Var name="UnlockedChatEmoji" v=",st1,"/></Global>', ["st2"]);
   wellFormed(out);
-  assert.match(out, /v=",st1,,st2,,"/);
+  const v = out.match(/\bv="([^"]*)"/)?.[1];
+  assert.equal(v, ",st1,,st2,");
+  assert.equal(v!.split(",").length, 1 + 2 * 2, "2 ids must yield 5 entries, not 6");
+  assert.ok(!v!.endsWith(",,"), "a second trailing comma is a shape no save has");
 });
 
 test("parseOwnMeta reads FVer regardless of attribute order", () => {

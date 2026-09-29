@@ -92,7 +92,14 @@ export function writeVar(xml: string, varName: string, value: string): string {
   // DataElem with value="..." (value before name)
   const d = new RegExp(`(<DataElem\\b[^>]*?\\bvalue=")([^"]*)("[^>]*?\\bname="${n}")`, "i");
   if (d.test(xml)) return xml.replace(d, `$1${v}$3`);
-  const insert = `<Var name="${varName}" v="${v}" t="${isAvatar ? "b" : /^-?\d+$/.test(v) ? "i" : "s"}"/>`;
+  // Insert only. The game writes an integer as `t="i"`, a flag as `t="b"` and
+  // a string with **no `t` at all** — measured on the same var,
+  // `tutorial_finished_step`, across 15 saves: 14 carry no `t` and the single
+  // `t="s"` is in a file this tool exported. `t="s"` was ours, so a var we
+  // create now looks exactly like one the game created. Floats take no `t`
+  // either rather than guessing between the game's `f` and `d`.
+  const type = isAvatar ? "b" : /^-?\d+$/.test(v) ? "i" : "";
+  const insert = type ? `<Var name="${varName}" v="${v}" t="${type}"/>` : `<Var name="${varName}" v="${v}"/>`;
   for (const closer of ["</Global>", "</root>", "</Root>", "</ROOT>"]) {
     if (xml.includes(closer)) return xml.replace(closer, insert + closer);
   }

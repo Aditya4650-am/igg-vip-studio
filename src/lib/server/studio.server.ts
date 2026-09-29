@@ -10,6 +10,7 @@ import { applyBarnCapacity, applyBarnItems, barnInfo, ensureBarnCapacity } from 
 import { injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, injectUpgradeLevels, inspectRegatta, parseProfileUnlocked, upgradeMaxLevel, discoverUpgrades, REGATTA_DEFAULT_TASKS, REGATTA_MAX_TASKS, UPGRADE_REF_CAP } from "./township/inject.server";
 import { grantArtifacts } from "./township/museum.server";
 import { assertCardCollectionsSafe, grantCards, countOwnedCards, friendsList, inspectCards, sendCards, type CardSend } from "./township/cards.server";
+import { assertSaveShapeSafe, stripUnknownAvatars } from "./township/save-shape.server";
 import { completeZoo, discoverZoo, type ZooPaddock } from "./township/zoo.server";
 import {
   backupFreshStartState,
@@ -203,13 +204,53 @@ function encodeSave(s: Session): string | null {
   // the game's own saves never break is refused here rather than on device.
   // Both gates compare against the save as it was loaded, so a city that
   // already looked odd on arrival is never blocked for that same reason.
-  if (s.loadedXml) assertCardCollectionsSafe(s.loadedXml.replace(/^\uFEFF/, ""), s.rawXml.replace(/^\uFEFF/, ""));
+  if (s.loadedXml) {
+    const was = s.loadedXml.replace(/^\uFEFF/, "");
+    const now = s.rawXml.replace(/^\uFEFF/, "");
+    // Same choke point, for the card half: a feature that leaves an invariant
+    // the game's own saves never break is refused here rather than on device.
+    // Both gates compare against the save as it was loaded, so a city that
+    // already looked odd on arrival is never blocked for that same reason.
+    assertCardCollectionsSafe(was, now);
+    // And the shape half — avatars, sticker list, profile lists, <Upgrade>
+    // level/slx, `t="i"` vars and tag balance. Same loaded-vs-pushed rule, so
+    // it refuses only what *this* edit introduced: an oddity the save arrived
+    // with keeps its key on both sides and stays pushable. Because it lives
+    // here rather than in one feature, every path that ends in a push — stats,
+    // inject, unban, skins, upgrades, cards, profile, season, regatta — is
+    // covered without each having to remember.
+    assertSaveShapeSafe(was, now);
+  }
   // v1.15 client behavior: after Load/Decode and edits, the payload sent to
   // the desktop is the decoded XML itself. The desktop writes those bytes
   // directly to /data/data/<package>/saves/mGameInfo.xml (and .bak).
   // Encryption/container handling is intentionally NOT applied here.
   const xml = Buffer.from(s.rawXml.replace(/^\uFEFF/, ""), "utf8");
   return xml.toString("base64");
+}
+
+/**
+ * `encodeSave` for the paths that edit `s.rawXml` directly instead of going
+ * through `applySave`.
+ *
+ * The push gates run inside `encodeSave` and they may refuse. Rolling back is
+ * not optional: `assertSaveShapeSafe` compares against the save as it was
+ * loaded, so a rejected edit left in `s.rawXml` makes *every* later push of
+ * that session refuse too — the feature would stay broken until the session is
+ * reloaded, which is the "stuck" state `applySave`'s rollback exists to avoid.
+ * The success line is dropped as well, so the log never claims something the
+ * file did not get.
+ */
+function encodeOrRollback(s: Session, note: string, rollback: () => void): string | null {
+  const logLen = s.log.length;
+  try {
+    return encodeSave(s);
+  } catch (e) {
+    rollback();
+    s.log.length = logLen;
+    s.log.push(note);
+    throw e;
+  }
 }
 
 function openSave(buf: Buffer) {
@@ -248,6 +289,16 @@ export function connectLoad(token: string, device: string, _saveXml?: string, _p
   if (saveB64?.trim()) blob = Buffer.from(saveB64.trim(), "base64");
   if (blob && blob.length >= 8) {
     const opened = openSave(blob);
+    // Drop avatar vars no city on the server can hold — the fake `399..500`
+    // an earlier build wrote after raising `AVATAR_MAX` without evidence — from
+    // the *working* copy only. `originalDecrypted` and `loadedXml` stay
+    // byte-exact, so Backup still returns the file exactly as it arrived.
+    const cleaned = stripUnknownAvatars(opened.xml);
+    const avatarNote = cleaned.removed.length
+      ? `Removed ${cleaned.removed.length} avatar id(s) no real city has: ${
+          [...cleaned.removed].sort((a, b) => a - b).slice(0, 8).join(", ")
+        }${cleaned.removed.length > 8 ? ", …" : ""}`
+      : null;
     const stats = parseStats(opened.xml);
     const barn = barnInfo(opened.xml);
     const friends = parseInvitedFriends(opened.xml);
@@ -257,7 +308,7 @@ export function connectLoad(token: string, device: string, _saveXml?: string, _p
       token,
       kind: opened.kind,
       device,
-      rawXml: opened.xml,
+      rawXml: cleaned.xml,
       header: opened.header,
       originalDecrypted: opened.original,
       friendXml: null,
@@ -279,6 +330,7 @@ export function connectLoad(token: string, device: string, _saveXml?: string, _p
       unban: { mode: null, applied: false },
       log: [
         "Save loaded",
+        ...(avatarNote ? [avatarNote] : []),
         `Stats ready: ${Object.keys(stats).length} fields`,
         `Friends ready: ${friends.length}`,
       ],
@@ -300,7 +352,9 @@ export function refreshOwnSave(token: string, sessionId: string, saveB64: string
   const friends = s.friends;
   const unban = s.unban;
   s.kind = opened.kind;
-  s.rawXml = opened.xml;
+  // Same load-time avatar cleanup as `connectLoad`: the working copy drops ids
+  // the game never issued, while `originalDecrypted`/`loadedXml` stay exact.
+  s.rawXml = stripUnknownAvatars(opened.xml).xml;
   s.header = opened.header;
   s.originalDecrypted = opened.original;
   s.loadedXml = opened.xml.replace(/^\uFEFF/, "");
@@ -622,10 +676,18 @@ export function applyRegatta(token: string, sessionId: string) {
 
 export function applySeason(token: string, sessionId: string) {
   const s = requireSession(sessionId, token);
+  const prevXml = s.rawXml;
+  const prevSeason = s.season;
   s.season = { premium: true, score: 1002 };
   if (s.rawXml) s.rawXml = injectSeason(s.rawXml);
+  // Logged after the gates accept, like `applySave`, so a refusal leaves no
+  // line behind claiming the season was applied to a file that was rolled back.
+  const fileB64 = encodeOrRollback(s, "Season rejected by push gate", () => {
+    s.rawXml = prevXml;
+    s.season = prevSeason;
+  });
   s.log.push("Season Pass premium=1 score=1002");
-  return { ...snapshot(s), xml: s.rawXml, fileB64: encodeSave(s) };
+  return { ...snapshot(s), xml: s.rawXml, fileB64 };
 }
 
 export function refreshBarn(token: string, sessionId: string) {
@@ -659,16 +721,38 @@ export function applyUnban(token: string, sessionId: string, mode: "inicial" | "
   const s = requireSession(sessionId, token);
   if (!s.friendXml) throw new Error("FetchCity friend trước khi restore");
   if (!s.rawXml) throw new Error("Load mGameInfo trước");
+  const prev = {
+    xml: s.rawXml,
+    stats: s.stats,
+    profileUnlocked: s.profileUnlocked,
+    barn: s.barn,
+    zoo: s.zoo,
+    unban: s.unban,
+  };
+  const rollback = () => {
+    s.rawXml = prev.xml;
+    s.stats = prev.stats;
+    s.profileUnlocked = prev.profileUnlocked;
+    s.barn = prev.barn;
+    s.zoo = prev.zoo;
+    s.unban = prev.unban;
+  };
   s.rawXml = applyDesban(s.rawXml, s.friendXml, mode);
   const malformed = findUnbalancedTag(s.rawXml);
-  if (malformed) throw new Error(`Unban tạo XML không hợp lệ (${malformed}) — hủy để tránh hỏng file`);
+  // A malformed result must not be left in place either: `rawXml` has already
+  // been rewritten, so the next push would send an edit that was reported as
+  // cancelled. Same reasoning as `applySave`'s rollback.
+  if (malformed) {
+    rollback();
+    throw new Error(`Unban tạo XML không hợp lệ (${malformed}) — hủy để tránh hỏng file`);
+  }
   s.stats = parseStats(s.rawXml);
   s.profileUnlocked = cloakProfileUnlocked(parseProfileUnlocked(s.rawXml));
   s.barn = barnInfo(s.rawXml);
   s.zoo = discoverZoo(s.rawXml);
   s.unban = { mode, applied: true };
   s.log.push(`Restore changes prepared`);
-  return { ...snapshot(s), fileB64: encodeSave(s) };
+  return { ...snapshot(s), fileB64: encodeOrRollback(s, "Restore rejected by push gate", rollback) };
 }
 
 export function attachFriendXml(token: string, sessionId: string, xml: string) {
@@ -714,6 +798,12 @@ export function applyDecorActions(
 ) {
   const s = requireSession(sessionId, token);
   if (!s.rawXml) throw new Error("Load mGameInfo trước");
+  const prev = { xml: s.rawXml, decor: s.decor, profileUnlocked: s.profileUnlocked };
+  const rollback = () => {
+    s.rawXml = prev.xml;
+    s.decor = prev.decor;
+    s.profileUnlocked = prev.profileUnlocked;
+  };
   if (action === "stash") {
     const revealed = revealSave({ decor: ids });
     s.rawXml = maxBuildingsStash(s.rawXml, revealed.decor, 10);
@@ -731,7 +821,7 @@ export function applyDecorActions(
     s.log.push("Decor cloned from friend city");
   }
   s.profileUnlocked = cloakProfileUnlocked(parseProfileUnlocked(s.rawXml));
-  return { ...snapshot(s), fileB64: encodeSave(s) };
+  return { ...snapshot(s), fileB64: encodeOrRollback(s, "Decor rejected by push gate", rollback) };
 }
 
 /**

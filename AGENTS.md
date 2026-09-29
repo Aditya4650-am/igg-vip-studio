@@ -546,6 +546,86 @@ broken block but not one the save arrived with. `verify.mts`-style checks were
 run against 4 real saves (clean, event-closed, and the tool-edited
 `mGameInfo.current.xml`) with zero failures.
 
+## Save shape gate: the push refuses only what *this edit* broke
+
+`save-shape.server.ts` is the shape half of the push gate, wired into
+`encodeSave` beside `assertCardCollectionsSafe`, so it covers every path that
+ends in a push (stats, inject, unban, skins, upgrades, cards, profile, season,
+regatta, decor) without each feature having to remember.
+
+**The rule is a diff, not an absolute.** `saveShapeProblems(xml)` returns
+invariant **keys**; `assertSaveShapeSafe(loaded, pushed)` refuses only keys
+that are *new*. A save that arrived with an oddity keeps that key on both
+sides and stays pushable - the same lesson `assertNoForeignIdentity` learned
+when it refused a clean copy over one friend-reference - and it is what stops
+the gate from ever holding a working feature hostage: an untouched block
+reproduces exactly the keys it had on arrival.
+
+Rules, each measured against real saves (17 files, 6 genuinely fetched):
+
+- `xml-unbalanced` - only fires when the edit is what unbalanced the document.
+- `avatar-id-out-of-range:<n>` - outside `isRealAvatarId()`: 1..398 (a genuine
+  fetch reaches `Unlocked_ava398`) plus `1390`/`1391`, which all 17 saves
+  carry. Nothing else exists.
+- `avatar-var-outside-global:<n>` - past `</Global>` the game never reads the
+  var: well-formed XML that yields a green tick and changes nothing in game.
+- `chat-emoji-shape` - `UnlockedChatEmoji` is `,st1,,st2,`: one comma wrapped
+  at each end, `,,` between ids, so n ids split into exactly `1 + 2n` entries.
+  Measured on all 10 saves carrying the var.
+- `chat-emoji-unknown:<id>` - a sticker id outside `CHAT_EMOJI_IDS`.
+- `profile-shape:<field>` / `profile-unknown:<field>:<id>` - the
+  `UnlockedBadges|Frames|Styles|ExpRanks|Themes` `<DataElem>` lists are plain
+  `a,b,c`, no wrapping and no empty slots, ids from `RAW_PROFILE`.
+- `upgrade-slx:<tag>:<id>` - `slx` is `level XOR 32162029`, measured on
+  **241/241 rows across 12 saves**. Bumping `level` alone writes a save that
+  disagrees with itself in a field the game reads for free.
+- `var-int:<name>` - a `t="i"` `<Var>` holding anything but digits makes the
+  loader reject the **whole** save. `writeVar` only picks `t="i"` for a
+  numeric value, so this catches the other way in: replacing the value of a var
+  that already had `t="i"` and leaving its type alone.
+
+Two obvious-looking rules were **dropped because real saves contradict them** - do not re-add them:
+
+- **duplicate `<Var name>` is normal**: genuine saves hold 0 to 35 duplicated
+  var names each (`FinishReason` x5, `startTimex2`). A "no duplicate names"
+  rule would refuse every real save.
+- **`t="s"` is this tool's own fingerprint, not a game type.** The same var,
+  `tutorial_finished_step`, appears in 15 saves we hold: 14 carry no `t` and
+  the single `t="s"` sits in a file this tool exported. The game writes
+  strings with no `t` at all (14,254 `name,v` vars measured), so `writeVar`'s
+  insert path now emits no `t` for non-integers; integers stay `t="i"` and
+  avatars `t="b"`.
+
+### Loading deletes avatars no city can hold
+
+`stripUnknownAvatars()` runs on **load only** (`connectLoad` and
+`refreshOwnSave`, on `s.rawXml`), so `originalDecrypted` and `loadedXml` stay
+byte-exact and *Backup* still returns the file exactly as it arrived. It
+removes only ids `isRealAvatarId()` rejects - the fake `399..500` a build
+wrote after raising `AVATAR_MAX` to 500 with no evidence. It never touches
+`350..398`: those ship no artwork in `public/avatars/` but the game really has
+them, so deleting them would take away avatars that work.
+
+### Refusal must roll back, or the session wedges
+
+`assertSaveShapeSafe` compares against `s.loadedXml`, so a rejected edit left
+in `s.rawXml` would make **every later push of that session refuse too** -
+the feature stays broken until reload. `applySave` already rolled back; the
+three paths that edit `rawXml` directly and then call `encodeSave`
+(`applySeason`, `applyUnban`, `applyDecorActions`) now go through
+`encodeOrRollback()`, which restores the fields they overwrote and drops the
+success log line. `applyUnban`'s `findUnbalancedTag` throw rolls back too -
+it used to leave the merge in place after reporting the run cancelled.
+
+Two defects this work fixed, both of them shapes no real save has:
+`unlockEmoji` appended a second trailing comma (`",st1,,st2,,"` = one entry
+more than any city holds) and `writeVar` stamped `t="s"` on string vars it
+created.
+
+Guard rails in `studio-pipeline.test.ts`: the stripped-id set, a load-to-push
+round trip proving no fake avatar reaches the device, one refusal test per
+rule plus the "arrived with it, still pushes" half of each, and the sticker
+delimiter fix pinned in `xml-edit.test.mts` (`5 entries, not 6`).
 ## Avatar icons
 
 `public/avatars/ava1.webp` … `ava349.webp` are the real profile pictures from

@@ -1118,7 +1118,11 @@ export function unlockEmoji(xml: string, ids?: string[]) {
   const list = ids?.length ? ids : CHAT_EMOJI_IDS;
   const existing = (readVarLoose(xml, "UnlockedChatEmoji") ?? "").split(",").filter((x) => x.trim());
   const merged = [...new Set([...existing, ...list])];
-  const val = "," + merged.join(",,") + ",,";
+  // Every real save writes this list as `,st1,,st2,,st3,` — one comma wrapped
+  // at each end, double separator between ids: for n ids the value splits into
+  // exactly 1 + 2n entries. The trailing `,,` this used to append produced one
+  // entry more than any city on the server holds, i.e. a shape no save has.
+  const val = "," + merged.join(",,") + ",";
   return writeVar(xml, "UnlockedChatEmoji", val);
 }
 
