@@ -23,9 +23,22 @@
  * each floor exists.
  */
 
-/** A strong player clears roughly 15 tasks in a week. Past that a batch stops
- *  looking like play and starts looking like a tool, so 15 is a hard ceiling. */
-export const REGATTA_MAX_TASKS = 15;
+/**
+ * The ceiling is what a **real** week can show is valid, not a guess.
+ *
+ * 36 is the size of a completed week measured in `<PrevRegata>` week 3 of two
+ * different players' cities — both game-written, both sitting in the corpus
+ * (`friend_city.xml`, `fc_ok.xml`). The largest week ever seen is 73; 105
+ * exists only in the old fabricator's output, which is kept as an
+ * anti-reference precisely because nothing real looks like it.
+ *
+ * Past this a batch would be describing a week no save the server has ever
+ * held, so it stops looking like play and starts looking like a tool. The
+ * per-batch plan is usually tighter than this anyway: a green week can only
+ * source as many records as its offer rows and the measured catalog allow, and
+ * `inspectRegatta` refuses at that point rather than promising the ceiling.
+ */
+export const REGATTA_MAX_TASKS = 36;
 export const REGATTA_DEFAULT_TASKS = 12;
 
 /** Why a save cannot receive regatta tasks. `ok` means it can. */

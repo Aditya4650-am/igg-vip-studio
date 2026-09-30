@@ -74,7 +74,7 @@ function liveRegattaSave(opts: { user?: string; life?: number | null; hasTask?: 
   return (
     `<Global>${lifeVar}<Var name="cityId" v="${user}" t="s"/>` +
     `<Regata id="507" startTime="${start}" endTime="${end}" score="135" scoreUpd="${start + 900}">` +
-    `<FreeTask id="match3_bomb_999" num="4" ver="1"/>${task}</Regata></Global>`
+    `<FreeTask id="match3_bomb_999" num="4" ver="99"/>${task}</Regata></Global>`
   );
 }
 
@@ -140,15 +140,19 @@ test("regata numbers new records above the block's own highest", () => {
   // counts; the archive next door starts over at 2 each week.
   const now = Math.floor(Date.now() / 1000);
   const start = now - 4 * 86400;
-  const rec = (tc: number, age: number) =>
+  // Real records never repeat a `(num, ver)`: the pair names a generation of a
+  // slot, and a generation is issued once. `liveRegattaSave` owns (4,1), so
+  // these two take (4,2) and (4,3) — the shape a real save shows, and the shape
+  // the batch's own minting has to keep.
+  const rec = (tc: number, age: number, ver: number) =>
     `<MyOldTask id="match3_bomb_999" type="event_order" eventType="Match3" target="create_bonus_bomb" ` +
-    `need="100" have="100" user="MECITY1" num="4" ver="1" takenCounter="${tc}" score="135" ` +
+    `need="100" have="100" user="MECITY1" num="4" ver="${ver}" takenCounter="${tc}" score="135" ` +
     `takeTime="${start + age}" completeTime="${start + age + 60}" endTime="${start + age + 120}" ` +
     `realEndTime="${start + age + 120}" regataCash="17" anlNumber="1" anlLimit="10"/>`;
 
   // This week is already three tasks in: numbered 1, 3 and 4. The template
   // the injector picks is the first row (takenCounter 1).
-  const xml = liveRegattaSave().replace("</Regata>", `${rec(3, 1500)}${rec(4, 2400)}</Regata>`);
+  const xml = liveRegattaSave().replace("</Regata>", `${rec(3, 1500, 2)}${rec(4, 2400, 3)}</Regata>`);
 
   const out = injectRegata(xml, 6); // three already there, so three are added
   const counters = [...out.matchAll(/<MyOldTask\b[^>]*>/g)].map((m) => Number(attrValue(m[0], "takenCounter")));
@@ -243,7 +247,7 @@ function countedRegattaSave(count: number) {
     `<Global><Var name="cityId" v="MECITY1" t="s"/>` +
     `<RegataCenter>` +
     `<Regata id="507" startTime="${start}" endTime="${end}" score="100" scoreUpd="${start + 900}">` +
-    `<FreeTask id="trains_1" num="1" ver="1"/>` +
+    `<FreeTask id="trains_1" num="1" ver="9"/>` +
     Array.from({ length: count }, (_, i) => task(i + 1)).join("") +
     `<Vars><Var name="taskCounter" v="${count}" t="i"/>` +
     `<Var name="takeConfirm" v="${count}" t="i"/>` +
@@ -627,6 +631,54 @@ test("the regatta push gate refuses a fabricated batch but not a measured one", 
     () => assertRegattaSafe(odd, injectRegata(odd, 6)),
     "an oddity the save arrived with must never block it",
   );
+});
+
+test("regata never issues a slot generation the block already holds", () => {
+  // Cause 4 from the ban notes: the clone path copied its source's `num` and
+  // `ver` verbatim, so every record it added restated a generation that was
+  // already spent — measured at 15 records with **1** distinct triple and 14
+  // copies of it, while nothing here looked.
+  const out = injectRegata(liveRegattaSave(), 20);
+  const recs = [...out.matchAll(/<MyOldTask\b[^>]*?\/?>/g)].map((m) => attrsOf(m[0]));
+  const pairs = recs.map((a) => `${a.get("num")}|${a.get("ver")}`);
+  assert.equal(pairs.length, 20, "the save's own record plus nineteen added");
+  assert.equal(new Set(pairs).size, 20, `a generation may only be issued once: ${pairs.join(" ")}`);
+
+  // And none may run up to the slot's own offer row: a completed task has to
+  // predate the offer sitting there now, measured 148>145, 65>55, 58>1, 516>479.
+  const rowVer = Number(attrsOf(/<FreeTask\b[^>]*>/.exec(out)![0]).get("ver"));
+  for (const a of recs) {
+    assert.ok(
+      Number(a.get("ver")) < rowVer,
+      `slot ${a.get("num")} generation ${a.get("ver")} ran past its offer (${rowVer})`,
+    );
+  }
+});
+
+test("the push gate refuses a repeated slot generation, but not a save that arrived with one", () => {
+  const xml = greenWeekSave();
+  const out = injectRegata(xml, 15);
+  const two = [...out.matchAll(/<MyOldTask\b[^>]*?>/g)].map((m) => m[0]);
+  assert.ok(two.length >= 2, "the fixture must hold at least two records to collide");
+
+  // Hand the second record the first one's slot generation — the exact shape
+  // the clone path used to write on every record it added.
+  const a0 = attrsOf(two[0]!);
+  const clone = two[1]!.replace(/num="\d+"/, `num="${a0.get("num")}"`).replace(/ver="\d+"/, `ver="${a0.get("ver")}"`);
+  const dupe = out.replace(two[1]!, clone);
+  assert.notEqual(dupe, out, "the fixture really does carry the collision");
+
+  let msg = "";
+  try {
+    assertRegattaSafe(xml, dupe);
+  } catch (e) {
+    msg = (e as Error).message;
+  }
+  assert.match(msg, /regatta-slot-gen/, `a repeated generation must be refused, got: ${msg || "(no throw)"}`);
+
+  // The rule is a diff, same as every other key: a file that *arrived* holding
+  // the collision keeps it on both sides and is never held hostage for it.
+  assert.doesNotThrow(() => assertRegattaSafe(dupe, dupe), "an oddity the save arrived with must never block it");
 });
 
 test("building stash handles paired Building elements", () => {

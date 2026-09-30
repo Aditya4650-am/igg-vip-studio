@@ -63,7 +63,7 @@ const REGATTA_SAVE = [
   "<Global>",
   '<Var name="cityId" v="MECITY1" t="s"/>',
   `<Regata id="507" startTime="${R_START}" endTime="${R_END}" score="135" scoreUpd="${R_START + 900}">`,
-  '<FreeTask id="match3_bomb_999" num="4" ver="1"/>',
+  '<FreeTask id="match3_bomb_999" num="4" ver="99"/>',
   REGATTA_TASK,
   "</Regata>",
   "</Global>",

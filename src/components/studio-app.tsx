@@ -15,7 +15,7 @@ import { AVATAR_MAX, avatarEmoji, avatarGroupId, avatarIconPath, avatarsInRange,
 import { MUSEUM_IDS, artifactEmoji, artifactIconPath, museumLabel } from "@/lib/museum";
 import { CARD_GROUPS, cardIconPath, cardNumber } from "@/lib/cards";
 import { iconForBarn, iconForDecorLabel, iconForGem, iconForGroup, iconForItemLabel, iconForProfileLabel, iconForSkin, iconForStat, iconForSticker, iconForUpgradeLabel, iconForZoo } from "@/lib/game-icon-map";
-import { REGATTA_MAX_TASKS, regattaReason, type RegattaReason } from "@/lib/regatta";
+import { REGATTA_MAX_TASKS, REGATTA_DEFAULT_TASKS, regattaReason, type RegattaReason } from "@/lib/regatta";
 import {
   connectLoad,
   fetchCity,
@@ -1289,9 +1289,9 @@ export function StudioApp() {
   const [stickerSel, setStickerSel] = useState<Set<string>>(new Set());
   const [museumSel, setMuseumSel] = useState<Set<string>>(new Set());
   const [pendingRegatta, setPendingRegatta] = useState(false);
-  // How many completed tasks the Regatta tab should reach (10-15 is the range a
-  // real week produces; the server clamps to REGATTA_MAX_TASKS regardless).
-  const [regattaTasks, setRegattaTasks] = useState(12);
+  // How many completed tasks the Regatta tab should reach (the server clamps
+  // to REGATTA_MAX_TASKS regardless — a real completed week holds 36).
+  const [regattaTasks, setRegattaTasks] = useState(REGATTA_DEFAULT_TASKS);
   const [pendingSeason, setPendingSeason] = useState(false);
   const [pendingUnban, setPendingUnban] = useState<UnbanMode | null>(null);
   const [pendingDecorFragments, setPendingDecorFragments] = useState(false);
@@ -3438,10 +3438,12 @@ export function StudioApp() {
                           value={regattaTasks}
                           onChange={(e) => {
                             const raw = Number(e.target.value.replace(/[^\d]/g, ""));
-                            setRegattaTasks(raw > 0 ? Math.min(15, raw) : 12);
+                            setRegattaTasks(raw > 0 ? Math.min(REGATTA_MAX_TASKS, raw) : REGATTA_DEFAULT_TASKS);
                           }}
                         />
-                        <span className="text-xs text-muted">{tr("regattaCountHint")}</span>
+                        <span className="text-xs text-muted">
+                          {tr("regattaCountHint").replace("{max}", String(REGATTA_MAX_TASKS))}
+                        </span>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button

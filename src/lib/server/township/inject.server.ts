@@ -790,6 +790,105 @@ function regattaPool(text: string): number {
   return new Set([...text.matchAll(/<FreeTask\b[^>]*\bid="([^"]*)"/gi)].map((m) => m[1]!)).size;
 }
 
+/**
+ * Which template each of `need` **clone-path** records comes from, and the
+ * slot generation (`ver`) it will carry. `null` when the block's own slots
+ * cannot yield that many — a refusal, never a short batch dressed as a full
+ * one.
+ *
+ * The clone path used to copy `id`, `num` *and* `ver` straight off its source,
+ * so every record it added repeated a triple the block already held: measured
+ * on a real save, 15 records produced **1** distinct `(id, num, ver)` and 14
+ * copies of it, and the push gate did not look. Cause 4 from the ban notes —
+ * a repeated generation — was documented but never actually guarded.
+ *
+ * Two facts measured across every block in the corpus drive this:
+ *
+ * - `(num, ver)` is issued **once**. Zero repeats across a 37-record week and
+ *   a 42-record week, and zero across the 105 rows the old fabricator wrote
+ *   (it numbered them 1..105 exactly so). A slot's generation is a counter
+ *   that only moves forward, so handing a new record the source's own pair
+ *   restates a generation that is already spent.
+ * - The slot's live `<FreeTask>` row always sits **above** the records in its
+ *   own slot — 148>145, 65>55, 58>1, 516>479 measured — because a completed
+ *   task necessarily predates the offer sitting there now. A minted `ver` has
+ *   to stay strictly below that row, and a slot whose row has caught up with
+ *   its records is spent.
+ *
+ * `num` is never touched: it names a slot this save really uses, and there is
+ * no measured rule for moving a task to a different one. When the template's
+ * own slot is spent the next template is tried; when they all are, the batch
+ * refuses with `no_template` — an honest "this save has room for fewer than
+ * you asked for", which the tab reports through the same call.
+ *
+ * The whole plan is built before a single tag is written, because a mint
+ * spends its generation: half a plan left behind would be a save disagreeing
+ * with itself. `inspectRegatta` runs this very function, so "pressable" and
+ * "will succeed" stay one decision.
+ *
+ * Scope is the **live block only**: an archive numbers its own slots
+ * independently (a `<PrevRegata>` slot 1 sits at 157 while the live block's
+ * slot 1 offer sits at 148), so it neither caps nor consumes anything here.
+ */
+function regattaClonePlan(
+  inner: string,
+  templates: string[],
+  need: number,
+): { tpl: string; ver: number }[] | null {
+  if (need <= 0) return [];
+  if (!templates.length) return null;
+
+  const issued = new Set<string>();
+  const top = new Map<number, number>();
+  for (const m of inner.matchAll(/<MyOldTask\b[^>]*?\/?>/gi)) {
+    const a = tagAttrs(m[0]);
+    const num = Number(attrValue(a, "num"));
+    const ver = Number(attrValue(a, "ver"));
+    if (!Number.isInteger(num) || !Number.isInteger(ver) || ver < 1) continue;
+    issued.add(`${num}|${ver}`);
+    if (ver > (top.get(num) ?? 0)) top.set(num, ver);
+  }
+  const offer = new Map<number, number>();
+  for (const m of inner.matchAll(/<FreeTask\b[^>]*?\/?>/gi)) {
+    const a = tagAttrs(m[0]);
+    const num = Number(attrValue(a, "num"));
+    const ver = Number(attrValue(a, "ver"));
+    if (Number.isInteger(num) && Number.isInteger(ver)) offer.set(num, ver);
+  }
+
+  const mint = (num: number): number | null => {
+    const cap = offer.has(num) ? offer.get(num)! : Infinity;
+    let v = (top.get(num) ?? 0) + 1;
+    while (v < cap && issued.has(`${num}|${v}`)) v++;
+    if (v >= cap) return null;
+    issued.add(`${num}|${v}`);
+    top.set(num, v);
+    return v;
+  };
+
+  const plan: { tpl: string; ver: number }[] = [];
+  let cursor = 0;
+  let misses = 0;
+  // A full turn of templates without a single mint means every slot that can
+  // be named is spent: stop rather than spin, and let the caller refuse.
+  while (plan.length < need && misses < templates.length) {
+    const tpl = templates[cursor++ % templates.length]!;
+    const raw = attrValue(tagAttrs(tpl), "num");
+    if (raw === null || !/^-?\d+$/.test(raw)) {
+      misses++;
+      continue;
+    }
+    const ver = mint(Number(raw));
+    if (ver === null) {
+      misses++;
+      continue;
+    }
+    misses = 0;
+    plan.push({ tpl, ver });
+  }
+  return plan.length < need ? null : plan;
+}
+
 /** Read-only status so the UI can say *why* a save cannot take tasks before
  *  the user presses anything. Mirrors `injectRegata`'s checks exactly for the
  *  batch size it is given, and never throws. */
@@ -817,13 +916,18 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
   // order — now shared with the tab, which re-runs it for the count the user
   // actually picked instead of trusting this default-12 answer.
   const reason = regattaReason({ window: win, templates: sources.tags.length, current }, nTasks, now);
-  // `regattaReason` only knows that *some* record can be built. A synthesized
-  // batch must also be long enough: its plan is capped by how many measured ids
-  // this save is not already holding, and `injectRegata` refuses the moment the
-  // plan runs short. Answering "ok" here would hand the user a live button that
-  // fails on press — the exact defect this shared decision exists to prevent.
+  // `regattaReason` only knows that *some* record can be built. The batch also
+  // has to be long enough, and two different ceilings decide that: a synthesized
+  // batch is capped by how many measured ids this save is not already holding,
+  // a cloned one by the free slot generations its own block still has.
+  // `injectRegata` refuses the moment either plan runs short, so answering "ok"
+  // here would hand the user a live button that fails on press — the exact
+  // defect this shared decision exists to prevent. Both ceilings are read from
+  // the very functions the injector runs, so they cannot drift.
+  const need = reason === "ok" ? regattaWant(nTasks) - current : 0;
   const shortPlan =
-    reason === "ok" && sources.synthetic && sources.tags.length < regattaWant(nTasks) - current;
+    reason === "ok" &&
+    (sources.synthetic ? sources.tags.length < need : regattaClonePlan(block.inner, sources.tags, need) === null);
 
   return {
     reason: shortPlan ? "no_template" : reason,
@@ -964,6 +1068,13 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   // back on the offer list next to its own record, so the batch stops where the
   // plan stops and says so — never a short batch dressed as a full one.
   if (src.synthetic && src.tags.length < need) throw new Error(REGATTA_ERR.no_template);
+  // The clone path is capped one level up, by the slot generations its own
+  // block still has free. Every record takes the next unused `(num, ver)` of
+  // the slot it names, so a block whose slots have all been spent cannot take
+  // more — refuse instead of handing back a batch that repeats a generation
+  // (the exact shape the push gate below was written to refuse).
+  const clonePlan = src.synthetic ? null : regattaClonePlan(block.inner, src.tags, need);
+  if (clonePlan === null && !src.synthetic) throw new Error(REGATTA_ERR.no_template);
 
   // The save's own id, never a fresh one: a save that hands its records a
   // second identity is exactly what a server notices when it is looking.
@@ -1003,11 +1114,14 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   const tasks: string[] = [];
 
   for (let i = 0; i < need; i++) {
-    // The clone path cycles its templates (a real week repeats ids, with a
-    // different `num`/`ver` each time). The synthesized path must not: each
-    // record was cut from a specific offer row, so index `i` is that record and
-    // wrapping would emit it twice.
-    const tpl = src.synthetic ? src.tags[i]! : src.tags[i % src.tags.length]!;
+    // The clone path takes its template **and** its slot generation from the
+    // plan built above: `regattaClonePlan` cycles the templates the way a real
+    // week repeats ids, but never repeats a `(num, ver)` and never lets one run
+    // past the slot's own offer row. The synthesized path must not cycle at all:
+    // each record was cut from a specific offer row, so index `i` is that record
+    // and wrapping would emit it twice.
+    const step = clonePlan ? clonePlan[i]! : null;
+    const tpl = step ? step.tpl : src.tags[i]!;
     const a = tagAttrs(tpl);
     // Real records keep takeTime < completeTime < endTime strictly, and all
     // three inside the window. The floors below hold that ordering even when
@@ -1021,6 +1135,12 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
     tag = setTagAttr(tag, "completeTime", String(complete));
     tag = setTagAttr(tag, "realEndTime", String(endTime));
     if (attrValue(a, "endTime") !== null) tag = setTagAttr(tag, "endTime", String(endTime));
+    // The one field the clone path rewrites besides the timestamps. `num` is
+    // left exactly as the template has it — it names a slot this save really
+    // uses — and only its generation moves forward, to the free one the plan
+    // minted. The synthetic path already carries a real `ver` out of the offer
+    // row it was cut from, so it is left alone entirely.
+    if (step) tag = setTagAttr(tag, "ver", String(step.ver));
     const anlLimit = Number(attrValue(a, "anlLimit") ?? 0);
     if (Number.isFinite(anlLimit) && anlLimit > 0) tag = setTagAttr(tag, "anlNumber", String((i % anlLimit) + 1));
     if (takenBase >= 0 && attrValue(a, "takenCounter") !== null) {
@@ -1147,6 +1267,12 @@ const REGATTA_RECORD_FIELDS = [
  * - `regatta-ver-zero:<id>` — `ver` must be a positive integer. `"0"` appears
  *   on no real record in the corpus; it is the value a teammate's `<TakenTask>`
  *   row is cleared to, so writing it borrows somebody else's slot.
+ * - `regatta-slot-gen:<num>:<ver>` — two records in one block claiming the same
+ *   slot generation. `(num, ver)` is issued once (0 repeats in a 37-record and
+ *   a 42-record week), and a slot's `ver` only moves forward — so a repeat means
+ *   a batch re-stated a generation that was already spent. This is the key the
+ *   clone path used to earn on every single record it wrote, and the gate is
+ *   the reason it mints a fresh one instead (`regattaClonePlan`).
  * - `regatta-counter-missing` — a block holding records with no
  *   `taskCounter` / `takeConfirm` at all. Every save that has records declares
  *   them (7/7), and the known bad output has records and none of them.
@@ -1178,6 +1304,9 @@ export function regattaProblems(xml: string, own: string): string[] {
   for (const m of inner.matchAll(/<Member\b[^>]*?\btaskId="([^"]*)"/gi)) listed.add(m[1]!);
 
   let prevTaken: number | null = null;
+  // A slot's generation is issued once, so two records in the same block
+  // holding the same `(num, ver)` cannot both be real. See the key below.
+  const slotGen = new Set<string>();
   for (const m of inner.matchAll(/<MyOldTask\b[^>]*?\/?>/gi)) {
     const a = tagAttrs(m[0]);
     const id = attrValue(a, "id") ?? "?";
@@ -1243,6 +1372,19 @@ export function regattaProblems(xml: string, own: string): string[] {
     // `<TakenTask>` row is cleared to, so it borrows somebody else's slot.
     const verRaw = attrValue(a, "ver");
     if (verRaw !== null && !/^[1-9]\d*$/.test(verRaw)) keys.add(`regatta-ver-zero:${id}`);
+    // Two records claiming the same slot generation. Zero occurrences in a
+    // 37-record and a 42-record week, and zero in the 105 rows the old
+    // fabricator wrote — it numbered them 1..105 precisely so they would not
+    // collide. The clone path used to copy its source's `num` *and* `ver`
+    // verbatim, so every record it added restated a generation the block
+    // already held: 15 records, 1 distinct triple. That is cause 4 from the
+    // ban notes, documented and never actually checked until now.
+    const numRaw = attrValue(a, "num");
+    if (numRaw !== null && verRaw !== null) {
+      const pair = `${numRaw}|${verRaw}`;
+      if (slotGen.has(pair)) keys.add(`regatta-slot-gen:${numRaw}:${verRaw}`);
+      slotGen.add(pair);
+    }
 
     const takenRaw = attrValue(a, "takenCounter");
     if (takenRaw && /^\d+$/.test(takenRaw)) {
