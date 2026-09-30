@@ -1290,7 +1290,11 @@ export function StudioApp() {
   const [museumSel, setMuseumSel] = useState<Set<string>>(new Set());
   const [pendingRegatta, setPendingRegatta] = useState(false);
   // How many completed tasks the Regatta tab should reach (the server clamps
-  // to REGATTA_MAX_TASKS regardless — a real completed week holds 36).
+  // to REGATTA_MAX_TASKS regardless — 73 is the largest real week on record).
+  // It is a weekly *total*, but a push is limited harder than that by the
+  // window's own length: early in the week only a handful of days have run, so
+  // the batch refuses rather than compressing a week's worth of completions
+  // onto one or two days.
   const [regattaTasks, setRegattaTasks] = useState(REGATTA_DEFAULT_TASKS);
   const [pendingSeason, setPendingSeason] = useState(false);
   const [pendingUnban, setPendingUnban] = useState<UnbanMode | null>(null);
@@ -1919,6 +1923,8 @@ export function StudioApp() {
           window: session.regattaInfo.window,
           templates: session.regattaInfo.templates,
           current: session.regattaInfo.current,
+          lastDone: session.regattaInfo.lastDone,
+          quota: session.regattaInfo.quota,
         },
         regattaTasks,
       )
@@ -3415,6 +3421,12 @@ export function StudioApp() {
                         <span className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums">
                           {tr("regattaPool")} {session.regattaInfo.pool}
                         </span>
+                        <span
+                          className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums"
+                          title={tr("regattaDayTip")}
+                        >
+                          {tr("regattaDay")} {session.regattaInfo.quota}
+                        </span>
                       </div>
                       <p className="mt-3 text-xs text-muted">{tr("regattaGuards")}</p>
                       {session.regattaInfo.window ? (
@@ -3442,7 +3454,9 @@ export function StudioApp() {
                           }}
                         />
                         <span className="text-xs text-muted">
-                          {tr("regattaCountHint").replace("{max}", String(REGATTA_MAX_TASKS))}
+                          {tr("regattaCountHint")
+                            .replace("{max}", String(REGATTA_MAX_TASKS))
+                            .replace("{day}", String(session.regattaInfo.quota))}
                         </span>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
@@ -3466,7 +3480,8 @@ export function StudioApp() {
                         <p className="mt-2 text-xs text-amber">
                           {tr(REGATTA_WHY_KEY[regattaState])
                             .replace("{count}", String(session.regattaInfo.current))
-                            .replace("{max}", String(REGATTA_MAX_TASKS))}
+                            .replace("{max}", String(REGATTA_MAX_TASKS))
+                            .replace("{day}", String(session.regattaInfo.quota))}
                         </p>
                       ) : null}
                     </section>

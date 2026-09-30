@@ -1,7 +1,10 @@
 import {
   REGATTA_DEFAULT_TASKS,
+  REGATTA_MAX_PER_DAY,
   REGATTA_MAX_TASKS,
   regattaBounds,
+  regattaDailyQuota,
+  regattaMinGap,
   regattaReason,
   regattaWant,
   type RegattaReason,
@@ -413,6 +416,13 @@ export interface RegattaState {
   active: boolean;
   /** <MyOldTask> already completed in the current regatta. */
   current: number;
+  /** Newest completion already in that block; a later push may not date an
+   *  earlier one, so the window the tab is shown has to account for it too. */
+  lastDone: number;
+  /** This save's own `<Var name="TaskQuota">`, clamped to the highest quota the
+   *  game has ever shown — the game's daily task limit, and therefore the
+   *  number of gaps per rolling day a batch is allowed to have. */
+  quota: number;
   /** Records usable as templates anywhere in the save. */
   templates: number;
   /** Distinct <FreeTask> ids the game is offering. */
@@ -791,6 +801,25 @@ function regattaPool(text: string): number {
 }
 
 /**
+ * Newest completion already sitting in a block, or 0 when it has none.
+ *
+ * `realEndTime` is non-decreasing in document order in **every** block of the
+ * corpus (35/35, 14/14, 104/104 — the fabricator's own output kept it too), so
+ * a batch may only date completions *after* this. Without it a second push
+ * recomputed its range from the window alone and wrote a record completed
+ * before the one above it: measured at exactly 1 out-of-order record per
+ * second push.
+ */
+function regattaLastDone(inner: string): number {
+  let last = 0;
+  for (const m of inner.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)) {
+    const t = Number(m[1]);
+    if (Number.isFinite(t) && t > last) last = t;
+  }
+  return last;
+}
+
+/**
  * Which template each of `need` **clone-path** records comes from, and the
  * slot generation (`ver`) it will carry. `null` when the block's own slots
  * cannot yield that many — a refusal, never a short batch dressed as a full
@@ -811,15 +840,22 @@ function regattaPool(text: string): number {
  *   restates a generation that is already spent.
  * - The slot's live `<FreeTask>` row always sits **above** the records in its
  *   own slot — 148>145, 65>55, 58>1, 516>479 measured — because a completed
- *   task necessarily predates the offer sitting there now. A minted `ver` has
- *   to stay strictly below that row, and a slot whose row has caught up with
- *   its records is spent.
+ *   task necessarily predates the offer sitting there now.
+ *
+ * A slot is therefore never "spent": when the generation about to be issued
+ * would reach the row, the row advances with it (`rows` carries those
+ * replacements back to the caller). That is the same refresh the synthesized
+ * path performs on the slot it consumes, because a completed task *is* what
+ * replaces an offer — so a save topped up on day one (record at V, row at
+ * V+1) still has room on day two instead of refusing a week that is only
+ * half finished. The invariant the corpus shows is not "rows never move", it
+ * is "rows never fall behind", and advancing preserves exactly that.
  *
  * `num` is never touched: it names a slot this save really uses, and there is
- * no measured rule for moving a task to a different one. When the template's
- * own slot is spent the next template is tried; when they all are, the batch
- * refuses with `no_template` — an honest "this save has room for fewer than
- * you asked for", which the tab reports through the same call.
+ * no measured rule for moving a task to a different one. When a template
+ * cannot name a slot at all (`num` absent or non-numeric) the next one is
+ * tried; when none of them can, the batch refuses with `no_template` rather
+ * than emitting a record whose slot is anybody's guess.
  *
  * The whole plan is built before a single tag is written, because a mint
  * spends its generation: half a plan left behind would be a save disagreeing
@@ -834,8 +870,8 @@ function regattaClonePlan(
   inner: string,
   templates: string[],
   need: number,
-): { tpl: string; ver: number }[] | null {
-  if (need <= 0) return [];
+): { plan: { tpl: string; ver: number }[]; rows: Map<number, string> } | null {
+  if (need <= 0) return { plan: [], rows: new Map() };
   if (!templates.length) return null;
 
   const issued = new Set<string>();
@@ -848,19 +884,29 @@ function regattaClonePlan(
     issued.add(`${num}|${ver}`);
     if (ver > (top.get(num) ?? 0)) top.set(num, ver);
   }
-  const offer = new Map<number, number>();
+  // Offer rows kept as raw tags: a slot minted several times rebuilds from the
+  // original each time, so `ver` is set rather than accumulated.
+  const offers = new Map<number, { ver: number; tag: string }>();
   for (const m of inner.matchAll(/<FreeTask\b[^>]*?\/?>/gi)) {
-    const a = tagAttrs(m[0]);
+    const tag = m[0];
+    const a = tagAttrs(tag);
     const num = Number(attrValue(a, "num"));
     const ver = Number(attrValue(a, "ver"));
-    if (Number.isInteger(num) && Number.isInteger(ver)) offer.set(num, ver);
+    if (Number.isInteger(num) && Number.isInteger(ver)) offers.set(num, { ver, tag });
   }
 
-  const mint = (num: number): number | null => {
-    const cap = offer.has(num) ? offer.get(num)! : Infinity;
+  const rows = new Map<number, string>();
+  const mint = (num: number): number => {
     let v = (top.get(num) ?? 0) + 1;
-    while (v < cap && issued.has(`${num}|${v}`)) v++;
-    if (v >= cap) return null;
+    while (issued.has(`${num}|${v}`)) v++;
+    const offer = offers.get(num);
+    // A record must never sit at or above the offer standing in its own slot —
+    // 148>145, 65>55, 58>1, 516>479, with no exception anywhere in the corpus.
+    // When a generation reaches the row, the row is refreshed first, the same
+    // way the synthesized path refreshes the slot whose offer it consumes: a
+    // completed task is what replaces an offer, so the row moving forward is
+    // the mechanism that keeps the invariant, not a violation of it.
+    if (offer && offer.ver <= v) rows.set(num, setTagAttr(offer.tag, "ver", String(v + 1)));
     issued.add(`${num}|${v}`);
     top.set(num, v);
     return v;
@@ -869,8 +915,8 @@ function regattaClonePlan(
   const plan: { tpl: string; ver: number }[] = [];
   let cursor = 0;
   let misses = 0;
-  // A full turn of templates without a single mint means every slot that can
-  // be named is spent: stop rather than spin, and let the caller refuse.
+  // A full turn without a single mint means no template can name a slot:
+  // stop rather than spin, and let the caller refuse.
   while (plan.length < need && misses < templates.length) {
     const tpl = templates[cursor++ % templates.length]!;
     const raw = attrValue(tagAttrs(tpl), "num");
@@ -878,15 +924,10 @@ function regattaClonePlan(
       misses++;
       continue;
     }
-    const ver = mint(Number(raw));
-    if (ver === null) {
-      misses++;
-      continue;
-    }
     misses = 0;
-    plan.push({ tpl, ver });
+    plan.push({ tpl, ver: mint(Number(raw)) });
   }
-  return plan.length < need ? null : plan;
+  return plan.length < need ? null : { plan, rows };
 }
 
 /** Read-only status so the UI can say *why* a save cannot take tasks before
@@ -904,22 +945,31 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
   const user = resolveRegataUser(text);
   const block = regattaBlock(text);
   const base = { templates: sources.tags.length, pool, avgScore: 0, user, window: null };
-  if (!block) return { ...base, reason: "no_active_regatta", active: false, current: 0 };
+  if (!block)
+    return { ...base, reason: "no_active_regatta", active: false, current: 0, lastDone: 0, quota: REGATTA_MAX_PER_DAY };
 
   const win = regattaWindow(block.attrs);
   const now = Math.floor(Date.now() / 1000);
   const current = (block.inner.match(/<MyOldTask\b/gi) ?? []).length;
+  // The newest completion already there: a second push may not date an earlier
+  // one, so the range the tab is shown has to be the range the injector will
+  // use, not a fresh guess from the window alone.
+  const lastDone = regattaLastDone(block.inner);
+  // The daily rail this save is held to. It comes from the block, not from a
+  // constant: `TaskQuota` is the game's own "Today's Tasks: 4/17" counter and
+  // it is what every record's `anlLimit` mirrors (5/5 real saves).
+  const quota = regattaDailyQuota(regattaTaskQuota(block.inner));
   const scores = [...block.inner.matchAll(/<MyOldTask\b[^>]*\bscore="(\d+)"/g)].map((m) => Number(m[1]));
   const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
   const active = !!win && now >= win.start && now <= win.end;
   // Exactly what `injectRegata` will decide for this batch size, in the same
   // order — now shared with the tab, which re-runs it for the count the user
   // actually picked instead of trusting this default-12 answer.
-  const reason = regattaReason({ window: win, templates: sources.tags.length, current }, nTasks, now);
+  const reason = regattaReason({ window: win, templates: sources.tags.length, current, lastDone, quota }, nTasks, now);
   // `regattaReason` only knows that *some* record can be built. The batch also
   // has to be long enough, and two different ceilings decide that: a synthesized
   // batch is capped by how many measured ids this save is not already holding,
-  // a cloned one by the free slot generations its own block still has.
+  // a cloned one by how many templates can name a slot at all.
   // `injectRegata` refuses the moment either plan runs short, so answering "ok"
   // here would hand the user a live button that fails on press — the exact
   // defect this shared decision exists to prevent. Both ceilings are read from
@@ -933,6 +983,8 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
     reason: shortPlan ? "no_template" : reason,
     active,
     current,
+    lastDone,
+    quota,
     templates: sources.tags.length,
     pool,
     avgScore,
@@ -1068,13 +1120,13 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   // back on the offer list next to its own record, so the batch stops where the
   // plan stops and says so — never a short batch dressed as a full one.
   if (src.synthetic && src.tags.length < need) throw new Error(REGATTA_ERR.no_template);
-  // The clone path is capped one level up, by the slot generations its own
-  // block still has free. Every record takes the next unused `(num, ver)` of
-  // the slot it names, so a block whose slots have all been spent cannot take
-  // more — refuse instead of handing back a batch that repeats a generation
-  // (the exact shape the push gate below was written to refuse).
-  const clonePlan = src.synthetic ? null : regattaClonePlan(block.inner, src.tags, need);
-  if (clonePlan === null && !src.synthetic) throw new Error(REGATTA_ERR.no_template);
+  // The clone path is one plan of two halves: the slot generation every record
+  // gets, and the `<FreeTask>` rows that have to be refreshed alongside them so
+  // a slot's row never falls behind its own records. When no template can name
+  // a slot at all the batch refuses instead of inventing one.
+  const clone = src.synthetic ? null : regattaClonePlan(block.inner, src.tags, need);
+  if (clone === null && !src.synthetic) throw new Error(REGATTA_ERR.no_template);
+  const clonePlan = clone?.plan ?? null;
 
   // The save's own id, never a fresh one: a save that hands its records a
   // second identity is exactly what a server notices when it is looking.
@@ -1083,11 +1135,27 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   // Timestamps must sit inside the regatta window AND in the past. A completion
   // dated in the future, or outside the window the server is holding, is the
   // single easiest anomaly to spot.
-  const { hi, lo } = regattaBounds(win, now);
+  //
+  // The range is also anchored after `lastDone`, the newest completion already
+  // in the block. The window on its own was enough for a first push, but a
+  // second one recomputed the same range and wrote a record completed *before*
+  // the one above it — 1 out-of-order record per repeat push, against 0 in
+  // every block of the corpus.
+  const lastDone = regattaLastDone(block.inner);
+  // The save's own daily quota sets the spacing, so 15 tasks over a week is
+  // spread the way *this* player's game counts days — a block at TaskQuota 9
+  // gets wider gaps than one at 17, and neither is judged by a hardcoded
+  // figure the server never wrote.
+  const quota = regattaDailyQuota(regattaTaskQuota(block.inner));
+  const minGap = regattaMinGap(quota);
+  const { hi, lo } = regattaBounds(win, now, lastDone, minGap);
   // Both floors matter: the first keeps `lo` clear of `win.start + 122` below,
-  // so task times never collapse onto one another, and the second leaves each
-  // task at least a minute of its own.
-  if (hi - win.start < 600 || hi - lo < need * 60) throw new Error(REGATTA_ERR.window_closed);
+  // so task times never collapse onto one another; the second leaves every task
+  // `minGap` of its own, which is what bounds any single day at this save's own
+  // `TaskQuota` completions no matter how large the batch is. It is the same
+  // expression `regattaReason` answers the tab with, so "pressable" and "will
+  // succeed" stay one decision.
+  if (hi - win.start < 600 || hi - lo < (need - 1) * minGap) throw new Error(REGATTA_ERR.window_closed);
   const gap = need > 1 ? Math.floor((hi - lo) / (need - 1)) : 0;
 
   // `takenCounter` runs monotonically across the `MyOldTask` list of a single
@@ -1155,10 +1223,12 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   if (block.close) {
     text = text.replace(/(<Regata\b[^>]*>)([\s\S]*?)(<\/Regata\s*>)/i, (_f, o, inner, c) => {
       let body2 = inner;
-      // A consumed offer row is put back before the records are counted, so
-      // `<FreeTask>` still holds its full complement while no completed id
-      // remains on it.
-      if (src.free.size) body2 = rewriteFreeTasks(body2, src.free);
+      // Two kinds of row change, never both on one save: a synthesized batch
+      // puts back the offer it consumed, a cloned one refreshes every row whose
+      // generation it reached. Either way the row keeps sitting above the
+      // records in its own slot.
+      const free = new Map<number, string>([...src.free, ...(clone?.rows ?? [])]);
+      if (free.size) body2 = rewriteFreeTasks(body2, free);
       return `${o}${placeNewTasks(body2, body)}${c}`;
     });
   } else {

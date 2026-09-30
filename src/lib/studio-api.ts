@@ -84,7 +84,7 @@ const saveSchema = z.object({
   // Must stay in step with REGATTA_MAX_TASKS in server/township/inject.server.ts.
   // This module is bundled for the browser, so the constant cannot be imported
   // here; the server clamps the value again regardless of what arrives.
-  regattaTasks: z.number().int().min(1).max(36).optional(),
+  regattaTasks: z.number().int().min(1).max(73).optional(),
   season: z.boolean().optional(),
   unbanMode: z.enum(["inicial", "completo", "novo"]).optional(),
   decorFragments: z.boolean().optional(),

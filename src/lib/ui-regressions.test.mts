@@ -144,3 +144,30 @@ test("the regatta button answers for the count on screen, not the default batch"
   }
   assert.ok(/\bregattaWhyFull:\s*"[^"]*\{count\}[^"]*\{max\}/.test(i18n), "regattaWhyFull must name the count and the ceiling");
 });
+
+test("the regatta tab shows the save's own daily quota, not a hardcoded number", () => {
+  // The game itself reads out the limit — "Today's Tasks: 4/17", "Quota resets
+  // in: 11h 10m" — and it lives in the save as `<Var name="TaskQuota">`. A
+  // badge that hid it (or worse, printed a constant) would leave the user
+  // unable to see why a batch of 40 was fine on one save and refused on
+  // another with the same window.
+  const tsx = read("../components/studio-app.tsx");
+  const tab = tsx.slice(tsx.indexOf('{tab === "regatta" &&'), tsx.indexOf('{tab === "barn" &&'));
+  assert.ok(tab.includes("session.regattaInfo.quota"), "the tab must read the quota the save states");
+
+  // The decision the button makes has to be taken with that same quota, or
+  // "pressable" and "will succeed" drift apart again.
+  const reason = tsx.slice(tsx.indexOf("const regattaState"), tsx.indexOf("const tool ="));
+  assert.ok(/quota:\s*session\.regattaInfo\.quota/.test(reason), "regattaReason must be given the save's quota");
+
+  // Every string that talks about the number has to interpolate it rather than
+  // leave a raw `{day}` in front of the user.
+  const i18n = read("i18n.ts");
+  for (const key of ["regattaDay", "regattaDayTip", "regattaCountHint", "regattaWhyWindow"]) {
+    assert.ok(new RegExp(`\\b${key}:`).test(i18n), `${key} must exist in the dictionary`);
+  }
+  const raw = (tab.match(/\{day\}/g) ?? []).length;
+  const substituted = (tab.match(/\.replace\("\{day\}"/g) ?? []).length;
+  assert.equal(raw, substituted, "every {day} in the tab must be substituted before it is rendered");
+  assert.ok(substituted >= 2, "both the hint and the refusal must carry the save's quota");
+});

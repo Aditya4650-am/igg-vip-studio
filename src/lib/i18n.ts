@@ -343,12 +343,15 @@ const vi = {
   regattaDone: "Đã hoàn thành",
   regattaTemplates: "Mẫu:",
   regattaPool: "Danh sách task:",
+  regattaDay: "Giới hạn mỗi ngày:",
+  regattaDayTip:
+    "Quota hằng ngày của chính save này (biến TaskQuota) - đúng con số game hiển thị ở mục Today's Tasks. Tool không bao giờ đặt hai completion gần nhau hơn phần chia của một ngày, nên không bao giờ gom cả tuần vào một ngày.",
   regattaWindow: "Thời gian regatta",
   regattaGuards:
-    "Mỗi task được sao chép nguyên vẹn từ một task thật đã có trong save (type, target, need, score, ver...), chỉ đổi thời gian. Thời gian luôn nằm trong khoảng của regatta và luôn ở quá khứ. Không bao giờ tạo regatta mới, không ghi đè bộ đếm lifetime, không đổi danh tính save.",
+    "Mỗi task được sao chép nguyên vẹn từ một task thật đã có trong save (type, target, need, score, ver...), chỉ đổi thời gian. Thời gian luôn nằm trong khoảng của regatta và luôn ở quá khứ, luôn tăng dần sau task đã có, và mỗi ngày trong tuần chỉ nhận tối đa bằng đúng quota hằng ngày mà chính save đó khai (biến TaskQuota - đúng con số game hiển thị ở \"Today's Tasks\") - nên cả tuần không bao giờ bị gom vào một ngày. Không bao giờ tạo regatta mới, không ghi đè bộ đếm lifetime, không đổi danh tính save.",
   regattaCount: "Tổng task trong tuần",
   regattaCountHint:
-    "Số task bạn muốn tuần này có sau khi áp dụng (không phải số thêm vào). Tuần thật đã hoàn thành có tới 36 task và tool không bao giờ vượt {max}.",
+    "Số task bạn muốn tuần này có sau khi áp dụng (không phải số thêm vào). Tool không bao giờ vượt {max} task một tuần; riêng một lần đẩy còn bị giới hạn bởi quota mỗi ngày của chính save ({day} task/ngày) và thời gian tuần đã chạy, nên cách đúng là đẩy đều mỗi ngày thay vì gom tất cả vào một lần.",
   regattaAdd: "Thêm vào Lưu & đẩy",
   regattaQueued: "✓ Đã xếp hàng",
   regattaWhyNoRegatta:
@@ -357,7 +360,7 @@ const vi = {
     "Nút bị tắt vì save chưa có task regatta thật nào để sao chép. Chơi một task regatta trong game trước rồi thử lại.",
   regattaWhyFull: "Tuần này đã có {count} task. Muốn thêm thì tăng số trong ô lên lớn hơn {count} - tool không bao giờ đẩy một tuần vượt {max} task.",
   regattaWhyWindow:
-    "Nút bị tắt vì tuần regatta chưa mở đủ lâu để đặt thời gian an toàn cho task. Thử lại sau ít phút.",
+    "Nút bị tắt vì tuần regatta chưa chạy đủ lâu để đặt thời gian an toàn cho chừng đó task - mỗi ngày trong tuần chỉ nhận được tối đa {day} task theo quota của chính save. Quay lại sau trong tuần, hoặc giảm số xuống.",
 };
 
 const en: typeof vi = {
@@ -680,12 +683,15 @@ const en: typeof vi = {
   regattaDone: "Completed",
   regattaTemplates: "Templates:",
   regattaPool: "Task pool:",
+  regattaDay: "Daily limit:",
+  regattaDayTip:
+    "This save's own daily quota (the TaskQuota var) - exactly the number the game shows as Today's Tasks. The tool never places two completions closer than that share of a day, so a week is never piled onto one day.",
   regattaWindow: "Regatta window",
   regattaGuards:
-    "Every task is copied whole from a real record already in your save (type, target, need, score, ver ...) and only its timestamps move. Those always fall inside the regatta window and always in the past. It never creates a regatta, never rewrites a lifetime counter, and never touches your save's identity.",
+    "Every task is copied whole from a real record already in your save (type, target, need, score, ver ...) and only its timestamps move. Those always fall inside the regatta window, always in the past, always after the completions already there, and a day can only receive up to this save's own daily quota (the TaskQuota var - exactly the number the game shows as \"Today's Tasks\") - so a week's worth is never piled onto one day. It never creates a regatta, never rewrites a lifetime counter, and never touches your save's identity.",
   regattaCount: "Total tasks this week",
   regattaCountHint:
-    "How many tasks the week should hold once applied (not how many more to add). A real completed week holds 36, and this tool never goes past {max}.",
+    "How many tasks the week should hold once applied (not how many more to add). This tool never goes past {max} in a week, and one push is limited further by this save's own daily quota ({day} tasks/day) and how long the week has already run - so push a little each day rather than all at once.",
   regattaAdd: "Add to Save & push",
   regattaQueued: "✓ Queued",
   regattaWhyNoRegatta:
@@ -694,7 +700,7 @@ const en: typeof vi = {
     "Disabled: this save has no real completed regatta task to copy from. Play one regatta task in game first, then try again.",
   regattaWhyFull: "This week already has {count} tasks. Raise the number above {count} to add more - the tool never pushes a week past {max}.",
   regattaWhyWindow:
-    "Disabled: the regatta week has not been open long enough to place safe timestamps. Try again in a few minutes.",
+    "Disabled: the week has not run long enough to place that many tasks safely - a day can hold at most {day}, this save's own quota. Come back later in the week, or lower the number.",
 };
 
 function overlay(p: Partial<typeof en>): typeof en {

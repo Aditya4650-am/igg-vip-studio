@@ -560,6 +560,67 @@ foreign-`user` / `ver="0"` / offer-list-conflicting / tally-less /
 score-drifted one. `injectRegata` on the real `mGameInfo.current-9.xml` passes
 all of them at 10, 12 and 15.
 
+### The daily limit is the game's own quota, read out of the save (2026-10-01)
+
+The game states the number itself. The live client's regatta panel reads
+*"Your Tasks — Today's Tasks: 4/17"* with *"Quota resets in: 11h 10m"* under
+it: **17 completions per ~24h**, and it is a counter the server keeps. The same
+value is already inside the save as `<Var name="TaskQuota">`, and it is the
+block's **own** copy that decides here.
+
+- `anlLimit` on a record equals its block's `TaskQuota` on **5/5 real saves**
+  (9, 11, 13, 17, 17 — all odd, all different, so it is per player, not a
+  constant), and the save in that screenshot carries `TaskQuota=17`.
+- `regattaDailyQuota()` clamps what the block states into
+  `[1, REGATTA_MAX_PER_DAY]`. A save that states none falls back to 17 rather
+  than refusing everything, and a block claiming 30 is clamped rather than
+  believed — no save on file has ever asked for more than 17.
+- So a save at quota 9 is held to 9 while one at 17 is held to 17. One
+  hardcoded figure for every player is exactly the guess this repo's style
+  exists to avoid.
+
+**`REGATTA_MAX_PER_DAY` went 15 -> 17** for that reason: 15 was this repo's
+inference (between the busiest real day, 12, and the 18/day the 73-week
+implies), 17 is what the game prints. The weekly ceiling `REGATTA_MAX_TASKS =
+73` is untouched and still binds first for most weeks — 73 over a seven-day
+week averages ~10/day — so raising the daily rail does not widen what a push
+may carry on its own.
+
+**The spacing has to be `floor(86400 / q) + 1`, not `ceil`.** With spacing `s`
+any rolling 86400s window holds at most `floor(86400 / s) + 1` points, and only
+`s > 86400 / q` brings that down to `q` — `ceil(86400 / q)` sits exactly on the
+boundary and hands one window `q + 1`. `regattaMinGap(q)` is the only place that
+arithmetic lives; `REGATTA_MIN_GAP = regattaMinGap()` is just the no-quota case.
+
+Measured envelope, so the rule is not read as stricter than reality: a real
+block tops out at **21** completions in a rolling 24h against a quota of 11,
+because the game's reset sits off the UTC day and a rolling window can straddle
+two of them (up to 2x quota legitimately). Our spacing lands *under* `q` in
+every rolling day — `save9_after.xml` at quota 15 pushes to 20 records with a
+min gap of exactly 5761s and a busiest rolling day of 12 — i.e. the
+conservative half of that envelope, and 6.6x under the fabricator's
+105-in-one-day.
+
+What the quota decides is **how large one push may be**, not the spacing of a
+small one: `injectRegata` spreads the batch evenly over the usable range
+`[lo, hi]` and refuses with `window_closed` unless that range leaves
+`(need - 1) * regattaMinGap(quota)` inside it. Same fixture, same window, only
+`<Var name="TaskQuota">` differing: 46 is `ok` and 47 `window_closed` at quota
+17, 25 is `ok` and 26 `window_closed` at quota 9. `regattaReason` takes the
+same `state.quota`, so the badge and the push stay one decision.
+
+Shown in the UI as a **Daily limit** badge next to Templates/Pool, and named in
+`regattaCountHint` / `regattaWhyWindow` via `{day}` — a greyed-out button with
+no number leaves the user unable to see why 40 was fine on one save and refused
+on another with the same window.
+
+Guard rails: `xml-edit.test.mts` pins `REGATTA_MAX_PER_DAY === 17`, the
+quota-17/9/30 clamping, both refusals above (badge *and* push), the rolling-day
+bound at quota 9, and `regattaMinGap` keeping `floor(86400/gap) + 1 <= q` for
+every quota from 1 to 17; `ui-regressions.test.mts` pins that the tab reads
+`regattaInfo.quota`, hands it to `regattaReason`, and substitutes `{day}`
+everywhere it is used.
+
 ## Factory / upgrade levels
 
 The **Factories** tab (`tab === "factory"`) raises `<Upgrade version="4">`
