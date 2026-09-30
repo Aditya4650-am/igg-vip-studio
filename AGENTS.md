@@ -591,6 +591,84 @@ nothing. When FetchCity 403s, re-probe the floor before touching anything else.
 The host itself is reachable (a bogus request gets 401 `Wrong parameter` and the
 response comes via CloudFront), so 403 is rejected metadata, not a blocked host.
 
+### Why a large city failed while a small one downloaded (2026-09-30)
+
+Not a size limit — there is none anywhere in the path: neither the city id nor
+the level nor the payload length is consulted, and both a 1.9 MB and a 4.6 MB
+city come back in the same `0x54` container, which the decoder handled fine.
+It was **time**, twice:
+
+- The response body is decrypted by a hand-rolled port of Playrix's AES at
+  **~22 us per byte** — 3.5 s for a 150 KB city, 17 s for a 750 KB one — while
+  *every other stage of the download together costs under 10 ms* (measured by
+  splitting the script into stages, then by `cProfile`: half the time is
+  `single_block_encrypt`'s `byteClass` view machinery, half is `InvMix_2`).
+- `fetchCityXml` spawned the helper with `timeout: 90000`, so exactly those
+  cities were killed — and a killed child closes with `code === null`, which
+  fell through to the generic `FetchCity thất bại` rather than saying it timed
+  out. Reproduced live: small city OK in 27.8 s, big city killed at 90.2 s.
+
+Three changes, and **no limit on level, id or save size was added anywhere**:
+
+- `FETCH_CITY_TIMEOUT_MS = 300_000` replaces spawn's `timeout` option, driven by
+  our own `killTimer` so a deliberate kill sets `timedOut` and is reported as
+  `FetchCity timeout — …` instead of the generic failure.
+- `FETCH_TIMEOUT_S = 300` replaces `urlopen(timeout=25)` — that one is a
+  *per-read stall* guard, not a budget for the whole download.
+- **The AES moved to Node.** `fetch_city.py --pipe-decrypt` prints one
+  `{"stage":"decrypt", ts_id, key_b64, body_b64}` line after the HTTP transfer
+  and then blocks on `sys.stdin.buffer.read()`; `fetchCityXml` answers with the
+  plaintext gzip bytes and the helper carries on with `ts_uncompress` + the `0x54`
+  container decode exactly as before. Nothing is duplicated: Python keeps the
+  container logic, Node keeps only the AES it could already do natively.
+
+Live timeline on `igg-vip-studio-491` for `CsKEeUDtYh` / `3ZVJSA080P`:
+**27.8 s / killed at 90.2 s** → after the deadline raise alone **27.2 s /
+111.7 s** → with the handover **4.8 s / 4.0 s**. Measured per phase on a real
+run: handover 2.1 s small / 3.7 s large (that *is* the HTTP transfer), Node AES
+1 ms / 3 ms, helper tail 65 ms / 124 ms — the handover costs ~190 ms in total.
+Local: big city 19.4 s → ~3.8 s.
+
+Points that are easy to get wrong:
+
+- **The counter is the game's own GCM framing**: `J0 = iv || 0x00000001`, so the
+  first *data* block is `iv || 0x00000002` with the counter in bytes 12..15,
+  which is exactly what `aes-128-ctr` does with that 16-byte initial counter.
+  `n0 = 1` does **not** match. Verified byte-for-byte against the Python port on
+  two real responses (153,534 B and 761,217 B) and on round trips at 16 / 1,000 /
+  8,192 / 70,000 / 300,000 B — and end to end, the pipe and the standalone path
+  produce **SHA-identical XML** for both cities (1,907,158 B `0035ee23…`,
+  4,569,730 B `383bca96…`).
+- **`TS_AES_KEY` travels in the stage message** rather than being duplicated in
+  TypeScript, so the key has exactly one home and the two sides cannot drift
+  into decrypting with different keys.
+- The first stdout line is the stage message; anything else (an early error) is
+  put straight back for `close()` to interpret, so every existing error path is
+  unchanged. Both halves must ask for the handover — if only one does, the helper
+  blocks on stdin until the kill timer fires and *every* download looks like a
+  timeout.
+- **`ts_aes_encode` and the ts-id auth tag are untouched**: that tag is a
+  Playrix GHASH variant only the Python port can produce, so *requests* still go
+  through the original code. Only the response decrypt moved.
+
+Installing `cryptography` on the instance was tried first (a `setup_fast_aes.py`
+best-effort apt/pip chain wired into `render.yaml`) and **reverted**: it ran twice
+and demonstrably never took effect — the live small city stayed at 26–27 s
+either way — and with no build-log access there was no way to see why, so
+depending on a package manager we cannot observe is not a fix. `render.yaml` and
+`requirements.txt` are back to their original "standard library only" form.
+`_aes_ctr_decrypt` in `ts_township_core.py` remains as an optional accelerator
+for the *standalone* CLI path; it falls back to the port when the package is
+absent, so nothing requires it.
+
+Guard rails: `scripts/township/fetch_city.test.mjs` (the Python decryptor agrees
+with `cryptography` when present, a built request still decrypts to its own JSON,
+both deadlines >= 300, and **both halves still ask for the handover**) and
+`src/lib/server/township/fetch-city-pipe.test.ts`, which generates ciphertext
+live from `ts_aes_encode`, asserts `decryptResponseBody` reproduces the
+plaintext, that `n0 = 1` and `n0 = 3` provably do *not* (so the assertion is not
+vacuous), and that the Python port can read its own output.
+
 ## Device paths
 
 The save is NOT always at `/data/data/<pkg>/saves/`. Layouts differ by build
