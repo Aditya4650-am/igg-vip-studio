@@ -570,6 +570,16 @@ const REGATTA_TASK: Readonly<Record<string, readonly [need: number, score: numbe
 const REGATTA_SCORES = new Set<number>(Object.values(REGATTA_TASK).map((r) => r[1]));
 
 /**
+ * Whether the corpus has ever measured a completed record for this id — i.e.
+ * whether its `need` / `score` / `regataCash` are data rather than a guess.
+ * This is the test the push gate applies to a record's id (`regatta-id`), so
+ * it is exported for the tests to state the same rule from the outside.
+ */
+export function regattaTaskIsMeasured(id: string): boolean {
+  return !!REGATTA_TASK[id];
+}
+
+/**
  * `type` / `eventType` a completed record carries for this id — only families
  * a real record has been seen for. `match3_*` is always `event_order` +
  * `eventType="Match3"`; `trains_*` is `trains` with no eventType/target at
@@ -626,97 +636,154 @@ function regattaStatedNeeds(inner: string): Map<string, number> {
 }
 
 /**
- * Completed records built from the save's **own** pool, for a save that holds
- * no completed record to clone — a green week where `current` is 0 but the
- * pool is full, which is how a real save with 0 `<MyOldTask>` looked like a
- * permanently dead button.
+ * Completed records built for a save that holds no completed record to clone —
+ * a green week where `current` is 0 but the offer list is full, which is how a
+ * real save with 0 `<MyOldTask>` looked like a permanently dead button.
  *
- * Everything a record needs has a source in this document:
+ * The record is **taken out of** `<FreeTask>`, not added on top of it.
+ * Measured on every block in the corpus: a completed id never appears in that
+ * save's `<FreeTask>`, `<TakenTask>` or `<Member taskId>` list — you cannot
+ * still be offered a task you have already finished, and you cannot finish one
+ * a clanmate is holding. Leaving `bomb_1` on the offer list while also claiming
+ * to have completed it was the same self-contradiction the old injector wrote,
+ * one level down, and it is the kind of thing a server reads for free.
+ *
+ * Everything a record needs still has a source in this document:
  *
  * - `type` / `eventType` / `target` from the family rule above;
- * - `need` from the save's own `<TakenTask>` / `<Member>`, else the measured
- *   catalog (they agree wherever both exist — if they ever disagree the id is
- *   skipped rather than arbitrated);
- * - `score` / `regataCash` from the measured catalog only;
- * - `num` / `ver` from this save's own `<FreeTask>` entry for that id, which
- *   is proven to be what a real record carries (a live week's `bomb_999` has
- *   FreeTask and MyOldTask num/ver identical). An id a teammate holds has its
- *   pool entry cleared to `num="-1"` and carries no `num` of its own, so it
- *   borrows a slot number **from this save's own pool** (real records repeat
- *   slot numbers constantly — one week reads 1,3,1,3,3,6) and takes `ver`
- *   from the save's own `<TakenTask>`, which is `"0"`; `ver="0"` is carried by
- *   a real record too, so neither value is invented out of nothing;
- * - `anlLimit` from `<Var name="TaskQuota">`. Without it there is no source
- *   for a field every real record carries, so no records are built.
+ * - `need` / `score` / `regataCash` from the measured catalog (the save's own
+ *   `<TakenTask>` / `<Member>` rows agree with it wherever all three exist — a
+ *   disagreement skips the id rather than arbitrating);
+ * - `num` / `ver` from the `<FreeTask>` row being consumed, so the record keeps
+ *   the exact slot and generation this save itself offered. `ver` is never
+ *   `"0"`: no real record in the corpus carries it, and `"0"` is the value a
+ *   teammate's `<TakenTask>` row is cleared to — borrowing that read somebody
+ *   else's slot as ours, and it is what a server flags first;
+ * - `anlLimit` from `<Var name="TaskQuota">`. Without it there is no source for
+ *   a field every real record carries, so no records are built.
  *
- * An id the corpus has never seen completed (`REGATTA_TASK` misses) is
- * skipped: its `score` would have to be guessed. Repeats then carry the
- * requested batch to 10/12/15 exactly as the clone path always has.
+ * Consuming a row would leave the offer list one slot short, so the slot is
+ * refilled with the next measured id this save is **not** holding anywhere, at
+ * `ver + 1` — which is what the game does itself when a completed task is
+ * replaced. Four invariants hold at once because of it: `<FreeTask>` keeps its
+ * full complement of slots, no completed id remains on any list, every `ver` is
+ * a real generation that only ever moves forward, and `(id, num, ver)` never
+ * repeats (61 real records, zero repeated triples; the previous version
+ * repeated 4 of 10).
+ *
+ * An id the corpus has never seen completed (`REGATTA_TASK` misses) is never
+ * written: its `score` would have to be guessed. A save whose offer list holds
+ * only such ids therefore still refuses with `no_template`, which is what pins
+ * `the refusal still stands for ids no save has ever completed`.
  */
-function regattaSyntheticTasks(text: string): string[] {
+function regattaSyntheticTasks(text: string): { records: string[]; free: Map<number, string> } {
+  const none = (): { records: string[]; free: Map<number, string> } => ({ records: [], free: new Map() });
   const block = regattaBlock(text);
-  if (!block) return [];
+  if (!block) return none();
   const inner = block.inner;
   const quota = regattaTaskQuota(inner);
-  if (quota === null) return [];
+  if (quota === null) return none();
 
-  const free = new Map<string, { num: string; ver: string }>();
+  // Every id the block already holds somewhere. A refill may not reuse one:
+  // two offers for the same task at the same time is not a shape any save has.
+  const busy = new Set<string>();
+  for (const m of inner.matchAll(/<FreeTask\b[^>]*?\bid="([^"]*)"/gi)) busy.add(m[1]!);
+  for (const m of inner.matchAll(/<TakenTask\b[^>]*?\bid="([^"]*)"/gi)) busy.add(m[1]!);
+  for (const m of inner.matchAll(/<Member\b[^>]*?\btaskId="([^"]*)"/gi)) busy.add(m[1]!);
+
+  const rows = new Map<number, { id: string; ver: number; tag: string }>();
+  const order: number[] = [];
   for (const m of inner.matchAll(/<FreeTask\b[^>]*?\/?>/gi)) {
-    const a = tagAttrs(m[0]);
+    const tag = m[0];
+    const a = tagAttrs(tag);
+    const num = Number(attrValue(a, "num"));
+    const ver = Number(attrValue(a, "ver"));
     const id = attrValue(a, "id");
-    const num = attrValue(a, "num");
-    const ver = attrValue(a, "ver");
-    if (!id || num === null || ver === null || !/^\d+$/.test(num) || Number(num) < 1) continue;
-    free.set(id, { num, ver });
+    if (!id || !Number.isFinite(num) || num < 1 || !Number.isFinite(ver) || rows.has(num)) continue;
+    rows.set(num, { id, ver, tag });
+    order.push(num);
   }
-  const held = new Map<string, string>();
-  for (const m of inner.matchAll(/<TakenTask\b[^>]*?\/?>/gi)) {
-    const id = attrValue(tagAttrs(m[0]), "id");
-    if (id) held.set(id, attrValue(tagAttrs(m[0]), "ver") ?? "0");
-  }
+  if (!order.length) return none();
 
-  const slots = [...free.values()].map((v) => v.num);
+  const refills = Object.keys(REGATTA_TASK).filter((id) => !busy.has(id));
+  if (!refills.length) return none();
   const stated = regattaStatedNeeds(inner);
-  const out: string[] = [];
-  const seen = new Set<string>();
-
-  for (const id of [...free.keys(), ...held.keys()]) {
-    if (seen.has(id)) continue;
-    seen.add(id);
+  const measured = (id: string): boolean => {
     const shape = regattaTaskShape(id);
-    if (!shape) continue;
     const row = REGATTA_TASK[id];
-    if (!row) continue;
+    if (!shape || !row) return false;
     const own = stated.get(id);
-    if (own !== undefined && own !== row[0]) continue;
-    const need = own ?? row[0];
-    const entry = free.get(id);
-    const num = entry ? entry.num : slots.length ? slots[out.length % slots.length]! : null;
-    if (num === null) continue;
-    const ver = entry ? entry.ver : held.get(id) ?? "0";
+    return own === undefined || own === row[0];
+  };
 
-    out.push(
-      `<MyOldTask id="${id}" type="${shape.type}"` +
-        (shape.eventType ? ` eventType="${shape.eventType}" target="${regattaTarget(id)}"` : "") +
-        ` need="${need}" have="${need}" user="" endTime="0" num="${num}" ver="${ver}"` +
-        ` takenCounter="0" score="${row[1]}" regataCash="${row[2]}" takeTime="0"` +
+  // Only a slot currently offering a task with a measured score can be
+  // completed, so a save whose offer list is entirely unmeasured ids
+  // contributes nothing — the refusal the corpus pins by name.
+  const queue = order.filter((num) => measured(rows.get(num)!.id));
+  if (!queue.length) return none();
+
+  const records: string[] = [];
+  const free = new Map<number, string>();
+  let qi = 0;
+  let ri = 0;
+  for (let guard = 0; records.length < REGATTA_MAX_TASKS && guard < REGATTA_MAX_TASKS * 8; guard++) {
+    const num = queue[qi % queue.length]!;
+    qi++;
+    const row = rows.get(num)!;
+    if (!measured(row.id)) continue;
+    // The slot is refilled *before* it is consumed: with nothing to put back
+    // the block would silently lose a slot, and every save in the corpus keeps
+    // `<FreeTask>` at its full complement.
+    const refill = refills[ri++];
+    if (refill === undefined) break;
+    const shape = regattaTaskShape(row.id)!;
+    const rec = REGATTA_TASK[row.id]!;
+    const need = stated.get(row.id) ?? rec[0];
+    records.push(
+      `<MyOldTask id="${row.id}" type="${shape.type}"` +
+        (shape.eventType ? ` eventType="${shape.eventType}" target="${regattaTarget(row.id)}"` : "") +
+        ` need="${need}" have="${need}" user="" endTime="0" num="${num}" ver="${row.ver}"` +
+        ` takenCounter="0" score="${rec[1]}" regataCash="${rec[2]}" takeTime="0"` +
         ` completeTime="0" realEndTime="0" anlNumber="0" anlLimit="${quota}"/>`,
     );
+    const next = setTagAttr(setTagAttr(row.tag, "id", refill), "ver", String(row.ver + 1));
+    rows.set(num, { id: refill, ver: row.ver + 1, tag: next });
+    free.set(num, next);
   }
-  return out;
+  return { records, free };
+}
+
+/**
+ * Swap the offer rows the batch consumed back into `<FreeTask>`, keyed on the
+ * slot number so the other rows stay byte-identical. The replacement is built
+ * from the row it replaces — only `id` and `ver` change — so a row carrying
+ * `startTime` keeps it instead of losing an attribute the save had.
+ */
+function rewriteFreeTasks(inner: string, free: Map<number, string>): string {
+  return inner.replace(/<FreeTask\b[^>]*?\/?>/gi, (tag) => {
+    const num = Number(attrValue(tagAttrs(tag), "num"));
+    return free.get(num) ?? tag;
+  });
 }
 
 /**
  * The records this save can be topped up from: a completed record to clone if
- * it has one, otherwise its own pool. The distinction matters to the injector
- * alone — a fresh block has no `takenCounter` to continue from, so its batch
- * starts at 2 the way three untouched weeks all do.
+ * it has one, otherwise its own offer list. The distinction matters to the
+ * injector alone — a fresh block has no `takenCounter` to continue from, so its
+ * batch starts at 2 the way three untouched weeks all do — and to the tab,
+ * which reads `tags.length` as "how many records this save can still take"
+ * before it will let the button be pressed.
  */
-function regattaSources(text: string): { tags: string[]; synthetic: boolean } {
+function regattaSources(text: string): {
+  tags: string[];
+  /** slot number -> replacement `<FreeTask …/>` tag; empty on the clone path. */
+  free: Map<number, string>;
+  synthetic: boolean;
+} {
   const templates = regattaTemplates(text);
-  if (templates.length) return { tags: templates, synthetic: false };
-  const tags = regattaSyntheticTasks(text);
-  return { tags, synthetic: tags.length > 0 };
+  if (templates.length) return { tags: templates, free: new Map(), synthetic: false };
+  const { records, free } = regattaSyntheticTasks(text);
+  return { tags: records, free, synthetic: records.length > 0 };
 }
 
 function regattaPool(text: string): number {
@@ -750,8 +817,24 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
   // order — now shared with the tab, which re-runs it for the count the user
   // actually picked instead of trusting this default-12 answer.
   const reason = regattaReason({ window: win, templates: sources.tags.length, current }, nTasks, now);
+  // `regattaReason` only knows that *some* record can be built. A synthesized
+  // batch must also be long enough: its plan is capped by how many measured ids
+  // this save is not already holding, and `injectRegata` refuses the moment the
+  // plan runs short. Answering "ok" here would hand the user a live button that
+  // fails on press — the exact defect this shared decision exists to prevent.
+  const shortPlan =
+    reason === "ok" && sources.synthetic && sources.tags.length < regattaWant(nTasks) - current;
 
-  return { reason, active, current, templates: sources.tags.length, pool, avgScore, user, window: win };
+  return {
+    reason: shortPlan ? "no_template" : reason,
+    active,
+    current,
+    templates: sources.tags.length,
+    pool,
+    avgScore,
+    user,
+    window: win,
+  };
 }
 
 /**
@@ -766,11 +849,22 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
 function placeNewTasks(inner: string, body: string): string {
   let idx = -1;
   for (const m of inner.matchAll(/<MyOldTask\b[^>]*\/?>/gi)) idx = m.index + m[0].length;
-  if (idx < 0) {
-    const vars = /<Vars\b/i.exec(inner);
-    idx = vars ? vars.index : inner.length;
-  }
+  if (idx < 0) idx = regattaVarsAnchor(inner);
   return inner.slice(0, idx) + body + inner.slice(idx);
+}
+
+/**
+ * Where the block's `<Vars>` belongs — before `<Team>` when the save has no
+ * `<Vars>` yet, otherwise at the end. Real saves order the block
+ * `… / MyOldTask / Vars / Team`, so creating the tally anywhere after `<Team>`
+ * would produce a shape no save has, and `placeNewTasks` uses the same anchor
+ * so records and the tally that counts them land in that order together.
+ */
+function regattaVarsAnchor(inner: string): number {
+  const vars = /<Vars\b/i.exec(inner);
+  if (vars) return vars.index;
+  const team = /<Team\b/i.exec(inner);
+  return team ? team.index : inner.length;
 }
 
 /**
@@ -782,10 +876,17 @@ function placeNewTasks(inner: string, body: string): string {
  * Growing the block without moving them leaves a save that disagrees with
  * itself in three fields a server can read for free — and, if the game counts
  * a week from `taskCounter`, is why an injected batch registers as nothing.
- * Same rule as `RegataTasksCompleted` and `<Regata score>`: move what is
- * already there, never invent a counter the block never had.
+ * The batch's own tally is therefore always written: a block that holds records
+ * but declares none of them is the one shape no save in the corpus has, and it
+ * is exactly what the known bad output (105 records, every counter absent) left
+ * behind. Only `RegataTasksCompleted` is different — that one is a lifetime
+ * stat a save may genuinely never have tracked, so it is bumped only when
+ * already present.
+ *
+ * `countAfter` is the record count the block holds **after** the batch landed,
+ * which is what a freshly created counter has to read.
  */
-function bumpRegattaTaskVars(varsInner: string, added: number): string {
+function bumpRegattaTaskVars(varsInner: string, added: number, countAfter: number): string {
   let out = varsInner;
   const findTag = (name: string): string | null =>
     new RegExp(`<Var\\b[^>]*\\bname="${name}"[^>]*>`, "i").exec(out)?.[0] ?? null;
@@ -814,7 +915,15 @@ function bumpRegattaTaskVars(varsInner: string, added: number): string {
   if (attemptsTag && attempts !== null && nextConfirm !== null && attempts < nextConfirm) {
     set(attemptsTag, nextConfirm);
   }
-  return out;
+
+  // A block that has never counted its records gains the three every real one
+  // carries, set straight to the count they now describe — not to the batch
+  // size, which would disagree with the records the save already held.
+  const fresh: string[] = [];
+  if (!counterTag) fresh.push(`<Var name="taskCounter" v="${countAfter}" t="i"/>`);
+  if (!confirmTag) fresh.push(`<Var name="takeConfirm" v="${countAfter}" t="i"/>`);
+  if (!attemptsTag) fresh.push(`<Var name="takeAttempts" v="${countAfter}" t="i"/>`);
+  return out + fresh.join("");
 }
 
 /**
@@ -824,16 +933,16 @@ function bumpRegattaTaskVars(varsInner: string, added: number): string {
  * it (`regattaTemplates`), so nothing is invented: `type`, `eventType`,
  * `target`, `need`, `have`, `score`, `regataCash` and `anlLimit` are proven to
  * reconcile with that id. With none — a green week where the counter is still
- * 0 — the save's own pool is read instead (`regattaSyntheticTasks`), where
- * `need` comes from the save's own TakenTask/Member rows, `score` from the
- * measured catalog, `num`/`ver` from its own FreeTask entry and `anlLimit`
- * from its own TaskQuota. Only the counters and the timestamps move in either
- * case, and an id without a measured score is skipped rather than guessed.
+ * 0 — the block's own `<FreeTask>` offer rows are consumed instead
+ * (`regattaSyntheticTasks`), each one carrying its own `num`/`ver` out with it
+ * and being put back as the next measured id at `ver + 1`. In either case only
+ * the offer list, the counters and the timestamps move: `<Regata score>` and
+ * `scoreUpd` are never written, because they mirror the clan's own history.
  *
  * Refuses (rather than reporting a success the game ignores) when the save has
- * no live `<Regata>`, no real task to clone and no sourceable pool entry, no
- * usable window, or already has enough tasks. Throws, so `applySave` surfaces
- * the reason instead of ticking.
+ * no live `<Regata>`, no real task to clone and no sourceable offer row, a
+ * plan too short for the batch, no usable window, or already has enough tasks.
+ * Throws, so `applySave` surfaces the reason instead of ticking.
  */
 export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): string {
   const text0 = asText(xml).replace(/^\uFEFF/, "");
@@ -850,6 +959,11 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   const current = (block.inner.match(/<MyOldTask\b/gi) ?? []).length;
   const need = want - current;
   if (need <= 0) throw new Error(REGATTA_ERR.already_full.replace("%s", `${current}/${want}`));
+  // A synthesized plan is capped by how many measured ids this save is not
+  // already holding. Building `need` by reusing a completed id would put it
+  // back on the offer list next to its own record, so the batch stops where the
+  // plan stops and says so — never a short batch dressed as a full one.
+  if (src.synthetic && src.tags.length < need) throw new Error(REGATTA_ERR.no_template);
 
   // The save's own id, never a fresh one: a save that hands its records a
   // second identity is exactly what a server notices when it is looking.
@@ -887,10 +1001,13 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   const takenBase = maxTaken >= 0 ? maxTaken + 1 : src.synthetic ? 2 : -1;
 
   const tasks: string[] = [];
-  let addedScore = 0;
 
   for (let i = 0; i < need; i++) {
-    const tpl = src.tags[i % src.tags.length]!;
+    // The clone path cycles its templates (a real week repeats ids, with a
+    // different `num`/`ver` each time). The synthesized path must not: each
+    // record was cut from a specific offer row, so index `i` is that record and
+    // wrapping would emit it twice.
+    const tpl = src.synthetic ? src.tags[i]! : src.tags[i % src.tags.length]!;
     const a = tagAttrs(tpl);
     // Real records keep takeTime < completeTime < endTime strictly, and all
     // three inside the window. The floors below hold that ordering even when
@@ -911,13 +1028,19 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
     }
 
     tasks.push(tag);
-    addedScore += Number(attrValue(a, "score") ?? 0);
   }
 
   const body = tasks.join("");
   let text = text0;
   if (block.close) {
-    text = text.replace(/(<Regata\b[^>]*>)([\s\S]*?)(<\/Regata\s*>)/i, (_f, o, inner, c) => `${o}${placeNewTasks(inner, body)}${c}`);
+    text = text.replace(/(<Regata\b[^>]*>)([\s\S]*?)(<\/Regata\s*>)/i, (_f, o, inner, c) => {
+      let body2 = inner;
+      // A consumed offer row is put back before the records are counted, so
+      // `<FreeTask>` still holds its full complement while no completed id
+      // remains on it.
+      if (src.free.size) body2 = rewriteFreeTasks(body2, src.free);
+      return `${o}${placeNewTasks(body2, body)}${c}`;
+    });
   } else {
     const selfRe = /<Regata\b[^>]*\/>/i;
     const self = text.match(selfRe);
@@ -933,26 +1056,25 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
     text.match(/<Var\b[^>]*\bv="(\d+)"[^>]*\bname="RegataTasksCompleted"/i);
   if (life?.[1]) text = writeVar(text, "RegataTasksCompleted", String(Number(life[1]) + need));
 
-  // <Regata score> counts the tasks it holds and scoreUpd is the newest
-  // completeTime in the block (both verified on untouched reference saves).
-  // They are rewritten together so the block never contradicts itself.
+  // <Regata score> is deliberately **not** touched, and neither is `scoreUpd`.
+  // They are not local counters: on 3/3 untouched saves the block's `score` is
+  // exactly its own `<Var name="history">` last value, `scoreUpd` is that
+  // entry's timestamp, and both are repeated verbatim on the save's own
+  // `<Team><Clan id={clanId} score=… upd=…>`. That triple is the clan
+  // leaderboard number Playrix holds server-side. Adding the batch's scores to
+  // the block alone left history and Clan where they were — a save that
+  // disagrees with itself about its own clan score on the very upload that is
+  // checked first, and the strongest candidate there is for a ban.
   const after = text.match(/(<Regata\b[^>]*>)([\s\S]*?)(<\/Regata\s*>)/i);
-  const open = after ? after[1].match(/^(<Regata\b)([^>]*)(>)$/i) : null;
-  if (after && open) {
-    let attrs = open[2];
-    const times = [...after[2].matchAll(/\bcompleteTime="(\d+)"/g)].map((x) => Number(x[1]));
-    const newest = times.length ? Math.max(...times) : 0;
-    // Only touch an attribute the block already declares: adding one the save
-    // never carried is a shape change the loader has no reason to accept.
-    const rawScore = attrValue(attrs, "score");
-    if (rawScore !== null && /^\d+$/.test(rawScore) && Number.isFinite(addedScore)) {
-      attrs = putAttr(attrs, "score", String(Number(rawScore) + addedScore));
+  if (after) {
+    let inner = after[2];
+    const countAfter = (inner.match(/<MyOldTask\b/gi) ?? []).length;
+    if (!/<Vars\b/i.test(inner)) {
+      const at = regattaVarsAnchor(inner);
+      inner = inner.slice(0, at) + "<Vars></Vars>" + inner.slice(at);
     }
-    const rawUpd = attrValue(attrs, "scoreUpd");
-    if (rawUpd !== null && /^\d+$/.test(rawUpd) && newest > Number(rawUpd)) {
-      attrs = putAttr(attrs, "scoreUpd", String(newest));
-    }
-    text = text.replace(after[0], () => `${open[1]}${attrs}${open[3]}${bumpRegattaTaskVars(after[2], need)}${after[3]}`);
+    const withVars = bumpRegattaTaskVars(inner, need, countAfter);
+    text = text.replace(after[0], () => `${after[1]}${withVars}${after[3]}`);
   }
 
   return text;
@@ -1014,8 +1136,24 @@ const REGATTA_RECORD_FIELDS = [
  * - `regatta-anl-limit:<v>` / `regatta-anl-number:<v>` — `anlLimit` is
  *   `<Var name="TaskQuota">` (5/5 measured) and `anlNumber` cycles inside it.
  * - `regatta-id:<id>` — an id that is in neither this document's pool nor a
- *   record it already held is an id the game never offered: the old
- *   `match3_1..match3_105` output.
+ *   measured task is an id the game never issued: the old
+ *   `match3_1..match3_105` output. Measured membership (`REGATTA_TASK`) rather
+ *   than pool membership alone, because a completed task leaves the pool by
+ *   design and the synthesized batch takes it out of `<FreeTask>` on purpose.
+ * - `regatta-pool-conflict:<id>` — a completed id still listed in `<FreeTask>`,
+ *   `<TakenTask>` or `<Member taskId>`. Zero occurrences across every block in
+ *   the corpus: you cannot be offered a task you have finished, nor finish one
+ *   a clanmate holds.
+ * - `regatta-ver-zero:<id>` — `ver` must be a positive integer. `"0"` appears
+ *   on no real record in the corpus; it is the value a teammate's `<TakenTask>`
+ *   row is cleared to, so writing it borrows somebody else's slot.
+ * - `regatta-counter-missing` — a block holding records with no
+ *   `taskCounter` / `takeConfirm` at all. Every save that has records declares
+ *   them (7/7), and the known bad output has records and none of them.
+ * - `regatta-score-mirror` — `<Regata score>` must equal its own
+ *   `<Var name="history">` last value and its `<Team><Clan id=clanId>` score,
+ *   with `scoreUpd` matching both timestamps. True on 3/3 untouched saves; it
+ *   is the clan leaderboard number Playrix holds server-side.
  * - `regatta-taken-counter:<prev>-<next>` — the counter only ever grows inside
  *   a block (2,3,…,37 in an archived week, restarting at 2).
  * - `regatta-counter-mismatch` — a block that declares `taskCounter` /
@@ -1034,6 +1172,10 @@ export function regattaProblems(xml: string, own: string): string[] {
   const pool = new Set<string>();
   for (const m of inner.matchAll(/<FreeTask\b[^>]*\bid="([^"]*)"/gi)) pool.add(m[1]!);
   for (const m of inner.matchAll(/<TakenTask\b[^>]*\bid="([^"]*)"/gi)) pool.add(m[1]!);
+  // Every list an id can be sitting on right now — the offer list, a
+  // clanmate's take, a slot on the roster. A completed id must be on none.
+  const listed = new Set(pool);
+  for (const m of inner.matchAll(/<Member\b[^>]*?\btaskId="([^"]*)"/gi)) listed.add(m[1]!);
 
   let prevTaken: number | null = null;
   for (const m of inner.matchAll(/<MyOldTask\b[^>]*?\/?>/gi)) {
@@ -1088,7 +1230,19 @@ export function regattaProblems(xml: string, own: string): string[] {
       }
     }
 
-    if (!pool.has(id)) keys.add(`regatta-id:${id}`);
+    // A completed id leaves the pool by design — the synthesized batch takes it
+    // out of `<FreeTask>` on purpose — so pool membership is not the test; a
+    // measured task id is. What still matters is that the game has issued it
+    // at all, which is what stops the old `match3_1..match3_105` output.
+    if (!pool.has(id) && !REGATTA_TASK[id]) keys.add(`regatta-id:${id}`);
+    // …and that it is not sitting on any list right now: not still offered to
+    // us, not held by a clanmate, not a roster slot. Zero occurrences in every
+    // block of the corpus.
+    if (listed.has(id)) keys.add(`regatta-pool-conflict:${id}`);
+    // `"0"` appears on no real record; it is the value a teammate's
+    // `<TakenTask>` row is cleared to, so it borrows somebody else's slot.
+    const verRaw = attrValue(a, "ver");
+    if (verRaw !== null && !/^[1-9]\d*$/.test(verRaw)) keys.add(`regatta-ver-zero:${id}`);
 
     const takenRaw = attrValue(a, "takenCounter");
     if (takenRaw && /^\d+$/.test(takenRaw)) {
@@ -1112,10 +1266,59 @@ export function regattaProblems(xml: string, own: string): string[] {
   const count = (inner.match(/<MyOldTask\b/gi) ?? []).length;
   for (const name of ["taskCounter", "takeConfirm"]) {
     const v = declared(name);
-    if (v !== null && v !== count) keys.add("regatta-counter-mismatch");
+    if (v === null) {
+      if (count > 0) keys.add("regatta-counter-missing");
+    } else if (v !== count) {
+      keys.add("regatta-counter-mismatch");
+    }
   }
 
+  for (const k of regattaScoreMirror(block, inner)) keys.add(k);
+
   return [...keys];
+}
+
+/**
+ * `<Regata score>` mirrors the clan, it does not accumulate locally.
+ *
+ * On 3/3 untouched saves the block's `score` is exactly its own
+ * `<Var name="history">` last value, `scoreUpd` is that entry's timestamp, and
+ * both are repeated verbatim on the save's own
+ * `<Team><Clan id={clanId} score=… upd=…>`. That triple is the clan leaderboard
+ * number Playrix holds server-side, so every copy of it has to agree — adding
+ * the batch's scores to the block alone left the other two behind. Returns
+ * invariant keys, and an empty list when the save states no mirror to check
+ * against (a block with no `history` and no `clanId` is not evidence of
+ * anything).
+ */
+function regattaScoreMirror(block: { attrs: string; inner: string }, inner: string): string[] {
+  const score = attrValue(block.attrs, "score");
+  const upd = attrValue(block.attrs, "scoreUpd");
+  if (!score || !/^\d+$/.test(score)) return [];
+  const out: string[] = [];
+  const stampOk = !!upd && /^\d+$/.test(upd);
+
+  const hist = /<Var\b[^>]*\bname="history"[^>]*\bv="([^"]*)"/i.exec(inner)?.[1];
+  if (hist) {
+    const last = hist.split(",").filter(Boolean).pop() ?? "";
+    const sep = last.indexOf(":");
+    if (sep > 0) {
+      if (last.slice(sep + 1) !== score) out.push("regatta-score-mirror:history");
+      if (stampOk && last.slice(0, sep) !== upd) out.push("regatta-score-mirror:history-upd");
+    }
+  }
+
+  const clanId = attrValue(block.attrs, "clanId");
+  if (clanId) {
+    for (const m of inner.matchAll(/<Clan\b[^>]*?\/?>/gi)) {
+      const a = tagAttrs(m[0]);
+      if (attrValue(a, "id") !== clanId) continue;
+      if (attrValue(a, "score") !== score) out.push("regatta-score-mirror:clan");
+      if (stampOk && attrValue(a, "upd") !== upd) out.push("regatta-score-mirror:clan-upd");
+      break;
+    }
+  }
+  return out;
 }
 
 export function assertRegattaSafe(loaded: string, pushed: string) {

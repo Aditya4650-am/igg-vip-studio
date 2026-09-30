@@ -234,10 +234,18 @@ positions); the sidebar *Tools* button was removed, leaving Season there.
   keep them inside the window, strictly in the past, strictly
   `takeTime < completeTime < realEndTime`, and all distinct.
 - `RegataTasksCompleted` is **bumped only when already present**; a save that
-  never tracked it gains no fabricated counter. `<Regata score>` gets the
-  *delta* (a team aggregate) and `scoreUpd` is raised to the newest
-  `completeTime` — both only if the block already declares them, and always
-  rewritten together.
+  never tracked it gains no fabricated counter.
+- **`<Regata score>` and `scoreUpd` are never written, at all.** They are not
+  local counters: on 3/3 untouched saves the block's `score` is exactly its own
+  `<Var name="history">` last value, `scoreUpd` is that entry's timestamp, and
+  both are repeated verbatim on the save's own
+  `<Team><Clan id={clanId} score=… upd=…>`. That triple is the clan leaderboard
+  number Playrix holds **server-side**. The earlier rule — "raise the block by
+  the batch's delta, rewrite both together" — still left `history` and `Clan`
+  behind, so the save disagreed with itself about its own clan score on the very
+  upload that gets checked first, and it did so on both the clone and the
+  synthesized path. Now only the records, the offer list and the block's own
+  tally move.
 - `takenCounter` continues **above the target block's own highest**, never the
   template's own number. Measured on a real save (`CsKEeUDtYh`): an archived
   week reads `2,3,…,37` in document order inside `<PrevRegata>`, the week's
@@ -254,10 +262,15 @@ positions); the sidebar *Tools* button was removed, leaving Season there.
   disagreed with itself in three fields a server reads for free — and, if the
   game counts a week from `taskCounter`, is the reason an injected batch can
   register as nothing at all. `bumpRegattaTaskVars()` raises the two counters
-  by the batch and lifts `takeAttempts` if the batch would push it under. Same
-  rule as `RegataTasksCompleted`: **only what the block already declares** —
-  a `<Regata>` with no `<Vars>` gains no fabricated counter (guard rail:
-  `regata never invents a counter the block never had`).
+  by the batch, lifts `takeAttempts` if the batch would push it under — and
+  **creates the three when the block declares none**, because a block holding
+  records with no tally at all is the one shape no save in the corpus has and
+  it is exactly what the known bad output (105 records, every counter absent)
+  left behind. They are set to the record count, never to the batch size.
+  `RegataTasksCompleted` is the deliberate opposite: a lifetime stat a save may
+  genuinely never have tracked, so it is still bumped only when already
+  present. Guard rail: `regata gives a block that never counted its records the
+  tally every save has`.
 - **New records are inserted after the last `<MyOldTask>` / immediately before
   `<Vars>`** (`placeNewTasks`), not appended at the end of the block. Every
   untouched save orders the block `FreeTask* / TakenTask* / MyOldTask* / Vars /
@@ -310,7 +323,8 @@ is what tells the user so.
 Guard rails: `xml-edit.test.mts` proves field-for-field cloning, in-window
 ordered past timestamps, the monotonic lifetime counter, self-closing-block
 expansion (not a rival second block), every refusal, **the block counters
-staying in step with the records**, **no invented counter**, **placement
+staying in step with the records** (and being *created* when a block never had
+them, while `RegataTasksCompleted` still gains none), **placement
 before `<Vars>`**, and **`inspectRegatta(xml, n).reason === "ok"` ⟺
 `injectRegata(xml, n)` does not throw** over a matrix of saves × counts;
 `studio-pipeline.test.ts` adds `a refused regatta does not leave a half-applied
@@ -361,6 +375,40 @@ obvious claim — "everyone has regatta, copy them" — turned out to be false:
   still refuses `already_full` when it already holds ≥ the requested total, so
   the tool never pushes a week *down* or rewrites it.
 
+### Regatta: why a real 10-task batch was banned (2026-09-30)
+
+A user pushed a 10-task batch with `injectRegata` and was banned on the next
+sync. Six invariants a real save satisfies were broken, each of them a value a
+server reads for free — so fix all six rather than guessing which one fired.
+Measured against the corpus (`friend_city.xml`: 37 game-written records;
+`current-2`/`current-7`: 1 each; `current-9`: 0):
+
+1. **`<Regata score>` mirrored nothing.** On 3/3 untouched saves
+   `score == history.last == own <Clan score>` and
+   `scoreUpd == history.last ts == own <Clan upd>`; we raised only the block's
+   copy (33890 -> 35210) and left the other two behind. Strongest candidate,
+   and it fired on *both* paths. **Now never written.**
+2. **`ver="0"`** — 0 occurrences across ~61 real records; 6/6 of our distinct
+   ids emitted it, because `<TakenTask>` rows carry `num="-1" ver="0"` (a
+   teammate's cleared slot) and we borrowed them.
+3. **A completed id still on a list** — 0 overlaps in every block measured;
+   ours had 2/6 in `<FreeTask>` and 4/6 in `<TakenTask>`.
+4. **`(id, num, ver)` repeated** — 0 dupes in 61 real records and 0/105 in the
+   old injector output; ours 4/10, from cycling 6 ids across 10 records.
+5. `endTime == realEndTime` (39/39) and distinct per-record `realEndTime`
+   (36/36 in `<PrevRegata>`) — **already correct, do not re-investigate**;
+   so are attribute order, `user` identity and the timestamp windows.
+6. **Records with no `taskCounter`/`takeConfirm`/`takeAttempts`** — the only
+   defect the output shares with the known-bad file (`current.xml`, 105
+   records, all three absent).
+
+Rejected hypotheses, for the record: `realEndTime` must equal the block end
+(2/39), uniform timestamps, uniform scores as the *only* tell.
+
+Guard rail: `the regatta push gate refuses a fabricated batch but not a
+measured one` now also refuses `ver="0"`, an id back on the offer list, records
+with no tally, and a block score that outran its own history.
+
 ### Regatta: a green week (no record to clone) — and the teammate-id trap
 
 `mGameInfo.current-9.xml` (817,087 B, plain XML) reached the tab with a live
@@ -397,16 +445,36 @@ byte-for-byte unchanged):
   suffix, 23/23 measured; `trains_*` -> `trains`, no eventType/target); `need`
   from the save's own `<TakenTask id=… need=…>` / `<Member … taskId=… need=…>`
   else the catalog — **they agree wherever all three exist, and a disagreement
-  skips the id rather than arbitrating**; `num`/`ver` from the save's own
-  `<FreeTask>` entry (proven identical to a real record's), with a
-  TakenTask-sourced id borrowing a slot number from this save's own pool and
-  `ver="0"` — both values the save already carries on that task; `anlLimit` from
+  skips the id rather than arbitrating**; `num`/`ver` from the `<FreeTask>` row
+  the record is **cut from** (see the offer-list rule below); `anlLimit` from
   `<Var name="TaskQuota">` (equal to `anlLimit` on 5/5 saves). **No TaskQuota ->
   no records**, because that would leave out a field every real record has.
-- **Repeats are how 6 ids become 15**, exactly as the clone path has always
-  done (`templates[i % templates.length]`), and real weeks do it too
-  (`with_chips_3` x3, `rocket_1` x3). A repeated id must repeat its own
-  need/score/cash verbatim.
+- **The record is taken out of `<FreeTask>`, never added on top of it.**
+  Measured on every block in the corpus: a completed id appears in that save's
+  `<FreeTask>`, `<TakenTask>` **or** `<Member taskId>` list **zero** times. You
+  cannot still be offered a task you have finished, and you cannot finish one a
+  clanmate is holding — the earlier version left `bomb_1` sitting on the offer
+  list while also claiming to have completed it. So each consumed row carries
+  its own `num`/`ver` out with it and the slot is immediately **refilled** with
+  the next measured id this save is *not* holding anywhere, at `ver + 1` (what
+  the game does itself when a completed task is replaced). Four invariants then
+  hold at once: `<FreeTask>` keeps its full complement of slots (12 on a real
+  save, 8 on the fixture), no completed id is left on any list, every `ver` is
+  a real generation that only moves forward — **`ver="0"` appears on no real
+  record in the corpus, it is the value a teammate's `<TakenTask>` row is
+  cleared to** — and `(id, num, ver)` never repeats (61 real records, zero
+  repeated triples).
+- **Distinct ids, not repeats.** With `n` slots and a refill pool of
+  `catalog \ pool` (18 ids on the real green week) the batch builds 15 records
+  with 15 different ids, so the clone path's `templates[i % templates.length]`
+  cycling is not used on this path at all (`src.tags[i]`, no wrap). A plan that
+  would run short **refuses** with `no_template` rather than reusing a completed
+  id — `inspectRegatta` applies the same test, so "pressable" still equals
+  "will succeed".
+- A save whose offer list holds no id with a measured score still refuses with
+  `no_template`: nothing is sourceable, and guessing is what produces the
+  uniform-135 fingerprint. Guard rail:
+  `the refusal still stands for ids no save has ever completed`.
 - A fresh block has no `takenCounter` to continue: the synthetic batch seeds it
   at **2**, which is where three untouched weeks all start theirs (the clone
   path's `maxTaken + 1` behaviour is untouched, and a save whose records simply
@@ -436,21 +504,35 @@ optional only when `expired`), `regatta-time-order:<id>`,
 `regatta-time-outside:<id>`, `regatta-time-future:<id>`, `regatta-user:<id>`,
 `regatta-score:<v>` (135 is the old fingerprint and appears on no real record),
 `regatta-cash:<id>:<v>`, `regatta-target:<id>:<v>`, `regatta-need:<id>`,
-`regatta-anl-limit:<v>` / `regatta-anl-number:<v>`, `regatta-id:<id>` (an id in
-neither the pool nor a record the save already held — the old
-`match3_1..match3_105` output), `regatta-taken-counter:<prev>-<next>`,
+`regatta-anl-limit:<v>` / `regatta-anl-number:<v>`, `regatta-id:<id>` (**measured
+membership**, `REGATTA_TASK`, not pool membership: a completed task leaves the
+pool by design — `!pool.has(id) && !regattaTaskIsMeasured(id)` — which still
+catches the old `match3_1..match3_105` output), `regatta-pool-conflict:<id>`
+(a completed id still listed in `<FreeTask>` / `<TakenTask>` /
+`<Member taskId>` — 0 occurrences in the corpus), `regatta-ver-zero:<id>` (`ver`
+must be a positive integer; `"0"` is a teammate's cleared slot),
+`regatta-counter-missing` (records with no `taskCounter`/`takeConfirm` at all),
+`regatta-score-mirror:history|history-upd|clan|clan-upd` (`<Regata score>` must
+equal the block's own `<history>` last value and its `<Team><Clan id=clanId>`
+score, `scoreUpd` both timestamps — the clan leaderboard number Playrix holds
+server-side, 3/3 untouched saves), `regatta-taken-counter:<prev>-<next>`,
 `regatta-counter-mismatch`. `own` is resolved from **`loaded`**, never from
 `pushed`, or a batch that wrote someone else's id would define "ours" for itself.
 
 Guard rails: `xml-edit.test.mts` pins the green week (badge live for 10/12/15,
-15 records, 6 distinct pool ids, 4 distinct scores, `anlLimit` = TaskQuota,
-`anlNumber` inside it, strict time order in-window and in the past,
+15 records from **15 distinct measured ids**, none of them left on any list,
+`ver >= 1` and always an older generation than the offer now in that slot, no
+`(id, num, ver)` triple twice, 8 offer rows still present, `anlLimit` =
+TaskQuota, `anlNumber` inside it, strict time order in-window and in the past,
 `endTime == realEndTime`, derived targets, round(score/8) cash, `takenCounter`
-2..16, placement before `<Vars>`, `RegataTasksCompleted` +15, `<Regata score>`
-= base + the batch's own sum, nothing outside `<Regata>` changed but that one
-counter), the refusal for ids no save has ever completed, the teammate-id rule,
-and the gate accepting a measured batch while refusing a uniform-135 one.
-`injectRegata` on the real `mGameInfo.current-9.xml` passes all of them.
+2..16, placement before `<Vars>`, `RegataTasksCompleted` +15,
+**`<Regata score>`/`scoreUpd`/`history`/`<Clan>` all still reading the same
+number they read before**, `taskCounter == takeConfirm == takeAttempts == 15`),
+the refusal for ids no save has ever completed, the teammate-id rule, and the
+gate accepting a measured batch while refusing a uniform-135 / future-dated /
+foreign-`user` / `ver="0"` / offer-list-conflicting / tally-less /
+score-drifted one. `injectRegata` on the real `mGameInfo.current-9.xml` passes
+all of them at 10, 12 and 15.
 
 ## Factory / upgrade levels
 

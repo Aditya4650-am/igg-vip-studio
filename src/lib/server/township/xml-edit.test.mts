@@ -8,6 +8,7 @@ import {
   injectSeason,
   inspectRegatta,
   REGATTA_MAX_TASKS,
+  regattaTaskIsMeasured,
 } from "./inject.server.ts";
 import { maxBuildingsStash, maxFragments, parseOwnMeta, unlockEmoji } from "./desban.server.ts";
 import { applyStatChanges, parseStats, writeVar } from "./vars.server.ts";
@@ -277,12 +278,26 @@ test("regata keeps the block's own counters in step with the records it grew", (
   assert.equal(varNum(inner, "UnrelatedCounter"), 7, "a Var that is not a task count stays put");
 });
 
-test("regata never invents a counter the block never had", () => {
-  // `liveRegattaSave`'s <Regata> carries no <Vars> at all: a block that never
-  // tracked a count gains none, exactly like RegataTasksCompleted.
-  const out = injectRegata(liveRegattaSave(), 3);
-  assert.ok(!/<Var\b[^>]*\bname="taskCounter"/.test(out), "no fabricated taskCounter");
-  assert.ok(!/<Var\b[^>]*\bname="takeConfirm"/.test(out), "no fabricated takeConfirm");
+test("regata gives a block that never counted its records the tally every save has", () => {
+  // `liveRegattaSave`'s <Regata> carries no <Vars> at all. Every save in the
+  // corpus that holds records declares `taskCounter == takeConfirm ==
+  // count(<MyOldTask>)` and `takeAttempts >= takeConfirm` — 7/7 measured — so
+  // a block left with records and no tally is the one shape no real save has.
+  // It is also precisely what the known bad output (105 records, every counter
+  // absent) looked like, which makes it a refusal that costs nothing to avoid.
+  //
+  // `RegataTasksCompleted` is the opposite case and is untouched here: it is a
+  // lifetime stat a save may genuinely never have tracked, so it is bumped only
+  // when already present.
+  const out = injectRegata(liveRegattaSave(), 4);
+  wellFormed(out);
+  const inner = regattaInner(out);
+  assert.equal((inner.match(/<MyOldTask\b/g) ?? []).length, 4, "the save's own record plus three added");
+  assert.equal(varNum(inner, "taskCounter"), 4, "the tally counts every record in the block");
+  assert.equal(varNum(inner, "takeConfirm"), 4, "takeConfirm tracks the same records");
+  assert.equal(varNum(inner, "takeAttempts"), 4, "takeAttempts never trails");
+  assert.ok(inner.indexOf("<MyOldTask") < inner.indexOf("<Vars"), "the tally sits after the records it counts");
+  assert.ok(!/<Var\b[^>]*\bname="RegataTasksCompleted"/.test(out), "a lifetime stat it never had stays uncreated");
 });
 
 test("regata puts new records where real saves keep them", () => {
@@ -338,7 +353,7 @@ function greenWeekSave(): string {
     `<Var name="cityId" v="JqpjJQ9lom" t="s"/>` +
     `<Var name="RegataTasksCompleted" v="2304" t="i"/>` +
     `<Regata id="533" startTime="${start}" endTime="${end}" season="108" week="4" league="4" ` +
-    `score="33890" scoreUpd="${start + 900}">` +
+    `clanId="RzSwy5Lxfb" score="33890" scoreUpd="${start + 900}">` +
     `<FreeTask id="match3_create_bonus_lightning_7" type="" num="1" ver="59"/>` +
     `<FreeTask id="match3_win_game_in_row_3" type="" num="2" ver="25"/>` +
     `<FreeTask id="match3_create_bonus_bomb_1" type="" num="3" ver="69"/>` +
@@ -359,7 +374,11 @@ function greenWeekSave(): string {
     `<Var name="endTime" v="${end}" t="i"/>` +
     `<Var name="TaskQuota" v="15" t="i"/>` +
     `<Var name="MySeenScore" v="33750" t="i"/>` +
+    `<Var name="history" v="${start - 7200}:30000,${start + 900}:33890"/>` +
     `</Vars>` +
+    `<Team id="f9GxwVNVaF" place="0">` +
+    `<Clan id="RzSwy5Lxfb" name="Aristocrats" score="33890" upd="${start + 900}"/>` +
+    `</Team>` +
     `</Regata>` +
     `</Global>`
   );
@@ -375,7 +394,10 @@ test("a save with a full pool and nothing completed can take 10, 12 and 15 tasks
   // user picks, not just the default batch.
   for (const n of [10, 12, 15]) {
     assert.equal(inspectRegatta(xml, n).reason, "ok", `${n} tasks must be offerable`);
-    assert.equal(inspectRegatta(xml, n).templates, 6, "the badge counts usable sources");
+    assert.ok(
+      inspectRegatta(xml, n).templates >= n,
+      `the badge must count at least as many records as the batch asks for (${n})`,
+    );
   }
 
   const out = injectRegata(xml, 15);
@@ -383,9 +405,12 @@ test("a save with a full pool and nothing completed can take 10, 12 and 15 tasks
   const recs = [...out.matchAll(/<MyOldTask\b[^>]*?\/?>/g)].map((m) => m[0]);
   assert.equal(recs.length, 15, "the requested batch lands");
 
-  const pool = new Set([
+  // Every list an id can be sitting on right now. A completed id is on none of
+  // them: the batch takes its offer row out and puts the slot back.
+  const listed = new Set([
     ...[...out.matchAll(/<FreeTask\b[^>]*\bid="([^"]*)"/g)].map((m) => m[1]!),
     ...[...out.matchAll(/<TakenTask\b[^>]*\bid="([^"]*)"/g)].map((m) => m[1]!),
+    ...[...out.matchAll(/<Member\b[^>]*?\btaskId="([^"]*)"/g)].map((m) => m[1]!),
   ]);
   const start = Number(/<Regata\b[^>]*\bstartTime="(\d+)"/.exec(out)![1]);
   const end = Number(/<Regata\b[^>]*\bendTime="(\d+)"/.exec(out)![1]);
@@ -395,9 +420,13 @@ test("a save with a full pool and nothing completed can take 10, 12 and 15 tasks
   for (const r of recs) {
     const a = attrsOf(r);
     const id = a.get("id")!;
-    // A record for an id this save was never offered is the old injector's
+    // A record for an id the game has never issued is the old injector's
     // `match3_1..match3_105` output — the single most readable fake there is.
-    assert.ok(pool.has(id), `${id} must come from this save's own pool`);
+    // The test is "measured", not "still in the pool": a completed task leaves
+    // the pool by design, and requiring it to stay there was what made the
+    // batch contradict its own offer list.
+    assert.ok(regattaTaskIsMeasured(id), `${id} must be an id the corpus has seen completed`);
+    assert.ok(!listed.has(id), `${id} must not still be sitting on any list`);
     assert.equal(a.get("user"), "JqpjJQ9lom", "records are attributed to the save's own id");
 
     const type = a.get("type");
@@ -440,32 +469,40 @@ test("a save with a full pool and nothing completed can take 10, 12 and 15 tasks
     byId.get(id)!.add(variant);
   }
 
-  // 6 distinct ids the save can actually source, cycled to 15 — and any id the
-  // save offers in `<FreeTask>` keeps that entry's num/ver exactly, which is
-  // what a real record does.
-  assert.equal(byId.size, 6, "only ids with a measured need and score are used");
+  // 15 records, 15 distinct measured ids: the batch consumes an offer row and
+  // puts the slot back with the next id it has not used, so nothing is cycled
+  // into a second copy of itself.
+  assert.equal(byId.size, 15, "every record is a different measured task");
   for (const variants of byId.values()) assert.equal(variants.size, 1, "a repeated id repeats identically");
 
-  const freeEntries = new Map(
-    [...out.matchAll(/<FreeTask\b[^>]*?\/?>/g)].map((m) => {
-      const a = attrsOf(m[0]);
-      return [a.get("id")!, { num: a.get("num"), ver: a.get("ver") }];
-    }),
+  // The offer list keeps its full complement of slots — a real save holds 12,
+  // this fixture 8 — and no completed id is still on it.
+  const freeRows = [...out.matchAll(/<FreeTask\b[^>]*?\/?>/g)].map((m) => attrsOf(m[0]));
+  assert.equal(freeRows.length, 8, "every consumed offer row is put back");
+  const freeIds = new Set(freeRows.map((f) => f.get("id")));
+  assert.deepEqual(
+    recs.map((r) => attrsOf(r).get("id")).filter((id) => freeIds.has(id!)),
+    [],
+    "no completed task is still being offered to us",
   );
-  const freeIds = new Set<string>();
+
+  // A record's `num` is one of this save's own slots and its `ver` is an
+  // older generation of that slot than the row sitting there now — which is
+  // what lets the record and the offer coexist without contradicting each
+  // other. `ver="0"` is refused outright: no real record carries it, it is the
+  // value a teammate's `<TakenTask>` row is cleared to.
+  const freeVer = new Map(freeRows.map((f) => [Number(f.get("num")), Number(f.get("ver"))]));
+  const triples = new Set<string>();
   for (const r of recs) {
     const a = attrsOf(r);
-    const free = freeEntries.get(a.get("id")!);
-    if (!free) continue;
-    freeIds.add(a.get("id")!);
-    assert.equal(a.get("num"), free.num, "num comes from the save's own pool entry");
-    assert.equal(a.get("ver"), free.ver, "ver comes from the save's own pool entry");
+    const num = Number(a.get("num"));
+    const ver = Number(a.get("ver"));
+    assert.ok(freeVer.has(num), `slot ${num} is not one of this save's own offer slots`);
+    assert.ok(ver >= 1, `ver must be a real generation, never 0: ${r}`);
+    assert.ok(ver < freeVer.get(num)!, `a completed task must predate the offer now in slot ${num}`);
+    triples.add(`${a.get("id")}/${num}/${ver}`);
   }
-  assert.deepEqual(
-    [...freeIds].sort(),
-    ["match3_create_bonus_bomb_1", "match3_create_bonus_plane_1"],
-    "both pool-sourced ids keep their own num/ver on every repeat",
-  );
+  assert.equal(triples.size, 15, "no (id, num, ver) triple is ever issued twice");
 
   // A wall of one score is the old injector's fingerprint; this batch is not.
   assert.ok(new Set(recs.map((r) => attrsOf(r).get("score"))).size > 1, "scores must not be uniform");
@@ -475,16 +512,41 @@ test("a save with a full pool and nothing completed can take 10, 12 and 15 tasks
   const counters = recs.map((r) => Number(attrsOf(r).get("takenCounter")));
   assert.deepEqual(counters, counters.map((_, i) => 2 + i), "the fresh counter runs 2,3,… in order");
 
-  // Placement, and the three counters that have to move with the records.
+  // Placement, and the lifetime counter: bumped only because it was already
+  // there. Writing the batch size over it would move a lifetime stat backwards.
   assert.ok(out.indexOf("<MyOldTask") < out.indexOf("<Vars"), "new records sit before <Vars>");
   assert.match(out, /name="RegataTasksCompleted" v="2319"/, "the lifetime counter gains the batch");
-  const added = recs.reduce((a, r) => a + Number(attrsOf(r).get("score")), 0);
-  const blockScore = Number(/<Regata\b[^>]*\bscore="(\d+)"/.exec(out)![1]);
-  assert.equal(blockScore, 33890 + added, "<Regata score> carries the delta of the batch it holds");
-  const newest = Math.max(...recs.map((r) => Number(attrsOf(r).get("completeTime"))));
-  assert.equal(Number(/<Regata\b[^>]*\bscoreUpd="(\d+)"/.exec(out)![1]), newest, "scoreUpd is the newest completion");
-  // The block declares no taskCounter/takeConfirm, and it gains none.
-  assert.ok(!/<Var\b[^>]*\bname="taskCounter"/.test(out), "no fabricated taskCounter");
+
+  // <Regata score> and scoreUpd mirror the clan, they do not accumulate
+  // locally, so this tool never writes them. All three copies must still read
+  // what they read before the batch: the block's own attributes, the tail of
+  // its <Var name="history">, and its own <Team><Clan> entry. That triple is
+  // the clan leaderboard number Playrix holds server-side, and raising only
+  // the block's copy is the cheapest way to disagree with it.
+  assert.equal(Number(/<Regata\b[^>]*\bscore="(\d+)"/.exec(out)![1]), 33890, "<Regata score> is not a local counter");
+  assert.equal(
+    Number(/<Regata\b[^>]*\bscoreUpd="(\d+)"/.exec(out)![1]),
+    start + 900,
+    "scoreUpd stays the newest real history entry",
+  );
+  assert.equal(
+    /<Var\b[^>]*\bname="history"[^>]*\bv="([^"]*)"/.exec(out)![1].split(",").pop(),
+    `${start + 900}:33890`,
+    "history is untouched and still agrees with the block",
+  );
+  assert.match(
+    /<Clan id="RzSwy5Lxfb"[^>]*>/.exec(out)![0],
+    new RegExp(`score="33890"[^>]*upd="${start + 900}"`),
+    "the save's own Clan entry still agrees",
+  );
+
+  // The block's own tally is created and counts every record sitting in it —
+  // a block with records and no tally at all is the shape no save in the
+  // corpus has, and it is what the known bad output left behind.
+  const inner = regattaInner(out);
+  assert.equal(varNum(inner, "taskCounter"), 15, "taskCounter counts every record in the block");
+  assert.equal(varNum(inner, "takeConfirm"), 15, "takeConfirm tracks the same records");
+  assert.equal(varNum(inner, "takeAttempts"), 15, "takeAttempts never trails takeConfirm");
 });
 
 test("a save that has completed nothing must never be handed a teammate's id", () => {
@@ -535,6 +597,27 @@ test("the regatta push gate refuses a fabricated batch but not a measured one", 
 
   const foreign = out.replace(/user="JqpjJQ9lom"/g, 'user="SOMEBODYELSE"');
   assert.throws(() => assertRegattaSafe(xml, foreign), /regatta/i, "a second identity must be refused");
+
+  // Four values a server reads for free, each of which this batch must never
+  // be able to leave with: a `ver="0"` (the value a teammate's row is cleared
+  // to), a completed id back on the offer list, records with no tally at all,
+  // and a block score that no longer mirrors the clan's history.
+  const first = /<MyOldTask\b[^>]*?>/.exec(out)![0];
+  const zeroVer = out.replace(first, first.replace(/ver="\d+"/, 'ver="0"'));
+  assert.throws(() => assertRegattaSafe(xml, zeroVer), /regatta/i, "ver=0 must be refused");
+
+  const firstId = /<MyOldTask\b[^>]*?\bid="([^"]*)"/.exec(out)![1];
+  const conflict = out.replace("</Regata>", `<FreeTask id="${firstId}" type="" num="11" ver="60"/></Regata>`);
+  assert.throws(() => assertRegattaSafe(xml, conflict), /regatta/i, "a completed id still offered must be refused");
+
+  const noTally = out
+    .replace(/<Var\b[^>]*\bname="taskCounter"[^>]*>/, "")
+    .replace(/<Var\b[^>]*\bname="takeConfirm"[^>]*>/, "");
+  assert.throws(() => assertRegattaSafe(xml, noTally), /regatta/i, "records with no tally must be refused");
+
+  const bumped = out.replace('score="33890" scoreUpd=', 'score="35210" scoreUpd=');
+  assert.notEqual(bumped, out, "the fixture really does carry the block score");
+  assert.throws(() => assertRegattaSafe(xml, bumped), /regatta/i, "a score that outran its own history must be refused");
 
   // The rule is a diff: a save that *arrived* carrying the old injector's
   // uniform 135 keeps that key on both sides and stays pushable. Refusing it
