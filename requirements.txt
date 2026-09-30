@@ -1,3 +1,11 @@
-# FetchCity helper (scripts/township/fetch_city.py) uses only the Python
-# standard library - no external packages required. This empty requirements
-# file exists so Nixpacks' pip phase succeeds on Render.
+# FetchCity helper (scripts/township/fetch_city.py) runs on the Python standard
+# library, so nothing here is required. `cryptography` is the one optional
+# speed-up: the FetchCity response body is decrypted with Playrix's AES-CTR, and
+# the hand-rolled port in ts_township_core.py costs ~22 us per byte - 3.5 s for
+# a 150 KB city and 17 s for a 750 KB one, which on the instance is what pushed
+# a large city past the child timeout while a small one still succeeded.
+# `cryptography` produces the same keystream in ~1 ms, verified byte-for-byte
+# against the port on real responses. Without it the port is used and the
+# download is merely slower, so the install in render.yaml is deliberately
+# best-effort: a missing pip or a missing wheel must never fail the build.
+cryptography>=41

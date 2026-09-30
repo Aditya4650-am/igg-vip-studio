@@ -6,7 +6,15 @@ services:
     region: singapore
     branch: main
     autoDeploy: true
-    buildCommand: NPM_CONFIG_PRODUCTION=false npm install && npm run build
+    # The pip step is best-effort on purpose (note the `|| true`): it only tries
+    # to make `cryptography` available to scripts/township/fetch_city.py, which
+    # decrypts the FetchCity response with Playrix's AES-CTR. The hand-rolled
+    # port in ts_township_core.py is correct but costs ~22 us per byte, so a
+    # large city took long enough to hit the child timeout while a small one did
+    # not. If pip or the wheel is unavailable, the port is used and the download
+    # is simply slower - it must never break the build. `--only-binary` keeps it
+    # from trying to compile (cryptography needs Rust), failing fast instead.
+    buildCommand: NPM_CONFIG_PRODUCTION=false npm install && (python3 -m pip install --only-binary=:all: --break-system-packages -r requirements.txt || python3 -m pip install --only-binary=:all: --user -r requirements.txt || true) && npm run build
     startCommand: node .output/server/index.mjs
     envVars:
       - key: NITRO_PRESET

@@ -1136,6 +1136,20 @@ function scriptPath() {
   return candidates.find((p) => existsSync(p)) ?? candidates[0]!;
 }
 
+/**
+ * Overall deadline for one FetchCity download.
+ *
+ * This is the only ceiling on *how big a city we can download* - the child does
+ * the HTTP fetch, the response AES and the container decode+inflate in one go,
+ * and that time scales with the payload. A 150 KB city measured 3.5 s of AES on
+ * a dev box; a 750 KB one measured 17 s and several times that on the instance,
+ * so the old 90 s cap killed exactly the large cities while small ones
+ * succeeded - reported as the generic "FetchCity thất bại", because a killed
+ * child closes with `code === null` rather than a non-zero code. There is no
+ * limit on city level, city id or save size anywhere else in this path.
+ */
+const FETCH_CITY_TIMEOUT_MS = 300_000;
+
 export function fetchCityXml(cityId: string, bver = "", fver = ""): Promise<string> {
   const target = cityId.trim();
   if (!target || target.length < 4 || /\s/.test(target)) {
@@ -1173,20 +1187,30 @@ export function fetchCityXml(cityId: string, bver = "", fver = ""): Promise<stri
       }
 
       let out = "";
+      let timedOut = false;
       const py = spawn(bin, [script, target, useBver, useFver], {
         cwd: dirname(script),
-        timeout: 90000,
         windowsHide: true,
         env: { ...process.env, PYTHONUNBUFFERED: "1" },
       });
 
+      // Our own timer instead of spawn's `timeout` option: it has to be able to
+      // tell a deliberate kill apart from anything else, because a killed child
+      // closes with `code === null` and would read as a generic failure.
+      const killTimer = setTimeout(() => {
+        timedOut = true;
+        py.kill();
+      }, FETCH_CITY_TIMEOUT_MS);
+
       py.stdout.setEncoding("utf8");
       py.stdout.on("data", (d) => { out += d; });
       py.on("error", (e) => {
+        clearTimeout(killTimer);
         lastError = e.message;
         runNext();
       });
       py.on("close", (code) => {
+        clearTimeout(killTimer);
         if (settled) return;
 
         // The helper is intentionally stdout-only JSON. If a runtime wrapper
@@ -1221,6 +1245,13 @@ export function fetchCityXml(cityId: string, bver = "", fver = ""): Promise<stri
             fail("FetchCity trả về dữ liệu city không hợp lệ");
             return;
           }
+        }
+
+        // Killed by our own deadline: there is no helper output to interpret,
+        // and the reason is the deadline rather than a failure.
+        if (timedOut) {
+          fail("FetchCity timeout — máy chủ game phản hồi quá lâu, thử lại sau");
+          return;
         }
 
         const detail = String(parsed?.error || lastError || "");

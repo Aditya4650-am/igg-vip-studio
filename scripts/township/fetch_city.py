@@ -23,6 +23,12 @@ except Exception as e:
     sys.exit(1)
 
 
+# Per-read socket stall guard. Deliberately large: a high-level city returns a
+# much bigger payload than a small one, and neither the level, the city id nor
+# the save size is a reason to refuse it.
+FETCH_TIMEOUT_S = 300
+
+
 def fetch_city(target_city_id: str, bver: str, fver: str, city_ver: int = 0) -> bytes:
     json_body = {
         "cityId": "",
@@ -45,7 +51,12 @@ def fetch_city(target_city_id: str, bver: str, fver: str, city_ver: int = 0) -> 
     }
     url = API_URL.format(endpoint="FetchCity") + "?cityId="
     req = urllib.request.Request(url, data=body_bytes, headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=25) as resp:
+    # This is a *stall* guard, not a budget for the whole download: `urlopen`'s
+    # timeout applies per socket read. A large city streams several hundred KB
+    # and used to be cut off at 25 s on a slow link, so make it generous - the
+    # caller owns the overall deadline (see FETCH_CITY_TIMEOUT_MS in
+    # desban.server.ts).
+    with urllib.request.urlopen(req, timeout=FETCH_TIMEOUT_S) as resp:
         raw = resp.read()
         resp_ts_id = resp.headers.get("ts-id") or resp.headers.get("Ts-Id") or ""
         if not resp_ts_id:
