@@ -28,6 +28,16 @@ const INICIAL_VARS = [
   "Achievement_IncreasedPopulation", "Achievement_PlowedFields", "Achievement_SpentCoins",
   "Achievement_BuiltHouses", "Achievement_CompleteMatch3Levels", "WareHouseCashUpgrade",
   "WHUdup", "ExpandLevel",
+  // Level and experience are one number written twice: `levelup` is derived
+  // from the cumulative `experience`, so a copy that moves the level but not
+  // the XP hands Playrix a city claiming 1089 levels with a level-30 player's
+  // experience behind it. That pair appears in no game-written save — only in
+  // files this tool produced — and it is arithmetically impossible, which is
+  // the cheapest kind of anomaly for a server to read. All four fetched or
+  // decoded saves agree: 30 -> 172109, 30 -> 170849, 999 -> 2436381253,
+  // 1089 -> 3370037992, rising together. `experience` has no stat alias, so
+  // one write is the whole story.
+  "experience",
 ];
 
 const COMPLETO_BLOCKS = [

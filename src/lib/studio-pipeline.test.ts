@@ -1532,6 +1532,77 @@ test("a restore and the town clone queued together push as one batch", () => {
   balanced(Buffer.from(out.fileB64!, "base64").toString("utf8"));
 });
 
+const LEVEL_OWN = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  "<Global>",
+  '<Var name="cityId" v="ME12345678" t="s"/>',
+  '<Var name="levelup" v="30" t="i"/>',
+  '<Var name="experience" v="172109" t="i"/>',
+  "</Global>",
+  '<Zoo><TownGround ver="2"><row j="0" v="ZOOMAP"/></TownGround><Buildings><Object id="zoo1"/></Buildings></Zoo>',
+  '<TownGround ver="2"><row j="0" v="MYTOWN"/></TownGround><Buildings><Object id="mine1"/></Buildings>',
+].join("");
+
+const LEVEL_DONOR = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  "<Global>",
+  '<Var name="cityId" v="FRD123456" t="s"/>',
+  '<Var name="deviceId" v="dead-beef" t="s"/>',
+  '<Var name="levelup" v="1089" t="i"/>',
+  '<Var name="experience" v="3370037992" t="i"/>',
+  "</Global>",
+  '<Zoo><TownGround ver="2"><row j="0" v="ZOOMAP"/></TownGround><Buildings><Object id="zoo1"/></Buildings></Zoo>',
+  '<TownGround ver="2"><row j="0" v="FRIENDTOWN"/></TownGround><Buildings><Object id="friend1"/></Buildings>',
+].join("");
+
+test("copy: the donor's level arrives with the experience that earned it", () => {
+  // A restore used to move `levelup` and leave `experience` behind — the one
+  // field out of the tool's twenty stat fields that stayed ours — so the
+  // pushed save claimed 1089 levels with a level-30 player's XP. That pair
+  // appears in no game-written save and is arithmetically impossible, which
+  // is the cheapest kind of anomaly for a server to read.
+  const snap = townSession(LEVEL_OWN);
+  studio.attachFriendXml(token, snap.sessionId, LEVEL_DONOR);
+  const out = studio.applySave({ token, sessionId: snap.sessionId, unbanMode: "novo" });
+  const xml = out.xml!;
+
+  assert.match(xml, /name="levelup" v="1089"/, "the level follows the donor");
+  assert.match(xml, /name="experience" v="3370037992"/, "and the XP that earned it follows the level");
+  balanced(xml);
+  assert.deepEqual(
+    progressionProblems(LEVEL_OWN, xml, LEVEL_DONOR),
+    [],
+    "level and XP came from one account, so there is nothing to refuse",
+  );
+
+  // The exact shape the copy used to produce: the level from one account, the
+  // XP still ours. Refused with a donor in hand and refused without one —
+  // having fetched a friend excuses nothing, because the pair is wrong on its
+  // face.
+  const mixed = LEVEL_OWN.replace('name="levelup" v="30"', 'name="levelup" v="1089"');
+  assert.deepEqual(progressionProblems(LEVEL_OWN, mixed), ["level-up-without-experience:30->1089"]);
+  assert.throws(() => assertProgressionsSafe(LEVEL_OWN, mixed), /level-up-without-experience/);
+  assert.throws(
+    () => assertProgressionsSafe(LEVEL_OWN, mixed, LEVEL_DONOR),
+    /level-up-without-experience/,
+    "a donor cannot excuse a pair that no real save holds",
+  );
+
+  // The other directions are all fine: XP alone can rise, and a save that
+  // never tracked `experience` gains no rule of its own.
+  assert.deepEqual(
+    progressionProblems(LEVEL_OWN, LEVEL_OWN.replace('v="172109"', 'v="999999"')),
+    [],
+    "experience may be raised on its own",
+  );
+  const noXp = LEVEL_OWN.replace(/<Var name="experience"[^>]*\/>/, "");
+  assert.deepEqual(
+    progressionProblems(noXp, noXp.replace('name="levelup" v="30"', 'name="levelup" v="1089"')),
+    [],
+    "a save with no experience var to compare against is not held to the rule",
+  );
+});
+
 const DECOR_OWN = [
   '<?xml version="1.0" encoding="utf-8"?>',
   "<Global>",

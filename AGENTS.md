@@ -1128,6 +1128,55 @@ A corpus sweep pushed each new rule through the real gates the way `encodeSave`
 would — profile unlock, decor stash in both the plain and the DataStore form,
 factory levels raised to the save's own ceiling, and skins, across all six
 saves: **0 refusals**.
+
+### Why a full-city copy could hand Playrix an impossible pair (2026-10-01)
+
+The report above was clarified: the user never touched the Profile tab — the
+badges, frames, styles and avatars came **with the friend's city**, so the
+suspect was the copy itself, and the section's opening "not root-caused" still
+stands. What the copy *did* leave behind was provable.
+
+`applyDesban` carries 20 of the tool's own stat fields across (`INICIAL_VARS`
+plus every `Achievement_*`). Measured on a real `novo` run — fc_ok (level 30)
+copying fc_big (level 1089): **19 followed the donor and exactly one stayed
+ours, `experience`.** The pushed save therefore claimed `levelup=1089` with
+`experience=172109`, the level-30 city's own XP.
+
+That pair is arithmetically impossible, because `levelup` is derived from the
+cumulative `experience`. The corpus bears it out:
+
+- game-written, all rising together: **30 → 172,109** (FetchCity), **30 →
+  170,849** (FetchCity), **999 → 2,436,381,253** (decoded), **1089 →
+  3,370,037,992** (FetchCity);
+- the only two files under the level-30 floor of ~171k are both ones this tool
+  produced: `mGameInfo.current.xml` (**66 → 3,138**) and `save9_after.xml`
+  (**250 → 984**).
+
+So the copy was manufacturing, on every run, the one shape no real save on file
+has — and a server can read it with a single comparison and no history at all.
+
+Two changes:
+
+- **`experience` joined `INICIAL_VARS`**, so level and XP arrive from the same
+  account. It carries no stat alias (`STAT_ALIASES` has none), so one write is
+  the whole story. Re-verified on the real pair: level 30 → 1089 and experience
+  172109 → 3370037992 together.
+- **`level-up-without-experience:<a>-><b>`** in `progressionProblems`: refuse a
+  push where `levelup` rises while `experience` does not. Compared only when
+  the save carries *both*, so a save that never tracked `experience` gains no
+  rule of its own — and it deliberately takes **no donor excuse**: having
+  fetched a friend cannot make an impossible pair possible. The old shape is
+  refused with a donor in hand and without one; a real `novo` copy now passes;
+  all six saves pass against themselves.
+
+**What this does not fix.** Playrix keeps its own record of the account, so a
+large level or money jump stays visible against that history whatever the file
+says internally. This removes a *provable* contradiction, not the general risk
+of adopting another player's progression — read a green gate as "nothing
+measurably wrong", never as "cannot be banned".
+
+Guard rail: `copy: the donor's level arrives with the experience that earned it`.
+
 ## Avatar icons
 
 `public/avatars/ava1.webp` … `ava349.webp` are the real profile pictures from

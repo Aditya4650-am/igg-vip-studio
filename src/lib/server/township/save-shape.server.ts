@@ -295,6 +295,15 @@ function readCounter(xml: string, name: string): number | null {
 }
 
 /**
+ * City level — `levelup`, falling back to `level` for saves that name it that
+ * way (`sanitizeStatChanges` reads both, so this does too). The pattern is
+ * anchored on a closing quote, so `level` never matches `levelup`.
+ */
+function readLevel(xml: string): number | null {
+  return readCounter(xml, "levelup") ?? readCounter(xml, "level");
+}
+
+/**
  * Every `<Upgrade>` family row keyed `tag:id` -> `level`.
  *
  * The rows are matched exactly the way `upgrade-slx` matches them: a tag
@@ -321,7 +330,7 @@ function upgradeLevels(xml: string): Map<string, number> {
  *
  * Unlike the key-diff above, this one is naturally a pair: a regression only
  * exists *between* two documents, so it is compared directly against the save
- * as it was loaded. Two rules, both measured:
+ * as it was loaded. Three rules, all measured:
  *
  * - `regata-tasks-completed-lower` — `RegataTasksCompleted` is a lifetime
  *   counter (136 .. 44911 across the corpus) and the Stats tab exposes it as
@@ -332,6 +341,14 @@ function upgradeLevels(xml: string): Map<string, number> {
  * - `upgrade-level-lower:<tag>:<id>` — factory, train and island levels only
  *   rise in game. `<Upgrade>` is in no restore block list, so nothing but the
  *   Factories tab can move it and there is no legitimate drop to excuse.
+ * - `level-up-without-experience:<a>-><b>` — `levelup` is derived from the
+ *   cumulative `experience`, so the pair only makes sense when both come from
+ *   the same account. Every game-written save in the corpus agrees (30 ->
+ *   172109, 30 -> 170849, 999 -> 2436381253, 1089 -> 3370037992, rising
+ *   together), and the only two files under the level-30 floor of ~171k are
+ *   both ones this tool produced (66 -> 3138, 250 -> 984). A level that climbs
+ *   while the XP behind it does not is arithmetically impossible — the copy
+ *   made exactly that shape until `experience` joined `INICIAL_VARS`.
  */
 export function progressionProblems(
   loaded: string,
@@ -358,6 +375,23 @@ export function progressionProblems(
     }
   }
 
+  // The level/XP pair: only compared when the save actually carries both, so a
+  // save that never tracked `experience` gains no rule of its own.
+  const lvlBefore = readLevel(loaded);
+  const lvlAfter = readLevel(pushed);
+  const xpBefore = readCounter(loaded, "experience");
+  const xpAfter = readCounter(pushed, "experience");
+  if (
+    lvlBefore !== null &&
+    lvlAfter !== null &&
+    xpBefore !== null &&
+    xpAfter !== null &&
+    lvlAfter > lvlBefore &&
+    xpAfter <= xpBefore
+  ) {
+    out.push(`level-up-without-experience:${lvlBefore}->${lvlAfter}`);
+  }
+
   return out;
 }
 
@@ -370,8 +404,8 @@ export function assertProgressionsSafe(loaded: string, pushed: string, donor?: s
   const bad = progressionProblems(loaded, pushed, donor);
   if (!bad.length) return;
   throw new Error(
-    `Không đẩy file lên máy: một chỉ số chỉ được tăng chứ không được giảm sau khi sửa ` +
-      `(${bad.join(", ")}). ` +
-      "Thành phố thật chưa từng cho kết quả này, nên server Playrix có thể coi save của bạn là gian lận.",
+    `Không đẩy file lên máy: save sau khi sửa mang một chỉ số mà thành phố thật không bao giờ ` +
+      `cho (${bad.join(", ")}). ` +
+      "Server Playrix đọc được các trường này ngay khi bạn đồng bộ, nên có thể coi save của bạn là gian lận.",
   );
 }
