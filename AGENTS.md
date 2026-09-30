@@ -202,6 +202,32 @@ reporting a success the game would silently ignore.
 `pendingDecorClone` was never set to `true` anywhere. Both now sit in one
 panel and queue into *Save & push*.
 
+### Two restore buttons looked broken, and only one of them was lying (2026-09-30)
+
+Reported on the first real use: *"only the basic stats works when i pushed in
+game. The full city, all, decorations+town, complete city not works errors
+shows."* Two separate causes, both reproduced byte-for-byte against the live
+FetchCity response for `3ZVJSA080P` (donor, 4.5 MB) and the repo's
+`mGameInfo.current.xml` (own, 860 KB):
+
+- **`Thành phố không có gì thay đổi — file của bạn đã giống hệt file được
+  chọn.`** The UI queues *full city + decorations + town* as **one** payload
+  (`unbanMode` + `decorClone` + `townClone` — that is exactly the "Save & push
+  3" badge), and `applySave` runs them in that order. `applyDesban` with
+  `completo`/`novo` **already** clones `TownGround` and `Buildings` from the
+  same donor, so the dedicated `cloneTownLayout` found the town byte-identical
+  and threw its deliberate no-change refusal — aborting the *whole* batch.
+  `applySave` now swallows **only** that error and only when the same batch ran
+  a `completo`/`novo` restore: `cloneTownLayout` tags the refusal with
+  `code = TOWN_UNCHANGED` and `isTownUnchanged(e)` reads it back. "This file
+  is not a city", a foreign identity, and a standalone town clone against your
+  own file still refuse exactly as before — that guard rail is untouched.
+
+- **`chat-emoji-unknown:desc`, `profile-unknown:…`** — the shape gate; see
+  *Why "Restore full city" refused a real city* in the save-shape section.
+
+Guard rail: `a restore and the town clone queued together push as one batch`.
+
 ## Regatta: clone-based tasks (own tab)
 
 The first `injectRegata` (commit `3c3b03a`) **fabricated** every field: ids
@@ -804,13 +830,18 @@ run against 4 real saves (clean, event-closed, and the tool-edited
 ends in a push (stats, inject, unban, skins, upgrades, cards, profile, season,
 regatta, decor) without each feature having to remember.
 
-**The rule is a diff, not an absolute.** `saveShapeProblems(xml)` returns
-invariant **keys**; `assertSaveShapeSafe(loaded, pushed)` refuses only keys
-that are *new*. A save that arrived with an oddity keeps that key on both
-sides and stays pushable - the same lesson `assertNoForeignIdentity` learned
-when it refused a clean copy over one friend-reference - and it is what stops
-the gate from ever holding a working feature hostage: an untouched block
-reproduces exactly the keys it had on arrival.
+**The rule is a diff, not an absolute.** `saveShapeProblems(xml, donor?)`
+returns invariant **keys**; `assertSaveShapeSafe(loaded, pushed, donor?)`
+refuses only keys that are *new*. A save that arrived with an oddity keeps that
+key on both sides and stays pushable - the same lesson
+`assertNoForeignIdentity` learned when it refused a clean copy over one
+friend-reference - and it is what stops the gate from ever holding a working
+feature hostage: an untouched block reproduces exactly the keys it had on
+arrival.
+
+`donor` is the friend city this session fetched (`s.friendXml`, handed over by
+`encodeSave`). It answers the two *"does a real city hold this id"* rules and
+nothing else - see *Why "Restore full city" refused a real city* below.
 
 Rules, each measured against real saves (17 files, 6 genuinely fetched):
 
@@ -823,10 +854,12 @@ Rules, each measured against real saves (17 files, 6 genuinely fetched):
 - `chat-emoji-shape` - `UnlockedChatEmoji` is `,st1,,st2,`: one comma wrapped
   at each end, `,,` between ids, so n ids split into exactly `1 + 2n` entries.
   Measured on all 10 saves carrying the var.
-- `chat-emoji-unknown:<id>` - a sticker id outside `CHAT_EMOJI_IDS`.
+- `chat-emoji-unknown:<id>` - a sticker id outside `CHAT_EMOJI_IDS`, unless the
+  donor's own `UnlockedChatEmoji` carries it.
 - `profile-shape:<field>` / `profile-unknown:<field>:<id>` - the
   `UnlockedBadges|Frames|Styles|ExpRanks|Themes` `<DataElem>` lists are plain
-  `a,b,c`, no wrapping and no empty slots, ids from `RAW_PROFILE`.
+  `a,b,c`, no wrapping and no empty slots; ids come from `RAW_PROFILE` or from
+  the donor.
 - `upgrade-slx:<tag>:<id>` - `slx` is `level XOR 32162029`, measured on
   **241/241 rows across 12 saves**. Bumping `level` alone writes a save that
   disagrees with itself in a field the game reads for free.
@@ -846,6 +879,45 @@ Two obvious-looking rules were **dropped because real saves contradict them** - 
   strings with no `t` at all (14,254 `name,v` vars measured), so `writeVar`'s
   insert path now emits no `t` for non-integers; integers stay `t="i"` and
   avatars `t="b"`.
+
+### Why "Restore full city" refused a real city (2026-09-30)
+
+`assertSaveShapeSafe` gained an optional third argument, `donor`, because the
+two *"does a real city hold this id?"* rules were being answered by a catalog —
+and a catalog can only ever answer for the ids it has measured.
+
+Measured on the live FetchCity response for `3ZVJSA080P` (a real Lv1089 city
+Playrix is serving): `saveShapeProblems(donor)` returns **9 keys** —
+`chat-emoji-unknown:desc` (its `UnlockedChatEmoji` holds 107 ids, 106 valid and
+exactly one `desc`), three `UnlockedBadges` ids `RAW_PROFILE` has never seen,
+three `UnlockedFrames` and two `UnlockedStyles` (`glow`, `Gold`). Copying that
+profile block is precisely what *Restore full city* does, so every full restore
+against a high-level friend failed with "server Playrix có thể coi save của
+bạn là gian lận" — for values sitting happily in a live city. The older note
+that `desc` *"appears in no save we hold"* was true only because we did not
+hold this city yet: **it is falsified — do not re-remove `desc` from a donor
+copy on that basis.**
+
+`donorIds(donor)` pulls the donor's `UnlockedChatEmoji` and its six `Unlocked*`
+profile lists out once, and `shapeProblems(xml, known)` skips an id the donor
+itself carries — for `chat-emoji-unknown` / `profile-unknown` **only**.
+Everything else stays unconditional, deliberately:
+
+- **an id in neither file is still refused**: the donor makes *its* ids real,
+  not every id in the world, so a Profile-tab invention never slips through;
+- **`chat-emoji-shape` / `profile-shape` still fire** — a delimiter oddity is a
+  writing bug rather than a missing id, and this is the rule that caught
+  `unlockEmoji`'s extra trailing comma;
+- **avatars, `upgrade-slx`, `var-int`, `xml-unbalanced`** — untouched.
+
+`saveShapeProblems(xml)` with no donor behaves exactly as before, so every
+existing 2-arg guard rail still holds. Growing `RAW_PROFILE` /
+`CHAT_EMOJI_IDS` from one file was rejected: it would legalize those ids in
+the Profile tab *everywhere*, and the next friend would break the same way
+again.
+
+Guard rail: `a restore may carry the donor's own ids, but never a shape the
+game does not write`.
 
 ### Loading deletes avatars no city can hold
 

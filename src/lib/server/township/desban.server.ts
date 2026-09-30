@@ -991,9 +991,22 @@ export function cloneTownLayout(ownXml: string, friendXml: string) {
   }
   // Never report a success that changed nothing: the game would silently keep
   // the old town and the user would see a green tick for an untouched save.
-  if (own === before) throw new Error("Thành phố không có gì thay đổi — file của bạn đã giống hệt file được chọn.");
+  if (own === before) {
+    const err = new Error(
+      "Thành phố không có gì thay đổi — file của bạn đã giống hệt file được chọn.",
+    ) as Error & { code?: string };
+    err.code = TOWN_UNCHANGED;
+    throw err;
+  }
   assertNoForeignIdentity(before, own, fr);
   return { xml: own, report: { blocks, vars: [] } };
+}
+
+/** Machine-readable form of the "the town was already the donor's" refusal. */
+export const TOWN_UNCHANGED = "town-unchanged";
+
+export function isTownUnchanged(e: unknown): boolean {
+  return !!e && typeof e === "object" && (e as { code?: string }).code === TOWN_UNCHANGED;
 }
 
 export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" | "completo" | "novo") {

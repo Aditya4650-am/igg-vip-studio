@@ -25,6 +25,7 @@ import {
   cloneTownLayout,
   declaredIds,
   fetchCityXml,
+  isTownUnchanged,
   maxBuildingsStash,
   maxFragments,
   parseInvitedFriends,
@@ -219,7 +220,13 @@ function encodeSave(s: Session): string | null {
     // here rather than in one feature, every path that ends in a push — stats,
     // inject, unban, skins, upgrades, cards, profile, season, regatta — is
     // covered without each having to remember.
-    assertSaveShapeSafe(was, now);
+    //
+    // `s.friendXml` goes along with it: a restore copies the friend's profile
+    // block and sticker list verbatim, and a high-level friend carries ids no
+    // catalog has measured yet. Those are the donor's own game data, not
+    // something this tool made up — refusing them made *Restore full city*
+    // fail against every friend richer than the catalog.
+    assertSaveShapeSafe(was, now, s.friendXml);
     // Regatta's own half: a completed task is a field-by-field record the
     // game reads on upload, so the batch is checked against every invariant a
     // real save holds before any of it can leave. Same loaded-vs-pushed rule —
@@ -444,7 +451,20 @@ export function applySave(p: SavePayload) {
   }
   if (p.townClone) {
     if (!s.friendXml) throw new Error("FetchCity bạn trước khi Clone bố cục thành phố");
-    s.rawXml = cloneTownLayout(s.rawXml, s.friendXml).xml;
+    try {
+      s.rawXml = cloneTownLayout(s.rawXml, s.friendXml).xml;
+    } catch (e) {
+      // `completo` / `novo` already clone this same donor's TownGround and
+      // Buildings earlier in the very same batch (the loop at the top of
+      // `applyDesban`), so by the time the dedicated clone runs the town is
+      // byte for byte the donor's — and it refuses with "nothing changed",
+      // aborting the whole *full city + decorations + town* batch. The town
+      // the user asked for is already in place, so that one refusal is a
+      // false alarm; every other failure ("this file is not a city", a
+      // foreign identity) still stops the batch.
+      const restoreAlreadyClonedTheTown = !!p.unbanMode && p.unbanMode !== "inicial";
+      if (!(restoreAlreadyClonedTheTown && isTownUnchanged(e))) throw e;
+    }
     parts.push("town-clone");
   }
   if (p.regatta) {

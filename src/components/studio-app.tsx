@@ -3303,11 +3303,9 @@ export function StudioApp() {
 
                 {tab === "newgame" && (
                   <div className="space-y-3">
-                    <p className="rounded-md bg-input px-3 py-2 text-sm text-amber">{tr("freshHint")}</p>
                     <p className="rounded-md bg-input px-3 py-2 text-xs text-muted">⚠️ {tr("freshCloudWarn")}</p>
                     <section className="panel">
-                      <h3 className="mb-1 text-xs font-bold tracking-wider uppercase text-cyan">🏙️ {tr("freshInject")}</h3>
-                      <p className="mb-3 text-xs text-muted">{tr("freshInjectD")}</p>
+                      <h3 className="mb-3 text-xs font-bold tracking-wider uppercase text-cyan">🏙️ {tr("freshInject")}</h3>
                       <div className="flex flex-wrap items-center gap-2">
                         {!freshBackup && (
                           <Button size="sm" variant="ghost" disabled={busy} onClick={onFreshBackup}>

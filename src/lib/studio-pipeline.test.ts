@@ -865,6 +865,54 @@ test("a profile id outside the catalog is refused only when this edit added it",
   assert.throws(() => assertSaveShapeSafe(base, wrapped), /profile-shape/);
 });
 
+test("a restore may carry the donor's own ids, but never a shape the game does not write", () => {
+  // Measured on the live FetchCity response for `3ZVJSA080P` — a real Lv1089
+  // city Playrix is serving right now: it holds three badges, three frames and
+  // two styles `RAW_PROFILE` has never measured, plus a `desc` sticker. Their
+  // presence in *our* save after a restore is not an invention, it is the
+  // donor's own game data, and copying that profile block is precisely what
+  // *Restore full city* is for. Refusing them made the Unban tab unusable
+  // against every friend richer than the catalog.
+  const KNOWN = "UVIgUB8QfkY4NA44Bz0XVw0vCBEWXQ=="; // Badge 1 in RAW_PROFILE
+  const DONOR_BADGE = "DSoGUBNqXnkyEANUPic+FQhRUWlEFs5JVUZKysUAD4=";
+  const cfg = (ids: string) =>
+    `<root><Global><Configs><DataElem name="UnlockedBadges" type="string" value="${ids}"/></Configs></Global></root>`;
+  const base = cfg(KNOWN);
+  const donor = cfg(`${KNOWN},${DONOR_BADGE}`);
+  const restored = cfg(`${KNOWN},${DONOR_BADGE}`);
+  assert.equal(restored, donor, "the restore copies the donor's list verbatim");
+
+  assert.ok(saveShapeProblems(restored).includes(`profile-unknown:UnlockedBadges:${DONOR_BADGE}`));
+  assert.throws(
+    () => assertSaveShapeSafe(base, restored),
+    /profile-unknown/,
+    "with no donor in sight the id is still something the tool made up",
+  );
+  assertSaveShapeSafe(base, restored, donor);
+
+  // An id in *neither* file is refused even with a donor attached: the donor
+  // makes its own ids real, not every id in the world.
+  const invented = restored.replace(DONOR_BADGE, "MADE_UP_ID");
+  assert.throws(() => assertSaveShapeSafe(base, invented, donor), /MADE_UP_ID/);
+
+  // Structure stays unconditional. A wrapped profile list is a writing bug no
+  // donor can excuse, so the rule that caught `unlockEmoji`'s extra trailing
+  // comma keeps firing with a donor in hand.
+  const badShape = cfg(",<known>,".replace("<known>", KNOWN));
+  assert.ok(saveShapeProblems(badShape).includes("profile-shape:UnlockedBadges"));
+  assert.throws(() => assertSaveShapeSafe(base, badShape, donor), /profile-shape/);
+
+  // The sticker half of the same rule.
+  const emoji = (v: string) => `<root><Global><Var name="UnlockedChatEmoji" v="${v}"/></Global></root>`;
+  assert.throws(() => assertSaveShapeSafe(emoji(",st1,,st2,"), emoji(",st1,,st2,,desc,")), /chat-emoji-unknown:desc/);
+  assertSaveShapeSafe(emoji(",st1,,st2,"), emoji(",st1,,st2,,desc,"), emoji(",st1,,st2,,desc,"));
+  assert.throws(
+    () => assertSaveShapeSafe(emoji(",st1,,st2,"), emoji(",st1,,st2,,"), emoji(",st1,,st2,,")),
+    /chat-emoji-shape/,
+    "the delimiter rule is not relaxed by carrying a donor",
+  );
+});
+
 test("cards: the push gate refuses an invariant no real city breaks, but not one it arrived with", () => {
   const clean = liveCardsSave();
   const stockBroken = clean.replace(
@@ -1349,6 +1397,28 @@ test("clone town layout refuses a file that is not a city", () => {
   const snap = townSession(TOWN_OWN);
   studio.attachFriendXml(token, snap.sessionId, '<Global><Var name="x" v="1"/></Global>');
   assert.throws(() => studio.applySave({ token, sessionId: snap.sessionId, townClone: true }), /TownGround/);
+});
+
+test("a restore and the town clone queued together push as one batch", () => {
+  // `applyDesban(completo|novo)` clones this same donor's TownGround and
+  // Buildings at the very top of its own body, so by the time the dedicated
+  // clone ran the town was already byte for byte the donor's — and it refused
+  // with "nothing changed", aborting the whole batch. That is what the UI
+  // queues for *full city + decorations + town*: one Save & push, three
+  // pending changes, and a user who saw every restore button "broken".
+  const snap = townSession(TOWN_OWN);
+  studio.attachFriendXml(token, snap.sessionId, TOWN_DONOR);
+  const out = studio.applySave({
+    token,
+    sessionId: snap.sessionId,
+    unbanMode: "novo",
+    decorClone: true,
+    townClone: true,
+  });
+  assert.ok(out.parts.includes("unban-novo"), out.parts.join(","));
+  assert.ok(out.parts.includes("decor-clone"), out.parts.join(","));
+  assert.ok(out.parts.includes("town-clone"), "the town step must be reported, not quietly dropped");
+  balanced(Buffer.from(out.fileB64!, "base64").toString("utf8"));
 });
 
 const DECOR_OWN = [

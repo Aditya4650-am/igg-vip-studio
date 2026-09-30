@@ -107,7 +107,49 @@ export function stripUnknownAvatars(xml: string): { xml: string; removed: number
  * enough to diff (`avatar-id-out-of-range:431`, not "an avatar is wrong"), so
  * a save that already broke one of them arrives without refusing.
  */
-export function saveShapeProblems(xml: string): string[] {
+export function saveShapeProblems(xml: string, donor?: string | null): string[] {
+  return shapeProblems(xml, donorIds(donor));
+}
+
+/**
+ * Ids the *donor* save itself carries — the friend's city FetchCity just
+ * downloaded, which is a real file Playrix is serving right now.
+ *
+ * Two rules below answer a question about the world: "does a real city hold
+ * this id?". A catalog can only ever answer it for the ids it has measured,
+ * and a Lv1089 friend proved the catalogs are not finished: their save holds
+ * three badges, three frames and two styles `RAW_PROFILE` has never seen, plus
+ * a `desc` sticker. Copying that profile block is exactly what *Restore full
+ * city* is for, so refusing it made the whole Unban tab unusable against a
+ * high-level friend while the same ids sat happily in a live city.
+ *
+ * The donor is therefore authoritative for these two rules only. Structural
+ * rules — sticker delimiters, avatar range, `slx`, `t="i"`, tag balance — stay
+ * unconditional, because those describe how the file is *written* and a bug
+ * there is ours regardless of where the bytes came from.
+ */
+type DonorIds = {
+  emoji: ReadonlySet<string>;
+  profile: ReadonlyMap<string, ReadonlySet<string>>;
+};
+
+function donorIds(donor: string | null | undefined): DonorIds | null {
+  if (!donor) return null;
+  const emoji = new Set<string>();
+  const emojiTag = /<Var\b(?=[^>]*\bname="UnlockedChatEmoji")[^>]*>/i.exec(donor);
+  if (emojiTag) for (const id of splitList(attrValue(emojiTag[0], "v") ?? "")) emoji.add(id);
+
+  const profile = new Map<string, ReadonlySet<string>>();
+  for (const field of Object.keys(PROFILE_FIELDS)) {
+    const tag = new RegExp(`<DataElem\\b(?=[^>]*\\bname="${field}")[^>]*>`, "i").exec(donor);
+    if (!tag) continue;
+    const ids = splitList(attrValue(tag[0], "value") ?? "");
+    if (ids.length) profile.set(field, new Set(ids));
+  }
+  return { emoji, profile };
+}
+
+function shapeProblems(xml: string, known: DonorIds | null): string[] {
   const out = new Set<string>();
 
   // A tag-unclosed document makes the game discard progress, which from the
@@ -135,7 +177,10 @@ export function saveShapeProblems(xml: string): string[] {
     // separator between ids. An extra trailing comma is one more entry than
     // any city on the server holds.
     if (v !== "" && v !== canonicalEmoji(ids)) out.add("chat-emoji-shape");
-    for (const id of ids) if (!CHAT_EMOJI_SET.has(id)) out.add(`chat-emoji-unknown:${id}`);
+    for (const id of ids) {
+      if (CHAT_EMOJI_SET.has(id) || known?.emoji.has(id)) continue;
+      out.add(`chat-emoji-unknown:${id}`);
+    }
   }
 
   // ---- profile lists ----------------------------------------------------
@@ -147,8 +192,14 @@ export function saveShapeProblems(xml: string): string[] {
     const ids = splitList(v);
     // Real saves hold a plain `a,b,c`: no wrapping, no empty slots.
     if (v !== ids.join(",")) out.add(`profile-shape:${field}`);
-    const known = PROFILE_IDS.get(group);
-    if (known) for (const id of ids) if (!known.has(id)) out.add(`profile-unknown:${field}:${id}`);
+    const catalog = PROFILE_IDS.get(group);
+    if (catalog) {
+      const fromDonor = known?.profile.get(field);
+      for (const id of ids) {
+        if (catalog.has(id) || fromDonor?.has(id)) continue;
+        out.add(`profile-unknown:${field}:${id}`);
+      }
+    }
   }
 
   // ---- <Upgrade> level / slx --------------------------------------------
@@ -186,14 +237,20 @@ export function saveShapeProblems(xml: string): string[] {
  * oddity the save arrived with stays pushable. That is what lets the gate be
  * strict about what the tool writes without ever holding a user's own file
  * hostage for something it did not do.
+ *
+ * `donor` is the friend city this session fetched, when there is one. It is
+ * consulted *only* by the two "does a real city hold this id" rules (see
+ * `donorIds`), so a restore can carry a high-level friend's profile and
+ * stickers across while an id the Profile tab invented is still refused.
  */
-export function assertSaveShapeSafe(loaded: string, pushed: string) {
+export function assertSaveShapeSafe(loaded: string, pushed: string, donor?: string | null) {
   if (loaded === pushed) return;
 
-  const after = saveShapeProblems(pushed);
+  const known = donorIds(donor);
+  const after = shapeProblems(pushed, known);
   if (!after.length) return;
 
-  const before = new Set(saveShapeProblems(loaded));
+  const before = new Set(shapeProblems(loaded, known));
   const broken = after.filter((k) => !before.has(k));
   if (!broken.length) return;
 
