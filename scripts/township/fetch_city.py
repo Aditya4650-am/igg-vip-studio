@@ -13,6 +13,7 @@ try:
     import urllib.request
     from ts_township_core import (
         API_URL,
+        TS_AES_KEY,
         _build_request_body,
         _decrypt_response,
         ts_decode_bytearray,
@@ -28,8 +29,44 @@ except Exception as e:
 # the save size is a reason to refuse it.
 FETCH_TIMEOUT_S = 300
 
+# --pipe-decrypt: hand the encrypted response body to the caller instead of
+# decrypting it here (see decrypt_response).
+PIPE_FLAG = "--pipe-decrypt"
 
-def fetch_city(target_city_id: str, bver: str, fver: str, city_ver: int = 0) -> bytes:
+
+def decrypt_response(raw: bytes, ts_id: str, pipe: bool) -> bytes:
+    """Return the response's gunzipped JSON envelope.
+
+    The AES that opens the envelope is the single expensive step of the whole
+    download - ~22 us per byte in the Python port, so 3.5 s for a 150 KB city
+    and 17 s for a 750 KB one, where every other stage together costs under
+    10 ms. On the server that is what made a large city outlive its deadline
+    while a small one finished.
+
+    So with `pipe` we hand the body over and let the caller decrypt it with the
+    native AES it already has, then read the plaintext back from stdin. Same
+    bytes either way: the keystream is standard GCM (J0 = iv || 1, data blocks
+    from inc32(J0)), verified byte-for-byte against this file's own decryptor on
+    two real responses and on round trips from 16 to 300,000 bytes.
+
+    The key travels in that message rather than being repeated in the caller on
+    purpose - TS_AES_KEY keeps exactly one home, so the two can never drift into
+    decrypting with different keys.
+    """
+    if not pipe:
+        return _decrypt_response(raw, ts_id)
+
+    print(json.dumps({
+        "stage": "decrypt",
+        "ts_id": ts_id,
+        "key_b64": base64.b64encode(TS_AES_KEY).decode("ascii"),
+        "body_b64": base64.b64encode(raw).decode("ascii"),
+    }), flush=True)
+    return bytes(ts_uncompress(sys.stdin.buffer.read()))
+
+
+def fetch_city(target_city_id: str, bver: str, fver: str, city_ver: int = 0,
+               pipe: bool = False) -> bytes:
     json_body = {
         "cityId": "",
         "cityVer": city_ver,
@@ -66,7 +103,7 @@ def fetch_city(target_city_id: str, bver: str, fver: str, city_ver: int = 0) -> 
                     break
     if not resp_ts_id:
         raise RuntimeError("Server response missing ts-id header")
-    json_bytes = _decrypt_response(raw, resp_ts_id)
+    json_bytes = decrypt_response(raw, resp_ts_id, pipe)
     json_obj = json.loads(json_bytes, strict=False)
     b64_data = (json_obj.get("result") or {}).get("data")
     if not b64_data:
@@ -76,17 +113,20 @@ def fetch_city(target_city_id: str, bver: str, fver: str, city_ver: int = 0) -> 
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print(json.dumps({"ok": False, "error": "usage: fetch_city.py cityId [bver] [fver]"}))
+    args = [a for a in sys.argv[1:] if a != PIPE_FLAG]
+    pipe = PIPE_FLAG in sys.argv
+    if len(args) < 1:
+        print(json.dumps({"ok": False,
+                          "error": "usage: fetch_city.py cityId [bver] [fver] [--pipe-decrypt]"}))
         sys.exit(1)
-    city = sys.argv[1].strip()
-    bver = sys.argv[2] if len(sys.argv) > 2 else ""
-    fver = sys.argv[3] if len(sys.argv) > 3 else ""
+    city = args[0].strip()
+    bver = args[1] if len(args) > 1 else ""
+    fver = args[2] if len(args) > 2 else ""
     if not bver or not fver:
         print(json.dumps({"ok": False, "error": "missing game version/FVer; refresh LocalInfo first"}))
         sys.exit(2)
     try:
-        xml = fetch_city(city, bver, fver)
+        xml = fetch_city(city, bver, fver, pipe=pipe)
         print(json.dumps({"ok": True, "xml_b64": base64.b64encode(xml).decode("ascii")}))
     except Exception as e:
         msg = str(e)

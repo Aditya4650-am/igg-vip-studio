@@ -8,27 +8,33 @@ import { fileURLToPath } from "node:url";
 /**
  * FetchCity download guards.
  *
- * Two things decide whether a *large* city downloads while a small one already
- * did, and neither is a limit on city level, city id or save size:
+ * Three things decide whether a *large* city downloads while a small one
+ * already did, and none of them is a limit on city level, city id or save size:
  *
- *   1. the AES that decrypts the response - the hand-rolled port costs ~22 us
- *      per byte (3.5 s at 150 KB, 17 s at 750 KB), which on the instance is what
- *      pushed a big city past the deadline. `_aes_ctr_decrypt` produces the same
- *      keystream in ~1 ms when `cryptography` is installed, and must agree with
- *      the port byte for byte or not be used at all.
+ *   1. where the response AES runs. The hand-rolled port in ts_township_core.py
+ *      costs ~22 us per byte (3.5 s at 150 KB, 17 s at 750 KB) - all by itself
+ *      more than the whole rest of the download - which on the instance is what
+ *      pushed a big city past its deadline while a small one still finished.
+ *      `fetch_city.py --pipe-decrypt` therefore hands the body to Node, whose
+ *      native AES opens it in about a millisecond; `decryptResponseBody` in
+ *      desban.server.ts has to produce exactly the plaintext the port does.
+ *      (When `cryptography` happens to be importable the standalone path uses
+ *      it too, and it must agree with the port as well.)
  *   2. the two deadlines - a per-read socket stall guard in fetch_city.py and the
  *      child-process deadline in desban.server.ts. The latter used to be 90 s and
  *      killed exactly the cities the first point made slow, while a killed child
  *      closes with `code === null` and surfaced as a generic failure.
+ *   3. both halves agreeing to hand over - if the helper asks and the caller
+ *      never answers, the helper blocks on stdin until the kill timer fires and
+ *      every download looks like a timeout.
  *
- * The AES half needs a Python interpreter; the deadline half is plain source.
+ * 1 and 3's AES half need a Python interpreter; the rest is plain source.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
 const proj = resolve(here, "../..");
 const fetchCityPy = join(here, "fetch_city.py");
 const desbanTs = join(proj, "src/lib/server/township/desban.server.ts");
-const requirementsTxt = join(proj, "requirements.txt");
 
 function runPython(code) {
   const bins = [process.env.PYTHON_BIN, "python3", "python"].filter(Boolean);
@@ -147,19 +153,20 @@ test("FetchCity has no deadline small enough to cut off a large city", () => {
     "a timed-out download is no longer reported as a timeout",
   );
 
-  // The instance has to be given the fast backend, not merely told about it.
-  assert.match(
-    readFileSync(requirementsTxt, "utf8"),
-    /^cryptography[^\n]*$/m,
-    "requirements.txt no longer asks for cryptography; the download falls back to the slow port",
+  // The expensive AES has to be handed over to Node, not left in Python - that
+  // is the whole reason a large city finishes now instead of dying on the
+  // deadline. Both halves have to ask for it, or the helper blocks on stdin
+  // until the kill timer fires and every download looks like a timeout.
+  assert.ok(
+    py.includes('PIPE_FLAG = "--pipe-decrypt"'),
+    "fetch_city.py no longer offers the decrypt handover",
   );
-
-  // ...and the install has to actually be wired into the deploy, or the fast
-  // backend silently disappears again while every other check still passes.
-  const render = readFileSync(join(proj, "render.yaml"), "utf8");
-  const build = /buildCommand:\s*(.+)/.exec(render)?.[1] ?? "";
-  assert.ok(build.includes("setup_fast_aes.py"), "render.yaml no longer runs the fast-AES setup");
-  assert.ok(build.includes("|| true"), "the fast-AES setup could fail the build");
-  assert.ok(readFileSync(join(here, "setup_fast_aes.py"), "utf8").includes("sys.exit(0)"),
-    "setup_fast_aes.py lost the always-exit-0 guard that keeps it from breaking the deploy");
+  assert.ok(
+    ts.includes('"--pipe-decrypt"'),
+    "fetchCityXml no longer asks the helper to hand the body over",
+  );
+  assert.ok(
+    ts.includes('createDecipheriv("aes-128-ctr"'),
+    "fetchCityXml no longer decrypts the response natively",
+  );
 });
