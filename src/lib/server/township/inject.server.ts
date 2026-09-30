@@ -373,9 +373,20 @@ export function injectProfile(xml: string, selection: Record<string, string[]>) 
  * (verified on two real saves), so the existing `MyOldTask` value is
  * authoritative — reading it back means this feature can never hand one save
  * two identities, which is what a server notices when it is looking.
+ *
+ * Only a `MyOldTask` / `MyTask` tag may declare ours. `user=` was measured to
+ * appear on exactly those three tags and nowhere else: in a fetched city all
+ * 37 `MyOldTask` and the single `MyTask` carry its own `cityId`, while the ten
+ * `TakenTask` rows carry ten *different* clanmates and never that cityId. The
+ * old generic `\buser="..."` fallback therefore only ever resolved to a
+ * teammate — it was unreachable whenever a save had a record of its own, but
+ * on a save that has completed nothing this week it fired first and every new
+ * record would have been written with somebody else's id. That is the
+ * instant-ban story from the identity notes, so the fallback narrows to tags
+ * that are measurably ours and otherwise falls through to `cityId`.
  */
 function resolveRegataUser(text: string): string {
-  for (const pat of [/<MyOldTask\b[^>]*\buser="([^"]*)"/gi, /\buser="([^"]*)"/gi]) {
+  for (const pat of [/<MyOldTask\b[^>]*?\buser="([^"]*)"/gi, /<MyTask\b[^>]*?\buser="([^"]*)"/gi]) {
     for (const m of text.matchAll(pat)) if (m[1]?.trim()) return m[1].trim();
   }
   for (const name of ["SaveId", "userId", "UserId", "cityId", "PlayerId"]) {
@@ -421,7 +432,7 @@ const REGATTA_ERR = {
   no_active_regatta:
     "Save chưa có regatta đang diễn ra. Vào regatta trong game trước rồi thử lại - không thêm task ngoài một regatta đang mở, vì Playrix đối chiếu cửa sổ thời gian.",
   no_template:
-    "Save chưa có task regatta thật nào để làm mẫu. Không tạo task giả.",
+    "Save chưa có task regatta thật nào để chép, và không có task nào trong pool đủ dữ liệu thật (need/score/type) để dựng. Không tạo task giả.",
   window_closed: "Khoảng thời gian regatta hiện tại chưa đủ để thêm task an toàn.",
   already_full: "Regatta này đã có đủ task (%s) - không thêm nữa.",
 } as const;
@@ -497,6 +508,217 @@ function regattaTemplates(text: string): string[] {
   return out;
 }
 
+/**
+ * `id -> [need, score, regataCash]`, measured from completed `<MyOldTask>`
+ * records in real saves (67 game-written records across five files).
+ *
+ * This is what lets injection run on a save that holds **no** completed record
+ * to clone. `need` and `score` are per-id constants living in Playrix's
+ * server-side config: the same id repeats the same triple in every save, week
+ * and league in which it appears (`with_chips_3` = 150/120/15 three times,
+ * `rocket_1` = 85/140/18 three times, `plane_1` = 120/140/18 twice), so
+ * neither can be invented for an id this table has never seen. Duplicate ids
+ * inside one week are normal (`with_chips_3` x3, `rocket_1` x3) — that is how
+ * a save reaches 10/12/15 tasks from a handful of distinct ids, and the same
+ * cycling the clone path has always done.
+ *
+ * `regataCash` is round(score/8) on **every** match3 record measured (26/26:
+ * 75->9, 115->14, 120->15, 125->16, 130->16, 140->18, 150->19). The trains row
+ * keeps its own measured cash (120->12) because `type="trains"` is the one
+ * family where that relation does not hold.
+ *
+ * Deliberately absent — no save in the corpus has ever completed them, so a
+ * value would have to be guessed:
+ *
+ * - `trains_1` / `trains_2` / `trains_4` / `match3_create_bonus_rocket_3`,
+ *   and every `coins_`, `wagon_`, `feed_`, `ore_`, `orders_`, `factory_`,
+ *   `fruits_`, `digtools_`, `casino_` id: their `score` is server config we
+ *   hold no sample of, and a guessed score is exactly the "uniform 135"
+ *   fingerprint the old injector is recognised by.
+ * - anything inferred from a family, a difficulty suffix or a league. The same
+ *   `need` maps to different scores across families (1000->115 but
+ *   1300->140), so that inference is provably wrong.
+ */
+const REGATTA_TASK: Readonly<Record<string, readonly [need: number, score: number, cash: number]>> = {
+  match3_create_bonus_bomb_1: [50, 140, 18],
+  match3_create_bonus_bomb_3: [32, 120, 15],
+  match3_create_bonus_bomb_999: [60, 150, 19],
+  match3_create_bonus_lightning_3: [8, 115, 14],
+  match3_create_bonus_lightning_999: [12, 150, 19],
+  match3_create_bonus_plane_1: [120, 140, 18],
+  match3_create_bonus_plane_2: [100, 130, 16],
+  match3_create_bonus_plane_999: [140, 150, 19],
+  match3_create_bonus_rocket_1: [85, 140, 18],
+  match3_create_bonus_rocket_2: [70, 125, 16],
+  match3_create_bonus_rocket_999: [100, 150, 19],
+  match3_create_bonus_with_chips_1: [220, 140, 18],
+  match3_create_bonus_with_chips_2: [180, 125, 16],
+  match3_create_bonus_with_chips_3: [150, 120, 15],
+  match3_create_bonus_with_chips_8: [80, 75, 9],
+  match3_create_bonus_with_chips_999: [280, 150, 19],
+  match3_remove_chips_blue_red_999: [1300, 150, 19],
+  match3_remove_chips_red_green_1: [1300, 140, 18],
+  match3_remove_chips_red_green_3: [1000, 115, 14],
+  match3_remove_chips_red_green_999: [1500, 150, 19],
+  match3_remove_chips_yellow_green_2: [1150, 125, 16],
+  match3_remove_chips_yellow_green_999: [1500, 150, 19],
+  match3_win_game_in_row_1: [4, 130, 16],
+  trains_3: [5, 120, 12],
+};
+
+/** Every score a real completed record has ever been seen carrying. */
+const REGATTA_SCORES = new Set<number>(Object.values(REGATTA_TASK).map((r) => r[1]));
+
+/**
+ * `type` / `eventType` a completed record carries for this id — only families
+ * a real record has been seen for. `match3_*` is always `event_order` +
+ * `eventType="Match3"`; `trains_*` is `trains` with no eventType/target at
+ * all. Every other family has **no** completed record anywhere in the corpus,
+ * so its `type` is unknown and an id from it is skipped rather than guessed —
+ * guessing `type` is what made the old injector write `type="event_order"` on
+ * a trains task.
+ */
+function regattaTaskShape(id: string): { type: string; eventType?: string } | null {
+  if (id.startsWith("match3_")) return { type: "event_order", eventType: "Match3" };
+  if (id.startsWith("trains_")) return { type: "trains" };
+  return null;
+}
+
+/** The `target` a match3 record states: the id minus `match3_` and its
+ *  trailing difficulty suffix. 23/23 measured records satisfy this
+ *  (`match3_create_bonus_bomb_999` -> `create_bonus_bomb`,
+ *  `match3_win_game_in_row_1` -> `win_game_in_row`). */
+function regattaTarget(id: string): string {
+  return id.startsWith("match3_") ? id.slice("match3_".length).replace(/_\d+$/, "") : "";
+}
+
+/** The block's own `<Var name="TaskQuota">` — measured equal to `anlLimit` on
+ *  5/5 real saves (9, 11, 13, 17, 17). No other source for `anlLimit` exists. */
+function regattaTaskQuota(inner: string): number | null {
+  for (const m of inner.matchAll(/<Var\b[^>]*?>/gi)) {
+    const a = tagAttrs(m[0]);
+    if (attrValue(a, "name") !== "TaskQuota") continue;
+    const v = attrValue(a, "v");
+    if (v && /^\d+$/.test(v) && Number(v) > 0) return Number(v);
+  }
+  return null;
+}
+
+/** The `need` this save already states per id: a teammate's
+ *  `<TakenTask id=… need=…>` and the clan roster's
+ *  `<Member cityId=… taskId=… need=…>` agree on every id both carry, and both
+ *  agree with the measured catalog wherever all three exist. */
+function regattaStatedNeeds(inner: string): Map<string, number> {
+  const out = new Map<string, number>();
+  const put = (id: string | null, need: string | null): void => {
+    if (!id || !need || !/^\d+$/.test(need) || out.has(id)) return;
+    out.set(id, Number(need));
+  };
+  for (const m of inner.matchAll(/<TakenTask\b[^>]*?\/?>/gi)) {
+    const a = tagAttrs(m[0]);
+    put(attrValue(a, "id"), attrValue(a, "need"));
+  }
+  for (const m of inner.matchAll(/<Member\b[^>]*?\/?>/gi)) {
+    const a = tagAttrs(m[0]);
+    put(attrValue(a, "taskId") ?? attrValue(a, "id"), attrValue(a, "need"));
+  }
+  return out;
+}
+
+/**
+ * Completed records built from the save's **own** pool, for a save that holds
+ * no completed record to clone — a green week where `current` is 0 but the
+ * pool is full, which is how a real save with 0 `<MyOldTask>` looked like a
+ * permanently dead button.
+ *
+ * Everything a record needs has a source in this document:
+ *
+ * - `type` / `eventType` / `target` from the family rule above;
+ * - `need` from the save's own `<TakenTask>` / `<Member>`, else the measured
+ *   catalog (they agree wherever both exist — if they ever disagree the id is
+ *   skipped rather than arbitrated);
+ * - `score` / `regataCash` from the measured catalog only;
+ * - `num` / `ver` from this save's own `<FreeTask>` entry for that id, which
+ *   is proven to be what a real record carries (a live week's `bomb_999` has
+ *   FreeTask and MyOldTask num/ver identical). An id a teammate holds has its
+ *   pool entry cleared to `num="-1"` and carries no `num` of its own, so it
+ *   borrows a slot number **from this save's own pool** (real records repeat
+ *   slot numbers constantly — one week reads 1,3,1,3,3,6) and takes `ver`
+ *   from the save's own `<TakenTask>`, which is `"0"`; `ver="0"` is carried by
+ *   a real record too, so neither value is invented out of nothing;
+ * - `anlLimit` from `<Var name="TaskQuota">`. Without it there is no source
+ *   for a field every real record carries, so no records are built.
+ *
+ * An id the corpus has never seen completed (`REGATTA_TASK` misses) is
+ * skipped: its `score` would have to be guessed. Repeats then carry the
+ * requested batch to 10/12/15 exactly as the clone path always has.
+ */
+function regattaSyntheticTasks(text: string): string[] {
+  const block = regattaBlock(text);
+  if (!block) return [];
+  const inner = block.inner;
+  const quota = regattaTaskQuota(inner);
+  if (quota === null) return [];
+
+  const free = new Map<string, { num: string; ver: string }>();
+  for (const m of inner.matchAll(/<FreeTask\b[^>]*?\/?>/gi)) {
+    const a = tagAttrs(m[0]);
+    const id = attrValue(a, "id");
+    const num = attrValue(a, "num");
+    const ver = attrValue(a, "ver");
+    if (!id || num === null || ver === null || !/^\d+$/.test(num) || Number(num) < 1) continue;
+    free.set(id, { num, ver });
+  }
+  const held = new Map<string, string>();
+  for (const m of inner.matchAll(/<TakenTask\b[^>]*?\/?>/gi)) {
+    const id = attrValue(tagAttrs(m[0]), "id");
+    if (id) held.set(id, attrValue(tagAttrs(m[0]), "ver") ?? "0");
+  }
+
+  const slots = [...free.values()].map((v) => v.num);
+  const stated = regattaStatedNeeds(inner);
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (const id of [...free.keys(), ...held.keys()]) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const shape = regattaTaskShape(id);
+    if (!shape) continue;
+    const row = REGATTA_TASK[id];
+    if (!row) continue;
+    const own = stated.get(id);
+    if (own !== undefined && own !== row[0]) continue;
+    const need = own ?? row[0];
+    const entry = free.get(id);
+    const num = entry ? entry.num : slots.length ? slots[out.length % slots.length]! : null;
+    if (num === null) continue;
+    const ver = entry ? entry.ver : held.get(id) ?? "0";
+
+    out.push(
+      `<MyOldTask id="${id}" type="${shape.type}"` +
+        (shape.eventType ? ` eventType="${shape.eventType}" target="${regattaTarget(id)}"` : "") +
+        ` need="${need}" have="${need}" user="" endTime="0" num="${num}" ver="${ver}"` +
+        ` takenCounter="0" score="${row[1]}" regataCash="${row[2]}" takeTime="0"` +
+        ` completeTime="0" realEndTime="0" anlNumber="0" anlLimit="${quota}"/>`,
+    );
+  }
+  return out;
+}
+
+/**
+ * The records this save can be topped up from: a completed record to clone if
+ * it has one, otherwise its own pool. The distinction matters to the injector
+ * alone — a fresh block has no `takenCounter` to continue from, so its batch
+ * starts at 2 the way three untouched weeks all do.
+ */
+function regattaSources(text: string): { tags: string[]; synthetic: boolean } {
+  const templates = regattaTemplates(text);
+  if (templates.length) return { tags: templates, synthetic: false };
+  const tags = regattaSyntheticTasks(text);
+  return { tags, synthetic: tags.length > 0 };
+}
+
 function regattaPool(text: string): number {
   return new Set([...text.matchAll(/<FreeTask\b[^>]*\bid="([^"]*)"/gi)].map((m) => m[1]!)).size;
 }
@@ -506,11 +728,16 @@ function regattaPool(text: string): number {
  *  batch size it is given, and never throws. */
 export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): RegattaState {
   const text = asText(xml).replace(/^\uFEFF/, "");
-  const templates = regattaTemplates(text);
+  // A save with no completed record to clone is no longer automatically a
+  // refusal: its own FreeTask/TakenTask pool states which ids it is offering,
+  // and those plus the measured task catalog are enough to build a record.
+  // The badge and the server both read this number, so "pressable" and "will
+  // succeed" stay one decision.
+  const sources = regattaSources(text);
   const pool = regattaPool(text);
   const user = resolveRegataUser(text);
   const block = regattaBlock(text);
-  const base = { templates: templates.length, pool, avgScore: 0, user, window: null };
+  const base = { templates: sources.tags.length, pool, avgScore: 0, user, window: null };
   if (!block) return { ...base, reason: "no_active_regatta", active: false, current: 0 };
 
   const win = regattaWindow(block.attrs);
@@ -522,9 +749,9 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
   // Exactly what `injectRegata` will decide for this batch size, in the same
   // order — now shared with the tab, which re-runs it for the count the user
   // actually picked instead of trusting this default-12 answer.
-  const reason = regattaReason({ window: win, templates: templates.length, current }, nTasks, now);
+  const reason = regattaReason({ window: win, templates: sources.tags.length, current }, nTasks, now);
 
-  return { reason, active, current, templates: templates.length, pool, avgScore, user, window: win };
+  return { reason, active, current, templates: sources.tags.length, pool, avgScore, user, window: win };
 }
 
 /**
@@ -593,14 +820,20 @@ function bumpRegattaTaskVars(varsInner: string, added: number): string {
 /**
  * Add completed tasks to a regatta the save is genuinely taking part in.
  *
- * Every field of a new task is copied from a record this save already holds
- * (`regattaTemplates`), so nothing is invented: `type`, `eventType`, `target`,
- * `need`, `have`, `score`, `regataCash` and `anlLimit` are proven to reconcile
- * with that id. Only the counters and the timestamps move.
+ * With a completed record to clone, every field of a new task is copied from
+ * it (`regattaTemplates`), so nothing is invented: `type`, `eventType`,
+ * `target`, `need`, `have`, `score`, `regataCash` and `anlLimit` are proven to
+ * reconcile with that id. With none — a green week where the counter is still
+ * 0 — the save's own pool is read instead (`regattaSyntheticTasks`), where
+ * `need` comes from the save's own TakenTask/Member rows, `score` from the
+ * measured catalog, `num`/`ver` from its own FreeTask entry and `anlLimit`
+ * from its own TaskQuota. Only the counters and the timestamps move in either
+ * case, and an id without a measured score is skipped rather than guessed.
  *
  * Refuses (rather than reporting a success the game ignores) when the save has
- * no live `<Regata>`, no real task to clone, no usable window, or already has
- * enough tasks. Throws, so `applySave` surfaces the reason instead of ticking.
+ * no live `<Regata>`, no real task to clone and no sourceable pool entry, no
+ * usable window, or already has enough tasks. Throws, so `applySave` surfaces
+ * the reason instead of ticking.
  */
 export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): string {
   const text0 = asText(xml).replace(/^\uFEFF/, "");
@@ -611,8 +844,8 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   const now = Math.floor(Date.now() / 1000);
   if (!block || !win || now < win.start || now > win.end) throw new Error(REGATTA_ERR.no_active_regatta);
 
-  const templates = regattaTemplates(text0);
-  if (!templates.length) throw new Error(REGATTA_ERR.no_template);
+  const src = regattaSources(text0);
+  if (!src.tags.length) throw new Error(REGATTA_ERR.no_template);
 
   const current = (block.inner.match(/<MyOldTask\b/gi) ?? []).length;
   const need = want - current;
@@ -640,17 +873,24 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   // holds (appending 3 after the block's 4), and restarting it per template id
   // let two ids interleave out of order: both are steps backwards in a field
   // that only ever grows, and exactly what a server can read for free.
+  //
+  // A block that holds no record at all has no counter to continue, but every
+  // real record still carries one and three untouched weeks each start theirs
+  // at 2 — so a synthesized batch starts there too. The clone path keeps its
+  // old behaviour untouched: a save whose records simply lack the field still
+  // gains none.
   let maxTaken = -1;
   for (const m of block.inner.matchAll(/<MyOldTask\b[^>]*\btakenCounter="(\d+)"/g)) {
     const v = Number(m[1]);
     if (Number.isFinite(v) && v > maxTaken) maxTaken = v;
   }
+  const takenBase = maxTaken >= 0 ? maxTaken + 1 : src.synthetic ? 2 : -1;
 
   const tasks: string[] = [];
   let addedScore = 0;
 
   for (let i = 0; i < need; i++) {
-    const tpl = templates[i % templates.length]!;
+    const tpl = src.tags[i % src.tags.length]!;
     const a = tagAttrs(tpl);
     // Real records keep takeTime < completeTime < endTime strictly, and all
     // three inside the window. The floors below hold that ordering even when
@@ -666,8 +906,8 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
     if (attrValue(a, "endTime") !== null) tag = setTagAttr(tag, "endTime", String(endTime));
     const anlLimit = Number(attrValue(a, "anlLimit") ?? 0);
     if (Number.isFinite(anlLimit) && anlLimit > 0) tag = setTagAttr(tag, "anlNumber", String((i % anlLimit) + 1));
-    if (maxTaken >= 0 && attrValue(a, "takenCounter") !== null) {
-      tag = setTagAttr(tag, "takenCounter", String(maxTaken + 1 + i));
+    if (takenBase >= 0 && attrValue(a, "takenCounter") !== null) {
+      tag = setTagAttr(tag, "takenCounter", String(takenBase + i));
     }
 
     tasks.push(tag);
@@ -716,6 +956,184 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   }
 
   return text;
+}
+
+/**
+ * Fields every game-written completed record carries — all 67 measured records
+ * hold them. `have` is checked separately because an *expired* record is
+ * allowed to omit it (two real ones do), while a completion always has it
+ * `== need`.
+ */
+const REGATTA_RECORD_FIELDS = [
+  "id",
+  "type",
+  "user",
+  "endTime",
+  "num",
+  "ver",
+  "takenCounter",
+  "score",
+  "regataCash",
+  "takeTime",
+  "completeTime",
+  "realEndTime",
+  "anlNumber",
+  "anlLimit",
+  "need",
+];
+
+/**
+ * Regatta's half of the push gate: invariants a real completed record holds,
+ * refused only when this tool is what broke them. Same loaded-vs-pushed rule
+ * as `assertSaveShapeSafe`, and for the same reason — a save that arrived with
+ * an oddity (an old injector's uniform 135, a record missing counters) keeps
+ * that key on both sides and stays pushable, so no feature is held hostage for
+ * something this tool never touched. Against a save that holds **no** record,
+ * which is exactly the state the new synthesized batch starts from, every key
+ * below is new — so this is the check that decides whether the batch may leave.
+ *
+ * Each rule was measured before being written here:
+ *
+ * - `regatta-record-missing:<field>` — the full field set real records carry.
+ * - `regatta-time-order:<id>` — `takeTime < completeTime < realEndTime`,
+ *   strictly, in that order, on every record in every save.
+ * - `regatta-time-outside:<id>` — all three inside the block's own window.
+ * - `regatta-time-future:<id>` — a completion dated in the future is the
+ *   easiest anomaly there is to spot.
+ * - `regatta-user:<id>` — records are attributed to the save's own id, never
+ *   to a teammate (that is the identity story the unban tab learned the hard
+ *   way).
+ * - `regatta-score:<v>` — outside the measured score set; 135 is the old
+ *   injector's uniform value and appears on no real record.
+ * - `regatta-cash:<id>:<v>` — for `event_order`, `regataCash` must be
+ *   round(score/8), which holds on 26/26 match3 records.
+ * - `regatta-target:<id>:<v>` — target must be the id minus `match3_` and its
+ *   trailing suffix (23/23 measured).
+ * - `regatta-need:<id>` — must be the number this very save already states for
+ *   that id in `<TakenTask>` / `<Member>`.
+ * - `regatta-anl-limit:<v>` / `regatta-anl-number:<v>` — `anlLimit` is
+ *   `<Var name="TaskQuota">` (5/5 measured) and `anlNumber` cycles inside it.
+ * - `regatta-id:<id>` — an id that is in neither this document's pool nor a
+ *   record it already held is an id the game never offered: the old
+ *   `match3_1..match3_105` output.
+ * - `regatta-taken-counter:<prev>-<next>` — the counter only ever grows inside
+ *   a block (2,3,…,37 in an archived week, restarting at 2).
+ * - `regatta-counter-mismatch` — a block that declares `taskCounter` /
+ *   `takeConfirm` must have them equal to the records it holds (7/7 saves).
+ */
+export function regattaProblems(xml: string, own: string): string[] {
+  const block = regattaBlock(xml.replace(/^\uFEFF/, ""));
+  if (!block) return [];
+  const inner = block.inner;
+  const win = regattaWindow(block.attrs);
+  const now = Math.floor(Date.now() / 1000);
+  const quota = regattaTaskQuota(inner);
+  const stated = regattaStatedNeeds(inner);
+  const keys = new Set<string>();
+
+  const pool = new Set<string>();
+  for (const m of inner.matchAll(/<FreeTask\b[^>]*\bid="([^"]*)"/gi)) pool.add(m[1]!);
+  for (const m of inner.matchAll(/<TakenTask\b[^>]*\bid="([^"]*)"/gi)) pool.add(m[1]!);
+
+  let prevTaken: number | null = null;
+  for (const m of inner.matchAll(/<MyOldTask\b[^>]*?\/?>/gi)) {
+    const a = tagAttrs(m[0]);
+    const id = attrValue(a, "id") ?? "?";
+    const expired = attrValue(a, "expired");
+    const isExpired = !!expired && expired !== "0";
+
+    for (const f of REGATTA_RECORD_FIELDS) {
+      if (attrValue(a, f) === null) keys.add(`regatta-record-missing:${f}`);
+    }
+    if (!isExpired && attrValue(a, "have") === null) keys.add("regatta-record-missing:have");
+
+    const take = Number(attrValue(a, "takeTime"));
+    const done = Number(attrValue(a, "completeTime"));
+    const real = Number(attrValue(a, "realEndTime"));
+    if (Number.isFinite(take) && Number.isFinite(done) && Number.isFinite(real)) {
+      if (!(take < done && done < real)) keys.add(`regatta-time-order:${id}`);
+      if (win && !(real >= win.start && real <= win.end)) keys.add(`regatta-time-outside:${id}`);
+      if (real >= now) keys.add(`regatta-time-future:${id}`);
+    }
+
+    if (attrValue(a, "user") !== own) keys.add(`regatta-user:${id}`);
+
+    const score = Number(attrValue(a, "score"));
+    if (Number.isFinite(score) && !REGATTA_SCORES.has(score)) keys.add(`regatta-score:${score}`);
+
+    const cash = Number(attrValue(a, "regataCash"));
+    if (attrValue(a, "type") === "event_order" && Number.isFinite(score) && Number.isFinite(cash)) {
+      if (cash !== Math.round(score / 8)) keys.add(`regatta-cash:${id}:${cash}`);
+    }
+
+    const target = attrValue(a, "target");
+    if (id.startsWith("match3_") && target !== null && target !== regattaTarget(id)) {
+      keys.add(`regatta-target:${id}:${target}`);
+    }
+
+    const need = attrValue(a, "need");
+    const ownNeed = stated.get(id);
+    if (need && /^\d+$/.test(need) && ownNeed !== undefined && Number(need) !== ownNeed) {
+      keys.add(`regatta-need:${id}`);
+    }
+
+    const anlLimitRaw = attrValue(a, "anlLimit");
+    if (anlLimitRaw && /^\d+$/.test(anlLimitRaw)) {
+      const anlLimit = Number(anlLimitRaw);
+      if (quota !== null && anlLimit !== quota) keys.add(`regatta-anl-limit:${anlLimit}`);
+      const anlNumberRaw = attrValue(a, "anlNumber");
+      if (anlLimit > 0 && anlNumberRaw && /^\d+$/.test(anlNumberRaw)) {
+        const anlNumber = Number(anlNumberRaw);
+        if (anlNumber < 1 || anlNumber > anlLimit) keys.add(`regatta-anl-number:${anlNumber}`);
+      }
+    }
+
+    if (!pool.has(id)) keys.add(`regatta-id:${id}`);
+
+    const takenRaw = attrValue(a, "takenCounter");
+    if (takenRaw && /^\d+$/.test(takenRaw)) {
+      const taken = Number(takenRaw);
+      if (prevTaken !== null && taken <= prevTaken) keys.add(`regatta-taken-counter:${prevTaken}-${taken}`);
+      prevTaken = taken;
+    }
+  }
+
+  // Only a counter the block already declares is ever compared: a block with
+  // none gains none (`regatta never invents a counter the block never had`).
+  const declared = (name: string): number | null => {
+    for (const m of inner.matchAll(/<Var\b[^>]*?>/gi)) {
+      const a = tagAttrs(m[0]);
+      if (attrValue(a, "name") !== name) continue;
+      const v = attrValue(a, "v");
+      if (v && /^\d+$/.test(v)) return Number(v);
+    }
+    return null;
+  };
+  const count = (inner.match(/<MyOldTask\b/gi) ?? []).length;
+  for (const name of ["taskCounter", "takeConfirm"]) {
+    const v = declared(name);
+    if (v !== null && v !== count) keys.add("regatta-counter-mismatch");
+  }
+
+  return [...keys];
+}
+
+export function assertRegattaSafe(loaded: string, pushed: string) {
+  if (loaded === pushed) return;
+
+  // The save's own id is read off the file as it **arrived**: resolving it
+  // from `pushed` would let a batch that wrote someone else's id define what
+  // counts as "ours" and pass on its own terms.
+  const own = resolveRegataUser(loaded);
+  const before = new Set(regattaProblems(loaded, own));
+  const broken = regattaProblems(pushed, own).filter((k) => !before.has(k));
+  if (!broken.length) return;
+
+  throw new Error(
+    `Không đẩy file lên máy: task regatta vừa thêm không khớp dữ liệu thật (${broken.slice(0, 6).join(", ")}` +
+      `${broken.length > 6 ? `, +${broken.length - 6}` : ""}). ` +
+      "Thành phố thật chưa từng cho kết quả này, nên server Playrix có thể coi save của bạn là gian lận.",
+  );
 }
 
 const UPGRADE_KEY = 32162029;

@@ -361,6 +361,97 @@ obvious claim — "everyone has regatta, copy them" — turned out to be false:
   still refuses `already_full` when it already holds ≥ the requested total, so
   the tool never pushes a week *down* or rewrites it.
 
+### Regatta: a green week (no record to clone) — and the teammate-id trap
+
+`mGameInfo.current-9.xml` (817,087 B, plain XML) reached the tab with a live
+`<Regata id="533" startTime="1790586000" endTime="1791187200" season="108"
+week="4" league="4">` holding **12 `<FreeTask>`, 16 `<TakenTask>` and
+0 `<MyOldTask>`**, plus `<Var name="TaskQuota" v="15"/>`. `regattaTemplates()`
+was empty, so every reading said `no_template` and the button stayed grey —
+a save that is genuinely in a regatta with a full pool could never take a task.
+`inspectRegatta` now reports `current=0 templates=6 pool=12 active=true` and
+10 / 12 / 15 all return `reason="ok"`.
+
+**How a record is built when there is none to copy** — `regattaSyntheticTasks()`,
+which runs only when `regattaTemplates()` is empty (the clone path is
+byte-for-byte unchanged):
+
+- **Catalog**: `REGATTA_TASK` maps `id -> [need, score, regataCash]` measured
+  from **67 game-written `<MyOldTask>` records across five files** (a fetched
+  friend city, two saves of this player, two more in Downloads). Both values are
+  per-id constants: the same id repeats the same triple in every save, week and
+  league it appears in (`with_chips_3` = 150/120/15 x3, `rocket_1` = 85/140/18
+  x3, `plane_1` = 120/140/18 x2), so neither may be invented for an id the
+  table has never seen. `regataCash` = round(score/8) on **26/26** match3
+  records; `trains_3` keeps its own measured 120->12 because `type="trains"` is
+  the one family where that relation fails.
+- **Skipped, never guessed**: `trains_1/2/4`, `rocket_3` and every `coins_`,
+  `wagon_`, `feed_`, `ore_`, `orders_`, `factory_`, `fruits_`, `digtools_`,
+  `casino_` id — no save in the corpus has completed one, so their `score` would
+  have to be made up, and a made-up score is the uniform-135 fingerprint.
+  Anything inferred from a family, a suffix or a league is equally out: the same
+  `need` maps to different scores across families (1000->115 but 1300->140), so
+  that inference is provably wrong.
+- **Sources per field**: `type`/`eventType`/`target` from the family rule
+  (`match3_*` -> `event_order` + `Match3` + id minus `match3_` and its trailing
+  suffix, 23/23 measured; `trains_*` -> `trains`, no eventType/target); `need`
+  from the save's own `<TakenTask id=… need=…>` / `<Member … taskId=… need=…>`
+  else the catalog — **they agree wherever all three exist, and a disagreement
+  skips the id rather than arbitrating**; `num`/`ver` from the save's own
+  `<FreeTask>` entry (proven identical to a real record's), with a
+  TakenTask-sourced id borrowing a slot number from this save's own pool and
+  `ver="0"` — both values the save already carries on that task; `anlLimit` from
+  `<Var name="TaskQuota">` (equal to `anlLimit` on 5/5 saves). **No TaskQuota ->
+  no records**, because that would leave out a field every real record has.
+- **Repeats are how 6 ids become 15**, exactly as the clone path has always
+  done (`templates[i % templates.length]`), and real weeks do it too
+  (`with_chips_3` x3, `rocket_1` x3). A repeated id must repeat its own
+  need/score/cash verbatim.
+- A fresh block has no `takenCounter` to continue: the synthetic batch seeds it
+  at **2**, which is where three untouched weeks all start theirs (the clone
+  path's `maxTaken + 1` behaviour is untouched, and a save whose records simply
+  lack the field still gains none).
+
+**The teammate-id trap (a real identity bug this surfaced).** `resolveRegataUser`
+fell through to a generic `\buser="..."`, and `user=` was measured to appear on
+exactly three tags: `<MyOldTask>` (37/37 = the save's own `cityId`), `<MyTask>`
+(own) and `<TakenTask>` (ten *different* clanmates, never that cityId). So the
+generic fallback could only ever return a **teammate** — unreachable while a
+save had a record of its own (pattern 1 won), but on a green week it fired first
+and every injected record would have carried somebody else's id. That is the
+instant-ban story from the identity notes, and it never showed before only
+because green weeks were refused with `no_template` before reaching it. The
+fallback is now limited to `MyOldTask` / `MyTask`; anything else falls through to
+`cityId`. Guard rail:
+`a save that has completed nothing must never be handed a teammate's id`.
+
+**Ban gate**: `regattaProblems(xml, own)` + `assertRegattaSafe(loaded, pushed)`
+are wired into `encodeSave` beside the card and shape gates, so every path that
+ends in a push is covered. Same loaded-vs-pushed rule — an oddity the save
+arrived with keeps its keys on both sides and stays pushable, which is what lets
+it be strict about what this tool writes. Against a green week (no records on
+arrival) **every key is new**, so this is what decides whether a batch may leave.
+Keys: `regatta-record-missing:<field>` (the full measured field set, with `have`
+optional only when `expired`), `regatta-time-order:<id>`,
+`regatta-time-outside:<id>`, `regatta-time-future:<id>`, `regatta-user:<id>`,
+`regatta-score:<v>` (135 is the old fingerprint and appears on no real record),
+`regatta-cash:<id>:<v>`, `regatta-target:<id>:<v>`, `regatta-need:<id>`,
+`regatta-anl-limit:<v>` / `regatta-anl-number:<v>`, `regatta-id:<id>` (an id in
+neither the pool nor a record the save already held — the old
+`match3_1..match3_105` output), `regatta-taken-counter:<prev>-<next>`,
+`regatta-counter-mismatch`. `own` is resolved from **`loaded`**, never from
+`pushed`, or a batch that wrote someone else's id would define "ours" for itself.
+
+Guard rails: `xml-edit.test.mts` pins the green week (badge live for 10/12/15,
+15 records, 6 distinct pool ids, 4 distinct scores, `anlLimit` = TaskQuota,
+`anlNumber` inside it, strict time order in-window and in the past,
+`endTime == realEndTime`, derived targets, round(score/8) cash, `takenCounter`
+2..16, placement before `<Vars>`, `RegataTasksCompleted` +15, `<Regata score>`
+= base + the batch's own sum, nothing outside `<Regata>` changed but that one
+counter), the refusal for ids no save has ever completed, the teammate-id rule,
+and the gate accepting a measured batch while refusing a uniform-135 one.
+`injectRegata` on the real `mGameInfo.current-9.xml` passes all of them.
+
 ## Factory / upgrade levels
 
 The **Factories** tab (`tab === "factory"`) raises `<Upgrade version="4">`

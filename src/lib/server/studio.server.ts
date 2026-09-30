@@ -7,7 +7,7 @@ import { applyStatChanges, parseStats, readAnyVar, STAT_ALIASES } from "./townsh
 import { shellErrorMessage } from "./township/save-decode.server";
 import { findUnbalancedTag } from "./township/xml-edit.server";
 import { applyBarnCapacity, applyBarnItems, barnInfo, ensureBarnCapacity } from "./township/barn.server";
-import { injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, injectUpgradeLevels, inspectRegatta, parseProfileUnlocked, upgradeMaxLevel, discoverUpgrades, REGATTA_DEFAULT_TASKS, REGATTA_MAX_TASKS, UPGRADE_REF_CAP } from "./township/inject.server";
+import { assertRegattaSafe, injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, injectUpgradeLevels, inspectRegatta, parseProfileUnlocked, upgradeMaxLevel, discoverUpgrades, REGATTA_DEFAULT_TASKS, REGATTA_MAX_TASKS, UPGRADE_REF_CAP } from "./township/inject.server";
 import { grantArtifacts } from "./township/museum.server";
 import { assertCardCollectionsSafe, grantCards, countOwnedCards, friendsList, inspectCards, sendCards, type CardSend } from "./township/cards.server";
 import { assertSaveShapeSafe, stripUnknownAvatars } from "./township/save-shape.server";
@@ -220,6 +220,12 @@ function encodeSave(s: Session): string | null {
     // inject, unban, skins, upgrades, cards, profile, season, regatta — is
     // covered without each having to remember.
     assertSaveShapeSafe(was, now);
+    // Regatta's own half: a completed task is a field-by-field record the
+    // game reads on upload, so the batch is checked against every invariant a
+    // real save holds before any of it can leave. Same loaded-vs-pushed rule —
+    // an old injector's fingerprints the save arrived with never block it, but
+    // a batch written here must be indistinguishable from game data.
+    assertRegattaSafe(was, now);
   }
   // v1.15 client behavior: after Load/Decode and edits, the payload sent to
   // the desktop is the decoded XML itself. The desktop writes those bytes

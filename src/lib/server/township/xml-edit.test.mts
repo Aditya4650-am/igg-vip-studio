@@ -1,7 +1,14 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { injectAvatars, injectRegata, injectSeason, inspectRegatta, REGATTA_MAX_TASKS } from "./inject.server.ts";
+import {
+  assertRegattaSafe,
+  injectAvatars,
+  injectRegata,
+  injectSeason,
+  inspectRegatta,
+  REGATTA_MAX_TASKS,
+} from "./inject.server.ts";
 import { maxBuildingsStash, maxFragments, parseOwnMeta, unlockEmoji } from "./desban.server.ts";
 import { applyStatChanges, parseStats, writeVar } from "./vars.server.ts";
 import { attrValue, findUnbalancedTag, insertInsideRoot, replaceElement } from "./xml-edit.server.ts";
@@ -312,6 +319,231 @@ test("the status shown for a batch size is the decision the server makes for it"
       );
     }
   }
+});
+
+/**
+ * The state the Add button used to be permanently dead in: a save genuinely
+ * taking part in a regatta, with a full task pool, that has completed
+ * **nothing** this week — so there is no `<MyOldTask>` to clone.
+ * `mGameInfo.current-9.xml` arrived exactly like this (live `<Regata>` window,
+ * 12 `<FreeTask>`, 16 `<TakenTask>`, `TaskQuota=15`, 0 records) and every
+ * reading of it said `no_template`.
+ */
+function greenWeekSave(): string {
+  const now = Math.floor(Date.now() / 1000);
+  const start = now - 3 * 86400;
+  const end = now + 4 * 86400;
+  return (
+    `<Global>` +
+    `<Var name="cityId" v="JqpjJQ9lom" t="s"/>` +
+    `<Var name="RegataTasksCompleted" v="2304" t="i"/>` +
+    `<Regata id="533" startTime="${start}" endTime="${end}" season="108" week="4" league="4" ` +
+    `score="33890" scoreUpd="${start + 900}">` +
+    `<FreeTask id="match3_create_bonus_lightning_7" type="" num="1" ver="59"/>` +
+    `<FreeTask id="match3_win_game_in_row_3" type="" num="2" ver="25"/>` +
+    `<FreeTask id="match3_create_bonus_bomb_1" type="" num="3" ver="69"/>` +
+    `<FreeTask id="match3_create_bonus_plane_1" type="" num="4" ver="85"/>` +
+    `<FreeTask id="match3_remove_chips_yellow_green_4" type="" num="5" ver="38"/>` +
+    `<FreeTask id="match3_combine_bonus_any_999" type="" num="6" ver="54"/>` +
+    `<FreeTask id="fruits_olive_5" type="" num="7" ver="27"/>` +
+    `<FreeTask id="orders_5" type="" num="10" ver="29"/>` +
+    `<TakenTask id="match3_create_bonus_with_chips_3" type="" need="150" user="6aI0uUa9SN" endTime="${end}" num="-1" ver="0" takenCounter="10"/>` +
+    `<TakenTask id="match3_create_bonus_rocket_3" type="" need="65" user="6aI0uUa9SN" endTime="${end}" num="-1" ver="0" takenCounter="11"/>` +
+    `<TakenTask id="match3_create_bonus_with_chips_2" type="" need="180" user="6aI0uUa9SN" endTime="${end}" num="-1" ver="0" takenCounter="15"/>` +
+    `<TakenTask id="match3_remove_chips_blue_red_999" type="" need="1300" user="6aI0uUa9SN" endTime="${end}" num="-1" ver="0" takenCounter="2"/>` +
+    `<TakenTask id="trains_3" type="" need="5" user="K70cFX2LJT" endTime="${end}" num="-1" ver="0" takenCounter="26"/>` +
+    `<Member cityId="6aI0uUa9SN" taskId="match3_create_bonus_with_chips_3" count="42" need="150"/>` +
+    `<Member cityId="K70cFX2LJT" taskId="trains_3" count="5" need="5"/>` +
+    `<Vars>` +
+    `<Var name="startTime" v="${start}" t="i"/>` +
+    `<Var name="endTime" v="${end}" t="i"/>` +
+    `<Var name="TaskQuota" v="15" t="i"/>` +
+    `<Var name="MySeenScore" v="33750" t="i"/>` +
+    `</Vars>` +
+    `</Regata>` +
+    `</Global>`
+  );
+}
+
+const attrsOf = (tag: string) =>
+  new Map([...tag.matchAll(/([\w:-]+)="([^"]*)"/g)].map((m) => [m[1]!, m[2]!]));
+
+test("a save with a full pool and nothing completed can take 10, 12 and 15 tasks", () => {
+  const xml = greenWeekSave();
+  assert.equal(inspectRegatta(xml).current, 0, "this save has no record to clone");
+  // The whole point: the badge and the reason both go live for the counts the
+  // user picks, not just the default batch.
+  for (const n of [10, 12, 15]) {
+    assert.equal(inspectRegatta(xml, n).reason, "ok", `${n} tasks must be offerable`);
+    assert.equal(inspectRegatta(xml, n).templates, 6, "the badge counts usable sources");
+  }
+
+  const out = injectRegata(xml, 15);
+  wellFormed(out);
+  const recs = [...out.matchAll(/<MyOldTask\b[^>]*?\/?>/g)].map((m) => m[0]);
+  assert.equal(recs.length, 15, "the requested batch lands");
+
+  const pool = new Set([
+    ...[...out.matchAll(/<FreeTask\b[^>]*\bid="([^"]*)"/g)].map((m) => m[1]!),
+    ...[...out.matchAll(/<TakenTask\b[^>]*\bid="([^"]*)"/g)].map((m) => m[1]!),
+  ]);
+  const start = Number(/<Regata\b[^>]*\bstartTime="(\d+)"/.exec(out)![1]);
+  const end = Number(/<Regata\b[^>]*\bendTime="(\d+)"/.exec(out)![1]);
+  const now = Math.floor(Date.now() / 1000);
+  const byId = new Map<string, Set<string>>();
+
+  for (const r of recs) {
+    const a = attrsOf(r);
+    const id = a.get("id")!;
+    // A record for an id this save was never offered is the old injector's
+    // `match3_1..match3_105` output — the single most readable fake there is.
+    assert.ok(pool.has(id), `${id} must come from this save's own pool`);
+    assert.equal(a.get("user"), "JqpjJQ9lom", "records are attributed to the save's own id");
+
+    const type = a.get("type");
+    if (id.startsWith("match3_")) {
+      assert.equal(type, "event_order");
+      assert.equal(a.get("eventType"), "Match3");
+      assert.equal(
+        a.get("target"),
+        id.replace(/^match3_/, "").replace(/_\d+$/, ""),
+        "target is the id minus match3_ and its difficulty suffix",
+      );
+      assert.equal(
+        Number(a.get("regataCash")),
+        Math.round(Number(a.get("score")) / 8),
+        "regataCash is round(score/8), as on 26/26 real match3 records",
+      );
+    } else {
+      assert.equal(type, "trains");
+      assert.equal(a.get("eventType"), undefined, "a trains record carries no eventType");
+      assert.equal(a.get("regataCash"), "12", "the one measured trains cash");
+    }
+
+    assert.equal(a.get("have"), a.get("need"), "a completion has have == need");
+    assert.ok([75, 115, 120, 125, 130, 140, 150].includes(Number(a.get("score"))), "score must be measured data");
+    assert.equal(a.get("anlLimit"), "15", "anlLimit is the block's own TaskQuota");
+    assert.ok(Number(a.get("anlNumber")) >= 1 && Number(a.get("anlNumber")) <= 15, "anlNumber cycles inside it");
+
+    const take = Number(a.get("takeTime"));
+    const done = Number(a.get("completeTime"));
+    const real = Number(a.get("realEndTime"));
+    assert.ok(take < done && done < real, "takeTime < completeTime < realEndTime, strictly");
+    assert.ok(real >= start && real <= end, "timestamps stay inside the window");
+    assert.ok(real < now, "a completion is never dated in the future");
+    assert.equal(a.get("endTime"), a.get("realEndTime"), "endTime equals realEndTime, as on every real record");
+
+    // Repeats are normal (a real week holds with_chips_3 three times), but a
+    // repeated id must repeat its own need/score/cash verbatim.
+    const variant = `${a.get("need")}/${a.get("score")}/${a.get("regataCash")}`;
+    if (!byId.has(id)) byId.set(id, new Set());
+    byId.get(id)!.add(variant);
+  }
+
+  // 6 distinct ids the save can actually source, cycled to 15 — and any id the
+  // save offers in `<FreeTask>` keeps that entry's num/ver exactly, which is
+  // what a real record does.
+  assert.equal(byId.size, 6, "only ids with a measured need and score are used");
+  for (const variants of byId.values()) assert.equal(variants.size, 1, "a repeated id repeats identically");
+
+  const freeEntries = new Map(
+    [...out.matchAll(/<FreeTask\b[^>]*?\/?>/g)].map((m) => {
+      const a = attrsOf(m[0]);
+      return [a.get("id")!, { num: a.get("num"), ver: a.get("ver") }];
+    }),
+  );
+  const freeIds = new Set<string>();
+  for (const r of recs) {
+    const a = attrsOf(r);
+    const free = freeEntries.get(a.get("id")!);
+    if (!free) continue;
+    freeIds.add(a.get("id")!);
+    assert.equal(a.get("num"), free.num, "num comes from the save's own pool entry");
+    assert.equal(a.get("ver"), free.ver, "ver comes from the save's own pool entry");
+  }
+  assert.deepEqual(
+    [...freeIds].sort(),
+    ["match3_create_bonus_bomb_1", "match3_create_bonus_plane_1"],
+    "both pool-sourced ids keep their own num/ver on every repeat",
+  );
+
+  // A wall of one score is the old injector's fingerprint; this batch is not.
+  assert.ok(new Set(recs.map((r) => attrsOf(r).get("score"))).size > 1, "scores must not be uniform");
+
+  // takenCounter starts at 2 the way three untouched weeks all do, and only
+  // grows inside the block.
+  const counters = recs.map((r) => Number(attrsOf(r).get("takenCounter")));
+  assert.deepEqual(counters, counters.map((_, i) => 2 + i), "the fresh counter runs 2,3,… in order");
+
+  // Placement, and the three counters that have to move with the records.
+  assert.ok(out.indexOf("<MyOldTask") < out.indexOf("<Vars"), "new records sit before <Vars>");
+  assert.match(out, /name="RegataTasksCompleted" v="2319"/, "the lifetime counter gains the batch");
+  const added = recs.reduce((a, r) => a + Number(attrsOf(r).get("score")), 0);
+  const blockScore = Number(/<Regata\b[^>]*\bscore="(\d+)"/.exec(out)![1]);
+  assert.equal(blockScore, 33890 + added, "<Regata score> carries the delta of the batch it holds");
+  const newest = Math.max(...recs.map((r) => Number(attrsOf(r).get("completeTime"))));
+  assert.equal(Number(/<Regata\b[^>]*\bscoreUpd="(\d+)"/.exec(out)![1]), newest, "scoreUpd is the newest completion");
+  // The block declares no taskCounter/takeConfirm, and it gains none.
+  assert.ok(!/<Var\b[^>]*\bname="taskCounter"/.test(out), "no fabricated taskCounter");
+});
+
+test("a save that has completed nothing must never be handed a teammate's id", () => {
+  // `user=` was measured to live on exactly three tags: <MyOldTask> and
+  // <MyTask> always carry the save's own cityId, and <TakenTask> always
+  // carries a clanmate's. On a save with no record of its own the old generic
+  // `user="…"` fallback matched <TakenTask> first, so every injected record
+  // would have been written with somebody else's id — the instant-ban story
+  // from the identity notes, and unreachable before only because such saves
+  // were refused outright with `no_template`.
+  const xml = greenWeekSave();
+  assert.match(xml, /<TakenTask[^>]*user="6aI0uUa9SN"/, "the fixture really does hold a teammate's id");
+  assert.ok(!/<MyOldTask/.test(xml), "and no record of its own");
+
+  const users = new Set(
+    [...injectRegata(xml, 12).matchAll(/<MyOldTask\b[^>]*\buser="([^"]*)"/g)].map((m) => m[1]),
+  );
+  assert.deepEqual([...users], ["JqpjJQ9lom"], "records are attributed to the save's own cityId");
+});
+
+test("the refusal still stands for ids no save has ever completed", () => {
+  // Every one of these is a real Township task, but not one appears on a
+  // completed record anywhere in the corpus, so `need` and `score` would have
+  // to be guessed — and a guessed score is precisely what gets read as a tool.
+  const now = Math.floor(Date.now() / 1000);
+  const xml =
+    `<Global><Var name="cityId" v="CITY1" t="s"/>` +
+    `<Regata id="533" startTime="${now - 3 * 86400}" endTime="${now + 4 * 86400}" score="100">` +
+    `<FreeTask id="coins_7" type="" num="1" ver="9"/>` +
+    `<FreeTask id="wagon_2" type="" num="2" ver="4"/>` +
+    `<FreeTask id="match3_create_bonus_rocket_3" type="" num="3" ver="7"/>` +
+    `<Vars><Var name="TaskQuota" v="15" t="i"/></Vars>` +
+    `</Regata></Global>`;
+  assert.equal(inspectRegatta(xml, 12).reason, "no_template");
+  assert.throws(() => injectRegata(xml, 12), /regatta/i);
+});
+
+test("the regatta push gate refuses a fabricated batch but not a measured one", () => {
+  const xml = greenWeekSave();
+  const out = injectRegata(xml, 15);
+  assert.doesNotThrow(() => assertRegattaSafe(xml, out), "a batch built only from measured values must pass");
+
+  const uniform = out.replace(/score="\d+"/g, 'score="135"');
+  assert.throws(() => assertRegattaSafe(xml, uniform), /regatta/i, "135 on every record is the old fingerprint");
+
+  const future = out.replace(/realEndTime="\d+"/g, `realEndTime="${Math.floor(Date.now() / 1000) + 99999}"`);
+  assert.throws(() => assertRegattaSafe(xml, future), /regatta/i, "a completion in the future must be refused");
+
+  const foreign = out.replace(/user="JqpjJQ9lom"/g, 'user="SOMEBODYELSE"');
+  assert.throws(() => assertRegattaSafe(xml, foreign), /regatta/i, "a second identity must be refused");
+
+  // The rule is a diff: a save that *arrived* carrying the old injector's
+  // uniform 135 keeps that key on both sides and stays pushable. Refusing it
+  // would hold a user's own file hostage for something this tool never did.
+  const odd = liveRegattaSave();
+  assert.doesNotThrow(
+    () => assertRegattaSafe(odd, injectRegata(odd, 6)),
+    "an oddity the save arrived with must never block it",
+  );
 });
 
 test("building stash handles paired Building elements", () => {
