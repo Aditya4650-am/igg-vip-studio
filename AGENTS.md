@@ -1029,6 +1029,105 @@ Guard rails in `studio-pipeline.test.ts`: the stripped-id set, a load-to-push
 round trip proving no fake avatar reaches the device, one refusal test per
 rule plus the "arrived with it, still pushes" half of each, and the sticker
 delimiter fix pinned in `xml-edit.test.mts` (`5 entries, not 6`).
+
+### Ban-protection pass: closing the ungated writes (2026-10-01)
+
+Reported as *"copied a complete friend city, applied that city's existing
+badge/frame/style, then got banned"* — and, more broadly, a request for ban
+protection across every feature. An audit traced every assignment to
+`s.rawXml` to its gates and measured the ungated ones against the corpus.
+
+**No profile defect was provable, and that is recorded here first so nobody
+reads the section below as the fix for that report.** On every save on file
+`injectProfile` with a catalog id is a pure append: the lists hold no
+duplicates (so `mergeCsv`'s dedupe never shrinks one), every catalog id is
+observed in some real save, the attribute order `name,type,value` is what the
+game writes, and the shape gate reported zero new keys after the write on all
+six files. The ban itself cannot be reproduced from here. The changes below
+are the gaps the audit found, not a proven root cause — **do not record this
+as solved.**
+
+**Profile writer (`injectProfile`), three hardenings:**
+
+- The `findConfigsSpan() === null` fallback wrote the `<DataElem>` before
+  `</root>` — past `</Global>`, which the game never reads — so it reported
+  success and changed nothing. It now throws.
+- When the field existed *outside* the span the writer inserted a **second**
+  copy; the game reads whichever it finds first and the other is silently
+  dead. It now throws instead of duplicating.
+- It cleared `NewBadges` / `NewFrames` / `NewStyles` / `NewThemes` on every
+  unlock — a write to state the edit had no business changing. Measured: all
+  four are empty on every save on file, and only `NewExpRanks` (never in the
+  map) ever carries values. Removed.
+
+**Two new keys in `saveShapeProblems`:**
+
+- `profile-store-dup:<field>` — more than one `PlayerProfile`, `Configs` or
+  `Unlocked*` DataElem. 6/6 real saves hold exactly one of each. This is the
+  shape half of the duplication bug above: a write the gate cannot see the
+  intent of still cannot leave a duplicate behind.
+- `stash-dup-id:<id>` — a repeated `<Building id>` in `<BuildingsStash>`.
+  6/6 real saves have none, across stashes of 6 to 1049 rows, and
+  `maxBuildingsStash` collects `seen` before appending so it can never trip
+  this itself.
+
+**`assertProgressionsSafe(loaded, pushed, donor?)`** — a *pair* comparator
+wired into `encodeSave` beside the other gates. It cannot use the key-diff,
+because a regression only exists between two documents:
+
+- `regata-tasks-completed-lower` — `RegataTasksCompleted` is a lifetime
+  counter (136, 136, 139, 2315, 2319, 9868, 44911 across the corpus) and the
+  Stats tab exposes it as `reg`, so a typed number can walk it backwards. The
+  one legitimate fall is a restore, which adopts the friend's whole counter
+  through `INICIAL_VARS`; that is excused **only** when the pushed value is
+  exactly the donor's, never merely because a donor was fetched. Verified on
+  two real saves: 44911 → 136 passes with the donor in hand and refuses
+  without one, and a removal (`100 -> gone`) is refused even with a donor,
+  because a donor can excuse copying a value, not deleting the field.
+- `upgrade-level-lower:<tag>:<id>` — factory/train/island levels only rise in
+  game, and `<Upgrade>` appears in no restore block list, so nothing but the
+  Factories tab can move it and there is no legitimate drop to excuse.
+
+**Candidate rules dropped because the measurement contradicted them — do not
+re-add them:**
+
+- **Skins ids cannot be gated on the catalog.** The corpus uses 57 distinct
+  `current=` ids and 288 distinct `available` ids, and `RAW_SKINS` (240 ids,
+  13 groups) is missing 23 of the `current` ones — every `*_Default` id for a
+  start, plus `Skin_Chicken_mars2025`, `Skin_Cow_arab`, `Skin_Fortress_aztecs`
+  and 20 more. An id gate would refuse saves Playrix is serving right now.
+  Same lesson `donorIds` taught the profile rule: a catalog only answers for
+  the ids it measured.
+- **Museum `ArtInfo` `"ind"` is not unique** — one save holds 354 entries
+  with a single distinct value, another 107 with three. It is not an
+  identifier.
+- **`WHUdup` is not `tier XOR 0x1eadabcc`.** Measured on **4/4 game-written
+  saves** (three FetchCity responses plus a decoded file):
+  `WHUdup ^ 0x1eadabcc === WareHouseCashUpgrade` — the name says it, *WHUdup
+  = WareHouseCashUpgrade duplicate*. `applyBarnCapacity()` writes the other
+  convention (`WHUdup = tier ^ XOR`, `WareHouseCashUpgrade = capacity`), so
+  its output satisfies `BARN_CAPACITY_MAP[WHUdup^XOR] === WareHouseCashUpgrade`
+  — a relation only `mGameInfo.current.xml`, the known tool-edited file, also
+  satisfies. **Not gated and not changed**: six saves cannot settle which of
+  the two numbers the game actually reads, and guessing wrong would either
+  refuse every barn edit or write a different wrong pair. Open question, with
+  the measurement on file; settle it with a save where the two conventions
+  can be told apart.
+
+Guard rails in `studio-pipeline.test.ts`:
+`profile: a second copy of a store is refused, and no unlock ever lands
+outside Configs` (duplicate store refused *and* arrived-that-way passes, the
+unlock lands inside `Configs`, both writer refusals, the `New*` marker
+surviving) and
+`progression: a lifetime counter and a factory level only ever go up` (down
+refused, up allowed, an untracked counter gains no rule, removal refused,
+donor excused only by its exact value, factory level down refused,
+arrived-low passes).
+
+A corpus sweep pushed each new rule through the real gates the way `encodeSave`
+would — profile unlock, decor stash in both the plain and the DataStore form,
+factory levels raised to the save's own ceiling, and skins, across all six
+saves: **0 refusals**.
 ## Avatar icons
 
 `public/avatars/ava1.webp` … `ava349.webp` are the real profile pictures from

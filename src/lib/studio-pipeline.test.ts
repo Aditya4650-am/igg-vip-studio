@@ -15,13 +15,13 @@ const { iconForZoo } = await import("./game-icon-map.ts");
 const { iconForUpgradeLabel } = await import("./game-icon-map.ts");
 const { ZOO_REQUIREMENTS } = await import("./server/township/zoo.server.ts");
 const { readdirSync, existsSync, readFileSync } = await import("node:fs");
-const { injectRegata, injectAvatars, getExistingAvatars, unlockAllAvatars } =
+const { injectRegata, injectAvatars, injectProfile, getExistingAvatars, unlockAllAvatars } =
   await import("./server/township/inject.server.ts");
 const { assertCardCollectionsSafe, cardProblems, CARD_IDS, CARD_STOCK_MAX } =
   await import("./server/township/cards.server.ts");
 const { CARD_GROUPS, cardNumber, CARD_COUNT } = await import("./cards.ts");
 const { CHAT_EMOJI_IDS } = await import("./server/township/chat-emoji.server.ts");
-const { saveShapeProblems, assertSaveShapeSafe, stripUnknownAvatars, isRealAvatarId } =
+const { saveShapeProblems, assertSaveShapeSafe, stripUnknownAvatars, isRealAvatarId, assertProgressionsSafe, progressionProblems } =
   await import("./server/township/save-shape.server.ts");
 
 const { token } = verifyLicenseKey("IGG-OWNER-TESTKEY", "TEST-DEVICE-0001");
@@ -910,6 +910,117 @@ test("a restore may carry the donor's own ids, but never a shape the game does n
     () => assertSaveShapeSafe(emoji(",st1,,st2,"), emoji(",st1,,st2,,"), emoji(",st1,,st2,,")),
     /chat-emoji-shape/,
     "the delimiter rule is not relaxed by carrying a donor",
+  );
+});
+
+test("profile: a second copy of a store is refused, and no unlock ever lands outside Configs", () => {
+  const KNOWN = "UVIgUB8QfkY4NA44Bz0XVw0vCBEWXQ=="; // Badge 1 in RAW_PROFILE
+  const SECOND = "USVTHSoRQlMJCDkDWRI/DykOExRTNys="; // Badge 2 in RAW_PROFILE
+  // The real shape: a `Configs` dataStore nested inside `PlayerProfile`, with
+  // the unlocked list as a child. 6/6 real saves hold exactly one of each.
+  const profile = (children: string, where = "inside") =>
+    where === "inside"
+      ? `<root><Global><DataElem name="PlayerProfile" type="dataStore"><DataElem name="Configs" type="dataStore">${children}</DataElem></DataElem></Global></root>`
+      // ...and the same list sitting *past* PlayerProfile's closer, where the
+      // Configs span cannot reach it.
+      : `<root><Global><DataElem name="PlayerProfile" type="dataStore"><DataElem name="Configs" type="dataStore"></DataElem></DataElem>${children}</Global></root>`;
+  const badges = (v: string) => `<DataElem name="UnlockedBadges" type="string" value="${v}"/>`;
+
+  // --- a duplicate store ------------------------------------------------
+  const one = profile(badges(""));
+  const two = profile(badges("")).replace(
+    "</Global>",
+    '<DataElem name="Configs" type="dataStore"/></Global>',
+  );
+  assert.deepEqual(
+    saveShapeProblems(one).filter((k) => k.startsWith("profile-store-dup")),
+    [],
+    "one Configs, one PlayerProfile, one list: the shape every real save has",
+  );
+  assert.ok(saveShapeProblems(two).includes("profile-store-dup:Configs"), "a second Configs is a shape no save has");
+  assert.throws(() => assertSaveShapeSafe(one, two), /profile-store-dup/);
+  assert.doesNotThrow(
+    () => assertSaveShapeSafe(two, two),
+    "a save that arrived with two stores is not this edit's fault",
+  );
+
+  // --- the writer itself ------------------------------------------------
+  const out = injectProfile(one, { Badges: [KNOWN] });
+  assert.ok(out.includes(`value="${KNOWN}"`), "the unlock lands");
+  assert.ok(
+    out.indexOf(KNOWN) > out.indexOf('name="Configs"'),
+    "and inside the Configs store the game reads",
+  );
+  assert.deepEqual(
+    saveShapeProblems(out).filter((k) => k.startsWith("profile-")),
+    [],
+    "an unlock straight from the catalog breaks no profile rule",
+  );
+
+  // A field that exists but sits outside the span must not be duplicated: the
+  // game would read whichever copy it finds first and the other would be dead.
+  const misplaced = profile(badges(""), "outside");
+  assert.throws(() => injectProfile(misplaced, { Badges: [KNOWN] }), /bản sao|ngoài vùng Configs/);
+
+  // With no Configs at all there is nowhere to write. The old fallback put the
+  // element before `</root>` — past `</Global>`, which the game never reads —
+  // so it reported success and changed nothing.
+  const nowhere = "<root><Global><Var name=\"levelup\" v=\"1\"/></Global></root>";
+  assert.throws(() => injectProfile(nowhere, { Badges: [KNOWN] }), /Configs/);
+
+  // The "newly earned" markers belong to the player, not to this edit.
+  const withMarker = profile(`${badges(KNOWN)}<DataElem name="NewBadges" type="string" value="${SECOND}"/>`);
+  const marked = injectProfile(withMarker, { Badges: [SECOND] });
+  assert.ok(
+    marked.includes(`<DataElem name="NewBadges" type="string" value="${SECOND}"/>`),
+    "an unlock must not silently clear a marker it has no business touching",
+  );
+});
+
+test("progression: a lifetime counter and a factory level only ever go up", () => {
+  const XOR = 32162029;
+  const doc = (reg: string | null, lvl: string) =>
+    `<root><Global>${
+      reg === null ? "" : `<Var name="RegataTasksCompleted" v="${reg}"/>`
+    }<Upgrade version="4"><Factory id="bakery" level="${lvl}" slx="${(Number(lvl) ^ XOR) >>> 0}"/></Upgrade></Global></root>`;
+  const base = doc("100", "7");
+
+  assert.deepEqual(progressionProblems(base, base), [], "an untouched save has nothing to refuse");
+
+  // --- the lifetime regatta counter ---
+  assert.deepEqual(progressionProblems(base, doc("90", "7")), ["regata-tasks-completed-lower:100->90"]);
+  assert.throws(() => assertProgressionsSafe(base, doc("90", "7")), /regata-tasks-completed-lower/);
+  assert.doesNotThrow(() => assertProgressionsSafe(base, doc("200", "7")), "raising it is the whole point");
+  assert.doesNotThrow(
+    () => assertProgressionsSafe(doc(null, "7"), base),
+    "a counter that was never tracked gains no rule",
+  );
+
+  // Losing the var entirely is a drop, and a donor cannot excuse a removal.
+  assert.throws(() => assertProgressionsSafe(base, doc(null, "7")), /100->gone/);
+
+  // --- a restore legitimately adopts the friend's own counter ---
+  const donor = doc("50", "1");
+  assert.throws(
+    () => assertProgressionsSafe(base, doc("90", "7"), donor),
+    /regata-tasks-completed-lower/,
+    "having fetched a friend excuses nothing by itself",
+  );
+  assert.doesNotThrow(
+    () => assertProgressionsSafe(base, doc("50", "7"), donor),
+    "the donor's exact value is theirs to copy verbatim",
+  );
+
+  // --- factory / train / island levels ---
+  assert.throws(
+    () => assertProgressionsSafe(base, doc("100", "6")),
+    /upgrade-level-lower:Factory:bakery:7->6/,
+    "a level no save ever loses must not leave this tool",
+  );
+  assert.doesNotThrow(() => assertProgressionsSafe(base, doc("100", "8")), "raising a factory is the feature");
+  assert.doesNotThrow(
+    () => assertProgressionsSafe(doc("100", "6"), doc("100", "6")),
+    "arrived at level 6: not our doing",
   );
 });
 

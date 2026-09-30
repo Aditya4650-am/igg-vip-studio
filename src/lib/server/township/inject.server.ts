@@ -340,33 +340,38 @@ export function injectProfile(xml: string, selection: Record<string, string[]>) 
       const abs = s0 + m.index;
       const replacement = m[1] + value + m[3];
       text = text.slice(0, abs) + replacement + text.slice(abs + m[0].length);
-    } else if (span) {
-      const tag = `\n\t\t\t\t\t<DataElem name="${field}" type="string" value="${value}"/>`;
-      text = text.slice(0, span[1]) + tag + text.slice(span[1]);
-    } else {
-      text = insertBeforeRoot(text, `\n<DataElem name="${field}" type="string" value="${value}"/>`);
+      continue;
     }
-  }
 
-  const newMap: Record<string,string> = {
-    UnlockedBadges: "NewBadges",
-    UnlockedFrames: "NewFrames",
-    UnlockedStyles: "NewStyles",
-    UnlockedThemes: "NewThemes",
-  };
-  for (const unlocked of Object.keys(unlockMap)) {
-    const newName = newMap[unlocked];
-    if (!newName) continue;
-    span = findConfigsSpan(text);
-    const region = span ? text.slice(span[0], span[1]) : text;
-    const esc = newName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pat = new RegExp(`(<DataElem\\b(?=[^>]*\\bname="${esc}")[^>]*\\bvalue=")([^"]*)(")`, "i");
-    const m = pat.exec(region);
-    if (m) {
-      const abs = (span ? span[0] : 0) + m.index;
-      text = text.slice(0, abs) + m[1] + "" + m[3] + text.slice(abs + m[0].length);
+    // The field is not inside the Configs span. Creating it is only correct
+    // when the document genuinely has no such field: if one exists somewhere
+    // the span did not cover (a second `Configs`, say), a second copy leaves
+    // the game reading whichever it finds first and the other one silently
+    // dead — the shape gate calls that `profile-store-dup`, but refusing here
+    // means it never gets written in the first place.
+    const anywhere = new RegExp(`<DataElem\\b(?=[^>]*\\bname="${esc}")[^>]*>`, "i");
+    if (anywhere.test(text)) {
+      throw new Error(
+        `Không mở khóa hồ sơ: <DataElem name="${field}"> nằm ngoài vùng Configs của ` +
+          "PlayerProfile. Viết thêm một bản sao thứ hai sẽ khiến game đọc nhầm danh sách.",
+      );
     }
+    // Never fall back to before `</root>`: that strip sits past `</Global>`,
+    // which the game does not read, so the edit would report success and
+    // change nothing in game.
+    if (!span) {
+      throw new Error(
+        "Không mở khóa hồ sơ: save này không có <DataElem name=\"Configs\"> trong " +
+          "PlayerProfile, nên không có nơi nào để ghi danh sách vào.",
+      );
+    }
+    const tag = `\n\t\t\t\t\t<DataElem name="${field}" type="string" value="${value}"/>`;
+    text = text.slice(0, span[1]) + tag + text.slice(span[1]);
   }
+  // The `New*` "unseen badge" markers are deliberately left alone. They are
+  // empty on every save measured (only `NewExpRanks` ever carries values), and
+  // clearing them was a write to state this edit had no business changing: a
+  // marker the save arrived with belongs to the player, not to a badge unlock.
   return text;
 }
 

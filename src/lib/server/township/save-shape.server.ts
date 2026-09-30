@@ -202,6 +202,18 @@ function shapeProblems(xml: string, known: DonorIds | null): string[] {
     }
   }
 
+  // ---- the profile stores themselves appear exactly once -----------------
+  // A second `<DataElem>` for the same field leaves the game reading whichever
+  // copy it finds first, so the other is silently dead — and `Configs` is
+  // searched for *after* the `PlayerProfile` open tag, so a stray one elsewhere
+  // is enough to send a write to the wrong store. Measured: 6/6 real saves
+  // hold exactly one `PlayerProfile`, one `Configs` and one of each list.
+  for (const name of ["PlayerProfile", "Configs", ...Object.keys(PROFILE_FIELDS)]) {
+    let n = 0;
+    for (const _ of xml.matchAll(new RegExp(`<DataElem\\b[^>]*\\bname="${name}"[^>]*>`, "gi"))) n++;
+    if (n > 1) out.add(`profile-store-dup:${name}`);
+  }
+
   // ---- <Upgrade> level / slx --------------------------------------------
   // Bumping `level` without `slx` writes a save that disagrees with itself in
   // a field the game reads for free; both are always rewritten together.
@@ -212,6 +224,21 @@ function shapeProblems(xml: string, known: DonorIds | null): string[] {
       if (((Number(m[2]) ^ UPGRADE_XOR) >>> 0) !== (Number(m[3]) >>> 0)) {
         out.add(`upgrade-slx:${m[1]}:${attrValue(m[0], "id") ?? ""}`);
       }
+    }
+  }
+
+  // ---- <BuildingsStash> rows are unique ------------------------------------
+  // The decor feature only ever appends ids the stash does not already hold
+  // (`maxBuildingsStash` collects `seen` first), so a repeated `id` means
+  // something else duplicated a row. Measured 6/6 real saves: no repeats, in
+  // stashes ranging from 6 to 1049 rows.
+  const stash = /<BuildingsStash\b[^>]*>([\s\S]*?)<\/BuildingsStash\s*>/i.exec(xml);
+  if (stash?.[1]) {
+    const seen = new Set<string>();
+    for (const m of stash[1].matchAll(/<Building\b[^>]*\bid="([^"]*)"/gi)) {
+      const id = m[1]!;
+      if (seen.has(id)) out.add(`stash-dup-id:${id}`);
+      seen.add(id);
     }
   }
 
@@ -257,6 +284,94 @@ export function assertSaveShapeSafe(loaded: string, pushed: string, donor?: stri
   throw new Error(
     `Không đẩy file lên máy: save bị hỏng sau khi sửa (${broken.slice(0, 6).join(", ")}` +
       `${broken.length > 6 ? `, +${broken.length - 6}` : ""}). ` +
+      "Thành phố thật chưa từng cho kết quả này, nên server Playrix có thể coi save của bạn là gian lận.",
+  );
+}
+
+/** First `<Var name=… v="…">` read as an integer, or `null` when absent. */
+function readCounter(xml: string, name: string): number | null {
+  const m = new RegExp(`<Var\\b(?=[^>]*\\bname="${name}")[^>]*\\bv="(-?\\d+)"`).exec(xml);
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * Every `<Upgrade>` family row keyed `tag:id` -> `level`.
+ *
+ * The rows are matched exactly the way `upgrade-slx` matches them: a tag
+ * carrying both `level` and `slx`, which is this family and nothing else in a
+ * real save. A row with no `id` cannot be identified across two documents, so
+ * it is skipped rather than keyed on a name every row would share.
+ */
+function upgradeLevels(xml: string): Map<string, number> {
+  const out = new Map<string, number>();
+  if (!xml.includes('slx="')) return out;
+  for (const m of xml.matchAll(
+    /<([A-Za-z][\w.-]*)\b(?=[^>]*\blevel="(-?\d+)")(?=[^>]*\bslx="-?\d+")[^>]*>/g,
+  )) {
+    const id = attrValue(m[0], "id");
+    if (!id) continue;
+    out.set(`${m[1]}:${id}`, Number(m[2]));
+  }
+  return out;
+}
+
+/**
+ * Fields a real save only ever moves **upwards**, refused when this push is
+ * what moved one down.
+ *
+ * Unlike the key-diff above, this one is naturally a pair: a regression only
+ * exists *between* two documents, so it is compared directly against the save
+ * as it was loaded. Two rules, both measured:
+ *
+ * - `regata-tasks-completed-lower` — `RegataTasksCompleted` is a lifetime
+ *   counter (136 .. 44911 across the corpus) and the Stats tab exposes it as
+ *   `reg`, so a typed number can walk it backwards. The one legitimate way for
+ *   it to fall is a restore, which copies the friend's whole counter verbatim
+ *   via `INICIAL_VARS`; that is excused **only** when the pushed value is
+ *   exactly the donor's, never merely because a donor was fetched.
+ * - `upgrade-level-lower:<tag>:<id>` — factory, train and island levels only
+ *   rise in game. `<Upgrade>` is in no restore block list, so nothing but the
+ *   Factories tab can move it and there is no legitimate drop to excuse.
+ */
+export function progressionProblems(
+  loaded: string,
+  pushed: string,
+  donor?: string | null,
+): string[] {
+  const out: string[] = [];
+
+  const before = readCounter(loaded, "RegataTasksCompleted");
+  const after = readCounter(pushed, "RegataTasksCompleted");
+  if (before !== null && (after === null || after < before)) {
+    const donorValue = donor ? readCounter(donor, "RegataTasksCompleted") : null;
+    const excused = after !== null && donorValue !== null && after === donorValue;
+    if (!excused) {
+      out.push(`regata-tasks-completed-lower:${before}->${after === null ? "gone" : after}`);
+    }
+  }
+
+  const was = upgradeLevels(loaded);
+  if (was.size) {
+    for (const [key, level] of upgradeLevels(pushed)) {
+      const prev = was.get(key);
+      if (prev !== undefined && level < prev) out.push(`upgrade-level-lower:${key}:${prev}->${level}`);
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Push gate for the counters above. Runs beside the other gates in
+ * `encodeSave`, so every path that ends in a push is covered.
+ */
+export function assertProgressionsSafe(loaded: string, pushed: string, donor?: string | null) {
+  if (loaded === pushed) return;
+  const bad = progressionProblems(loaded, pushed, donor);
+  if (!bad.length) return;
+  throw new Error(
+    `Không đẩy file lên máy: một chỉ số chỉ được tăng chứ không được giảm sau khi sửa ` +
+      `(${bad.join(", ")}). ` +
       "Thành phố thật chưa từng cho kết quả này, nên server Playrix có thể coi save của bạn là gian lận.",
   );
 }

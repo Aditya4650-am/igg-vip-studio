@@ -10,7 +10,7 @@ import { applyBarnCapacity, applyBarnItems, barnInfo, ensureBarnCapacity } from 
 import { assertRegattaSafe, injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, injectUpgradeLevels, inspectRegatta, parseProfileUnlocked, upgradeMaxLevel, discoverUpgrades, REGATTA_DEFAULT_TASKS, REGATTA_MAX_TASKS, UPGRADE_REF_CAP } from "./township/inject.server";
 import { grantArtifacts } from "./township/museum.server";
 import { assertCardCollectionsSafe, grantCards, countOwnedCards, friendsList, inspectCards, sendCards, type CardSend } from "./township/cards.server";
-import { assertSaveShapeSafe, stripUnknownAvatars } from "./township/save-shape.server";
+import { assertProgressionsSafe, assertSaveShapeSafe, stripUnknownAvatars } from "./township/save-shape.server";
 import { completeZoo, discoverZoo, type ZooPaddock } from "./township/zoo.server";
 import {
   backupFreshStartState,
@@ -227,6 +227,12 @@ function encodeSave(s: Session): string | null {
     // something this tool made up — refusing them made *Restore full city*
     // fail against every friend richer than the catalog.
     assertSaveShapeSafe(was, now, s.friendXml);
+    // And the progression half: the lifetime regatta counter and the
+    // factory/train/island levels only ever rise in game, so a push that walks
+    // one backwards is refused here rather than on device. The donor rides
+    // along because a restore legitimately replaces our counter with the
+    // friend's own — but only their exact value is excused, not any drop.
+    assertProgressionsSafe(was, now, s.friendXml);
     // Regatta's own half: a completed task is a field-by-field record the
     // game reads on upload, so the batch is checked against every invariant a
     // real save holds before any of it can leave. Same loaded-vs-pushed rule —
