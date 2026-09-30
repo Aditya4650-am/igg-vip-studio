@@ -1346,6 +1346,15 @@ export function fetchCityXml(cityId: string, bver = "", fver = ""): Promise<stri
             fail("FetchCity network error");
           } else if (lower.includes("city id không hợp lệ") || lower.includes("invalid city")) {
             fail("City ID không hợp lệ");
+          } else if (lower.includes("no data")) {
+            // Playrix answered `{"result": null}`: the request was fine but that
+            // id has no city on the game server (never synced, or it is not a
+            // city id). Measured on a real friend from the client's list whose
+            // fetch failed three times while two other friends returned full
+            // cities with the same version — so the version is not the cause.
+            // Reporting the generic failure here makes a valid id look like a
+            // broken downloader.
+            fail("Playrix không có city cho id này — có thể người chơi chưa từng đồng bộ");
           } else {
             fail("FetchCity thất bại");
           }

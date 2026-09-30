@@ -695,6 +695,25 @@ live from `ts_aes_encode`, asserts `decryptResponseBody` reproduces the
 plaintext, that `n0 = 1` and `n0 = 3` provably do *not* (so the assertion is not
 vacuous), and that the Python port can read its own output.
 
+### "FetchCity thất bại" on one friend while others download (2026-09-30)
+
+Three fetches for `xUQ84bFr0g` (a real friend from the client's own list,
+Lv6) failed with the generic message while `ERqKNLT2ob` and `3ZVJSA080P`
+returned full cities with the same `39.0.3`/`3903` pair — so the version
+floor is not the cause. Running the helper by hand gives the answer:
+
+    {"ok": false, "error": "FetchCity no data: {'result': None}"}
+
+Playrix accepted the request and simply has **no city stored for that id**
+(never synced, or the id is not a city id). The error mapper put `no data`
+into its catch-all branch, so a valid friend id read as a broken downloader.
+It now answers
+`Playrix không có city cho id này — có thể người chơi chưa từng đồng bộ`,
+still without printing the upstream envelope (the no-metadata rule above it).
+
+A `no data` answer is therefore **not** a bug to chase in the downloader:
+check the id against another tool first.
+
 ## Device paths
 
 The save is NOT always at `/data/data/<pkg>/saves/`. Layouts differ by build
