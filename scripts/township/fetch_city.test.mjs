@@ -153,4 +153,13 @@ test("FetchCity has no deadline small enough to cut off a large city", () => {
     /^cryptography[^\n]*$/m,
     "requirements.txt no longer asks for cryptography; the download falls back to the slow port",
   );
+
+  // ...and the install has to actually be wired into the deploy, or the fast
+  // backend silently disappears again while every other check still passes.
+  const render = readFileSync(join(proj, "render.yaml"), "utf8");
+  const build = /buildCommand:\s*(.+)/.exec(render)?.[1] ?? "";
+  assert.ok(build.includes("setup_fast_aes.py"), "render.yaml no longer runs the fast-AES setup");
+  assert.ok(build.includes("|| true"), "the fast-AES setup could fail the build");
+  assert.ok(readFileSync(join(here, "setup_fast_aes.py"), "utf8").includes("sys.exit(0)"),
+    "setup_fast_aes.py lost the always-exit-0 guard that keeps it from breaking the deploy");
 });

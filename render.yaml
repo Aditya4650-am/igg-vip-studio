@@ -6,15 +6,17 @@ services:
     region: singapore
     branch: main
     autoDeploy: true
-    # The pip step is best-effort on purpose (note the `|| true`): it only tries
-    # to make `cryptography` available to scripts/township/fetch_city.py, which
-    # decrypts the FetchCity response with Playrix's AES-CTR. The hand-rolled
-    # port in ts_township_core.py is correct but costs ~22 us per byte, so a
-    # large city took long enough to hit the child timeout while a small one did
-    # not. If pip or the wheel is unavailable, the port is used and the download
-    # is simply slower - it must never break the build. `--only-binary` keeps it
-    # from trying to compile (cryptography needs Rust), failing fast instead.
-    buildCommand: NPM_CONFIG_PRODUCTION=false npm install && (python3 -m pip install --only-binary=:all: --break-system-packages -r requirements.txt || python3 -m pip install --only-binary=:all: --user -r requirements.txt || true) && npm run build
+    # Best-effort install of `cryptography` for scripts/township/fetch_city.py.
+    # The FetchCity response is decrypted with Playrix's AES-CTR and the
+    # hand-rolled port in ts_township_core.py costs ~22 us per byte - 17 s for a
+    # 750 KB city, which is what pushed large cities past the child timeout while
+    # small ones still succeeded. `cryptography` produces the same keystream in
+    # ~1 ms, verified byte-for-byte against the port. The script always exits 0
+    # and the `|| true` is belt and braces: if it cannot install, fetch_city.py
+    # keeps using the port and the raised deadline still lets the download
+    # finish. Its attempts are echoed because the build log is the only place
+    # the outcome can be seen.
+    buildCommand: NPM_CONFIG_PRODUCTION=false npm install && (python3 scripts/township/setup_fast_aes.py || true) && npm run build
     startCommand: node .output/server/index.mjs
     envVars:
       - key: NITRO_PRESET
