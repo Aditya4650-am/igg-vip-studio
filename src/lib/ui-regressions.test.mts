@@ -218,35 +218,33 @@ test("the send panel takes a ticked batch, not one card per press", () => {
   assert.ok(tab.includes('tr("sendCapNote")'), "an over-cap selection must say why it cannot be queued");
 });
 
-test("the age warning is shown where the copy happens, and never gates it", () => {
+test("the copy is never gated, and no age banner is drawn over it", () => {
   const tab = read("../components/studio-app.tsx");
-  const i18n = read("i18n.ts");
   const server = read("server/studio.server.ts");
 
-  // The account's own age is the one thing on file that separates every clean
-  // save from every banned one, so it has to be read where the push is
-  // pressed rather than only inside a test.
+  // The account's age is still measured and exposed — it is the one field on
+  // file that separates every clean save from every banned one — but the
+  // banner was explicitly asked to be removed on 2026-10-02: a nag above the
+  // buttons was not what the user wanted, so the tab must not draw one.
   assert.ok(
     /accountAge:\s*accountAgeInfo\(/.test(server),
-    "the snapshot must expose the account's age to the tab",
+    "the snapshot must keep exposing the account's age",
+  );
+  assert.ok(
+    !tab.includes("session.accountAge"),
+    "the tab must not render an account-age banner",
+  );
+  assert.ok(
+    !tab.includes("acctFresh"),
+    "the age banner copy must not be used anywhere",
+  );
+  assert.ok(
+    !/acctFresh/.test(read("i18n.ts")),
+    "the banner strings are gone with it",
   );
 
-  assert.ok(tab.includes("session.accountAge"), "the tab must read it");
-  assert.ok(/\bfresh\b/.test(tab), "the warning is keyed on `fresh`");
-
-  // Twice: above the restore buttons, and above the copy section — the two
-  // places a full copy is actually queued.
-  const shown = tab.match(/tr\("acctFresh(?:Hours)?"\)/g) ?? [];
-  assert.ok(shown.length >= 2, `the warning must appear at both copy points, found ${shown.length}`);
-
-  for (const key of ["acctFresh", "acctFreshHours"]) {
-    assert.ok(new RegExp(`\\b${key}:`).test(i18n), `${key} must exist in the dictionary`);
-  }
-  assert.ok(/\bacctFresh:\s*"[^"]*\{d\}/.test(i18n), "acctFresh must name the day count");
-  assert.ok(/\bacctFreshHours:\s*"[^"]*\{h\}/.test(i18n), "acctFreshHours must name the hours");
-
-  // A warning that disables the button is a gate by another name, and the
-  // block was explicitly declined: push stays available.
+  // The block was explicitly declined, and stays declined: push is available
+  // whatever the account's age.
   assert.ok(
     !/disabled=\{[^}]*accountAge/.test(tab),
     "the account's age must not gate the push",

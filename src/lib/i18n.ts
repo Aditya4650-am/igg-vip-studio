@@ -24,10 +24,6 @@ export const LANGS: { id: Lang; label: string }[] = [
 ];
 
 const vi = {
-  acctFresh:
-    "Cảnh báo: tài khoản này mới {d} ngày vào game — chưa đủ 1 ngày. Trong hồ sơ của mình, mọi save copy lên tài khoản trẻ hơn 1 ngày đều bị khoá ngay ở hành động co-op đầu tiên (barn request, sticker, chat). Hãy copy vào tài khoản đã chơi ít nhất 1 ngày. Vẫn bấm được — đây chỉ là cảnh báo, không chặn.",
-  acctFreshHours:
-    "Cảnh báo: tài khoản này mới mở {h} giờ trước và chưa có bộ đếm ngày — quá trẻ để nhận một thành phố level cao. Trong hồ sơ của mình, mọi save copy lên tài khoản trẻ hơn 1 ngày đều bị khoá ngay ở hành động co-op đầu tiên. Hãy copy vào tài khoản đã chơi ít nhất 1 ngày. Vẫn bấm được — đây chỉ là cảnh báo, không chặn.",
  app: "IGG VIP TOOL",
  tagline: "Township tool",
  loginTitle: "Mở Client",
@@ -372,10 +368,6 @@ const vi = {
 };
 
 const en: typeof vi = {
-  acctFresh:
-    "Warning: this account has entered the game for {d} day(s) — under one day old. Every save on record copied onto an account younger than a day was banned on its very first co-op action: a barn request, a sticker, a message. Copy onto an account played for at least a day instead. Pushing still works: this is a warning, not a block.",
-  acctFreshHours:
-    "Warning: this account first opened {h} hour(s) ago and has never counted a day — far too young to carry a level-1000 city. Every save on record copied onto an account younger than a day was banned on its very first co-op action. Copy onto an account played for at least a day instead. Pushing still works: this is a warning, not a block.",
  app: "IGG VIP TOOL",
  tagline: "Township tool",
  loginTitle: "Client",

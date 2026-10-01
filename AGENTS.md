@@ -1912,48 +1912,88 @@ values the clean city never had** — and `DaysEnteredGame` is *not* among them
 (banned 0, donor 16), which is what proves the field describes this account
 rather than anything a copy brought in.
 
-### The age warning: a warning, never a gate
+### The age warning: measured, then removed on request (2026-10-02)
 
-`src/lib/account-age.ts` — browser-safe and pure, like `regatta.ts`.
-`accountAgeInfo(xml)` reads `DaysEnteredGame` and `firstVisitTime` in one pass
-(attribute order varies, so both are pulled out of each `<Var>` tag rather than
-assuming one precedes the other) and the snapshot exposes it as
-`session.accountAge`. The Unban tab prints `acctFresh` / `acctFreshHours` above
-the restore buttons and above the copy section when `fresh` is set. **Push stays
-enabled** — the user picked a warning over a block.
+`src/lib/account-age.ts` **stays** — browser-safe and pure, like `regatta.ts`
+— and `accountAgeInfo(xml)` still feeds `session.accountAge` from the snapshot.
+What is gone is the **banner**: both `acctFresh` / `acctFreshHours` blocks were
+deleted from the Unban tab and their strings from `i18n.ts`, on the explicit
+instruction *"remove all the warnings"*. The measurement below is unchanged
+and is still the strongest single discriminator on file; only the UI went.
 
 - `ACCOUNT_MIN_DAYS = 1`, `ACCOUNT_MIN_HOURS = 24`.
 - **`DaysEnteredGame` is the only signal allowed to fire on its own**, because
   it is the one the clean/banned split is **5/5** on:
 
-  | save | outcome | `DaysEnteredGame` | warns |
-  | --- | --- | ---: | --- |
-  | `mGameInfo.current.xml` | clean | 1 | no |
-  | `mGameInfo.current-2.xml` | clean | 1 | no |
-  | `mGameInfo.current-7.xml` | clean | 2 | no |
-  | `mGameInfo.current-3.xml` | banned | 0 | **yes** |
-  | `mGameInfo.current-8.xml` | banned | 0 | **yes** |
+  | save | outcome | `DaysEnteredGame` |
+  | --- | --- | ---: |
+  | `mGameInfo.current.xml` | clean | 1 |
+  | `mGameInfo.current-2.xml` | clean | 1 |
+  | `mGameInfo.current-7.xml` | clean | 2 |
+  | `mGameInfo.current-3.xml` | banned | 0 |
+  | `mGameInfo.current-8.xml` | banned | 0 |
 
+  It is now reported to nobody by the UI. Keep it in mind when a co-op action
+  bans an account — see the sync test below, which is a *checkable* signal
+  rather than a prediction.
 - **`firstVisitTime` is context only and may not OR in while the counter
   exists.** Measured: it reads **7 h on `current.xml`, a city whose install was
   already 25.8 h old** — the game refreshes it on a launch or an update, so it
-  is not install time. An earlier OR-condition tripped that proven-clean city,
-  which is exactly how a warning earns itself an ignore button. It acts only as
-  the fallback for a save that declares no `DaysEnteredGame` at all.
-- A restore never copies either field, so the warning cannot be "fixed" by the
-  copy it is warning about.
+  is not install time. An earlier OR-condition tripped that proven-clean city.
+  It acts only as the fallback for a save that declares no `DaysEnteredGame`
+  at all.
+- A restore never copies either field, so the number cannot be "fixed" by the
+  copy it describes.
 
-Guard rail: `src/lib/account-age.test.ts` — the two thresholds, the banned
-shape warning as `days` with ~3 h of context, the established city staying
-quiet, no-fields gaining no rule of its own, the `hours` fallback, attribute
-order, the `firstVisitTime`-does-not-override regression (the `current.xml`
-shape), and `applyDesban` + `cloneDecorOnly` across all three modes leaving
-`DaysEnteredGame` at 0 and the donor's `firstVisitTime` out.
+Guard rails: `src/lib/account-age.test.ts` keeps the library honest (the two
+thresholds, the banned shape, the established city staying quiet, no-fields
+gaining no rule, the `hours` fallback, attribute order, the
+`firstVisitTime`-does-not-override regression, and `applyDesban` +
+`cloneDecorOnly` across all three modes leaving `DaysEnteredGame` at 0 and the
+donor's `firstVisitTime` out). `ui-regressions.test.mts` →
+`the copy is never gated, and no age banner is drawn over it` pins the removal
+itself: the snapshot still exposes the age, the tab renders no banner, the
+strings are gone from `i18n.ts`, and push is never disabled by it.
 
 **Honest limit, unchanged.** This predicts from five saves and reports one
 measurable fact — the account has not counted a day — not the rule Playrix
 enforces. Read a green gate as "nothing provably wrong", never as "cannot be
 banned".
+
+### Does Playrix actually have your city? (2026-10-02)
+
+The question that mattered was *"why does a co-op action ban a copied account
+when the file passes every gate?"*, and it was answered without a device:
+`scripts/township/fetch_city.py <own cityId> 39.0.3 3903` returns
+`{ok: true, xml_b64}` — **the city Playrix currently stores** — which can be
+diffed against the save on the phone.
+
+| account | outcome | server vs device |
+| --- | --- | --- |
+| `tRTNVz89bq` | clean | 827,926 B vs 822,516 B, **98.1% of `<Var>` tags identical**, `TownGround`/`Buildings`/`Zoo`/`BuildingsStash`/`WildPark`/`MapOrders` all the same, 1 var device-only, **server ahead of device on every sync timestamp** → the copy reached Playrix |
+| `hfPOr0EVvk` | clean | server ≈ device (`residents` 60/60, regatta 44911/44912) → in sync |
+| `O9LPdsAmSD` | banned | server 1206 vars vs device 1391; **186 device-only** (`BLvl_*`, `Achievement_*`, `Regata*`, `ExpandLevel` 0→387, `TaskQuota`, `history`), 1 server-only, **67 changed values** (`townName` mino→god of war, `residents` 60→68085, `gameStartDate` 1790860863→1521676800 …); `BuildingsStash` absent on server; **device ahead of every sync timestamp** → **the copy never reached Playrix** |
+| `jWAxOAHPKo`, `jE9xSO5rbc`, `57QizaF1Qa` | banned | same shape: server still holds `residents 60`, the account's own founding date, no lifetime counters, `regatta=(absent)` |
+
+So on every banned account the phone is holding a city the server has never
+seen, and it stays that way. The clean ones show the opposite — Playrix is
+*ahead* of the device, i.e. the upload happened and the server then kept
+playing.
+
+**What this is and is not.** It is a *checkable* signal (`fetch_city` on your
+own id, diff against the device pull) and it lines up 6/6 with the outcome; it
+is **not** yet a mechanism, because there is no device attached to watch a push
+land in real time, so cause and effect cannot be separated from here. The
+pre-push save for a banned account does not exist either, so "the upload was
+rejected" and "the upload was never attempted" cannot be told apart — only that
+Playrix does not have the copy.
+
+Guard rail: `DaysEnteredGame` 0 vs ≥1 still splits 5/5, and the sync direction
+splits the four accounts above. Neither has been wired into a gate, because
+neither was approved as a block.
+
+**Honest limit, unchanged.** No tool can guarantee 100% protection; a green
+gate means "nothing provably wrong", never "cannot be banned".
 
 ### Population over its own cap (2026-10-01)
 
@@ -2216,6 +2256,12 @@ too — stopping only the parent orphans live instances.
 Render only, via `render.yaml`. This **must** be a persistent server: FetchCity
 shells out to Python, which a serverless/edge target cannot provide. Do not add
 a serverless preset.
+
+**The live host is `https://igg-vip-studio-491.onrender.com`** — read it off
+`client/igg_client.py:58` (`DEFAULT_SERVER_URL`), not from memory. A second
+name (`igg-vip-studio.onrender.com`) has been assumed in conversation and is
+not what the EXE talks to; check which one you are fetching before concluding
+that a change "is not deployed".
 
 **A commit does not deploy — a push does.** `render.yaml` says
 `branch: main` + `autoDeploy: true`, and Render reads the repo on GitHub, not
