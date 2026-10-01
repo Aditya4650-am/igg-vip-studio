@@ -1227,10 +1227,10 @@ of adopting another player's progression — read a green gate as "nothing
 measurably wrong", never as "cannot be banned". The next section closes that
 remaining gap for the restore path.
 
-Guard rail: `copy: the friend's town is taken, the account history stays ours`
+Guard rail: `copy: the friend's city is taken, their lifetime counters are not`
 (its second half still pins `level-up-without-experience`).
 
-### The restore copies the city, not the account history (2026-10-01)
+### What a restore copies is the reference tool's own 18 vars (2026-10-01)
 
 Reported as *"when i copy the only basic stat and open game instant ban"* — and
 earlier, *"basic stats, full city, all, complete city all got banned"*. Every one
@@ -1258,41 +1258,55 @@ arrive as a matched pair), so nothing in the save contradicted itself; the
 contradiction is against **Playrix's stored record of this account**. A save
 cannot be cleaned up into agreement with something that is not in the file.
 
-So the boundary moved instead of being policed: **the city comes from the
-friend, the account history stays yours.**
+An interim fix froze all of that back to our own values (`keepOwnHistory()` +
+`ACCOUNT_HISTORY_VARS`). It was **reverted the next day**: it made "Basic
+stats" copy nothing at all, which is not what the button promises — the report
+itself was that the friend's city was no longer arriving. What replaced it is
+not a taste decision either: **which vars a restore moves is read out of the
+reference tool.**
 
-- `ACCOUNT_HISTORY_VARS` + every `Achievement_*` (prefix) are re-asserted to
-  our own value at the end of `applyDesban` on **all three modes**:
-  `levelup`, `experience`, `money`, `moneyCash`, `EarnedCoins`, `spentCash`,
-  `earnedCash`, `gameStartDate`, `timeInGame`, `RegataTasksCompleted`,
-  `FirstAttemptM3Levels`, `LivesSent`, `Achievement_Teamwork`,
-  `FullCardCollections`.
-- A history var the donor has and we never had is **removed**, not imported —
-  the restore copies ~265 `Achievement_*` entries wholesale and a lifetime
-  achievement count that jumps to a stranger is the same anomaly as the level.
-- Still copied, because city state must follow the town it describes:
-  `residents`, `wheatCounter`, `plowFieldsAchiev`, `defaultOrdersCount`,
-  `match3Life`, `Match3Lives_infTime`, `WareHouseCashUpgrade`, `WHUdup`,
-  `ExpandLevel`, plus `TownGround` / `Buildings` / the block lists and
-  `skipTutorials`. Copying a friend's buildings while keeping your own
-  population and barn would leave the city disagreeing with itself.
-- `keepOwnHistory()` runs as a **single pass** so a name our save carries twice
-  keeps two copies (a genuine save may hold up to 35 duplicated var names) and
-  the donor's surplus is dropped rather than left behind; whatever a cloned
-  block overwrote is written back through `insertInsideRoot`.
+`twndesban2.pyc` (Python 3.14, 16-byte header, magic `2b 0e 0d 0a`)
+disassembles to a `_apply_desban` whose copy set is a literal 18-name tuple —
+and `INICIAL_VARS` now ships exactly those 18 and nothing else:
 
-**Effect, measured on real saves:** `inicial` on the level-999 pair now reports
-`levelup=999 experience=2436381253 money=3089645 regataDone=9868` — all ours —
-and moves only `residents`, `ExpandLevel`, `WareHouseCashUpgrade`, `WHUdup`.
-Vars moved fell 190 -> 123, and `Achievement_* added = 0` (the ~263 names a
-copy still adds are `skipTutorials` tutorial flags and `Minigames` state, both
-client state rather than account history).
+- It moves `levelup`, `money`, `moneyCash`, `EarnedCoins`, `spentCash`,
+  `earnedCash`, `timeInGame`, `residents`, `wheatCounter`, `plowFieldsAchiev`,
+  `defaultOrdersCount`, `match3Life`, `Match3Lives_infTime` and its five
+  achievements (`IncreasedPopulation`, `PlowedFields`, `BuiltFactories`,
+  `SpentCoins`, `EarneCoins`).
+- `gameStartDate`, `RegataTasksCompleted`, `FirstAttemptM3Levels`,
+  `FullCardCollections`, `LivesSent` and `Achievement_Teamwork` occur in that
+  file **only** inside `get_xml_stats`, its stats display — never in
+  `_apply_desban`. They are lifetime facts Playrix holds against the player,
+  so they are out of `INICIAL_VARS`.
+- The blanket `for (m of fr.matchAll(/<Var name="(Achievement_[^"]+)"/))` loop
+  is **gone**: it copied ~265 donor achievements wholesale where the reference
+  tool copies five. `Achievement_BuiltHouses` and
+  `Achievement_CompleteMatch3Levels` were dropped from `INICIAL_VARS` for the
+  same reason — they are not among those five.
+- Ours still adds three names the reference has no need of: `experience`
+  (paired with `levelup` — `level-up-without-experience` refuses a level that
+  rises while the XP does not) plus `WareHouseCashUpgrade`, `WHUdup` and
+  `ExpandLevel`, which describe the town and follow it.
+- Still copied as before, because city state follows the town:
+  `TownGround` / `Buildings` / the block lists and `skipTutorials`.
 
-**This is why "Basic stats" no longer changes level or money.** It was never a
-safe button — it was the smallest of the five and the one that produced the
-instant ban. Its remaining job is city state (population, orders, barn,
-expansions, tutorial skip), which is now the whole of what a stats copy can
-safely do. The tab says so under the buttons (`restoreKeepOwn`, added to `vi`
+**Effect, measured on real saves:** all three modes across four save pairs —
+`mGameInfo_decoded (999) <- fc_big (1089)`, `fc_ok <- fc_big`,
+`mGameInfo.current <- fc_big`, `save9_after <- fc_ok`. On the level-999 pair
+`inicial` moves 136 vars and adds 263, and writes `levelup=1089`,
+`experience=3370037992`, `money=1460975` — the friend's — while
+`gameStartDate`, `RegataTasksCompleted`, `FirstAttemptM3Levels`,
+`FullCardCollections`, `LivesSent`, `Achievement_Teamwork`,
+`Achievement_BuiltHouses` and `Achievement_CompleteMatch3Levels` are untouched
+in **every one of the 12 rows**, and no achievement outside the reference
+tool's five is created anywhere. The 263 additions are `skipTutorials` flags
+and `Minigames` state — client state, not account history.
+
+**"Basic stats" takes the friend's city again.** What it stops taking is the
+account behind it: the day the account started, the lifetime regatta /
+match-3 / card / social counters, and the ~260 achievements a high-level city
+carries. The tab says so under the buttons (`restoreKeepOwn`, updated in `vi`
 and `en`; the other 18 locale packs are `Partial` and fall back).
 
 **Honest limit, unchanged:** this removes the contradiction Playrix can
@@ -1300,10 +1314,14 @@ and `en`; the other 18 locale packs are `Partial` and fall back).
 a ban cannot be reproduced here — treat a green gate as "nothing provably
 wrong", never as "cannot be banned".
 
-Guard rail: `copy: the numbers Playrix keeps its own record of stay ours, on
-every mode` — runs all three modes and pins each history field individually,
-the donor-only achievement never appearing, city state following the donor, and
-identity/shape/progression all green.
+Guard rails: `unban: restore applies the friend's city state and re-encodes a
+valid save` (the friend's level and population land, our `FullCardCollections`
+does not), `copy: the friend's city is taken, their lifetime counters are not`
+(level and XP follow the donor; identity/shape/progression stay green) and
+`copy: the city follows the friend on every mode, its lifetime counters do not`
+(all three modes × both halves of the boundary, plus the donor-only achievement
+never appearing). All five push gates were then run over the 12 real restores
+above: **zero refusals**.
 
 ## Avatar icons
 

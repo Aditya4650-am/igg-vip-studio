@@ -22,12 +22,21 @@ const DEFAULT_FVER = "3903";
 const INICIAL_VARS = [
   "levelup", "money", "moneyCash", "EarnedCoins", "residents", "wheatCounter",
   "plowFieldsAchiev", "defaultOrdersCount", "match3Life", "Match3Lives_infTime",
-  "spentCash", "earnedCash", "timeInGame", "FirstAttemptM3Levels", "LivesSent",
-  "Achievement_Teamwork", "FullCardCollections", "RegataTasksCompleted",
-  "gameStartDate", "Achievement_BuiltFactories", "Achievement_EarneCoins",
+  "spentCash", "earnedCash", "timeInGame",
+  // Deliberately absent — lifetime facts Playrix tracks against the *player*,
+  // which the reference tool's basic-stats step never copies either (see the
+  // disassembly note above TUTORIAL_DONE):
+  //   gameStartDate, RegataTasksCompleted, FirstAttemptM3Levels,
+  //   FullCardCollections, LivesSent, Achievement_Teamwork,
+  //   Achievement_BuiltHouses, Achievement_CompleteMatch3Levels
+  //
+  // The reference tool's five achievements, exactly. It never copies the other
+  // ~260 a high-level city carries.
+  "Achievement_BuiltFactories", "Achievement_EarneCoins",
   "Achievement_IncreasedPopulation", "Achievement_PlowedFields", "Achievement_SpentCoins",
-  "Achievement_BuiltHouses", "Achievement_CompleteMatch3Levels", "WareHouseCashUpgrade",
-  "WHUdup", "ExpandLevel",
+  // City state rather than account history: barn capacity, its WHUdup partner
+  // and land expansions describe the town, so they follow the town.
+  "WareHouseCashUpgrade", "WHUdup", "ExpandLevel",
   // Level and experience are one number written twice: `levelup` is derived
   // from the cumulative `experience`, so a copy that moves the level but not
   // the XP hands Playrix a city claiming 1089 levels with a level-30 player's
@@ -57,83 +66,43 @@ const COMPLETO_BLOCKS = [
 const NOVO_BLOCKS = ["Minigames", "DSCollapseQuests", "QuestsBook", "DSCollection"];
 
 /**
- * Account history — the numbers Playrix keeps **its own** copy of for your
- * account and compares against when you upload.
+ * What a restore deliberately does **not** copy — settled by disassembling the
+ * reference tool instead of guessing.
  *
- * Measured by running all three restore modes over real saves: `inicial` alone
- * moved ~190 vars, and on a level-999 save copying a level-1089 city it wrote
- * `levelup 999 -> 1089`, `experience 2436381253 -> 3370037992`,
- * `RegataTasksCompleted 9868 -> 44911` and `FirstAttemptM3Levels 5698 -> 92524`
- * — every one of them a field the player never earned on this account, in a
- * single sync. The file stayed internally consistent (level and XP arrive as a
- * matched pair, so the shape and progression gates both stayed quiet), and the
- * identity gate found zero leaked cityId/deviceId/user values — yet that is the
- * upload that gets flagged, because the contradiction is against Playrix's
- * records rather than inside the save. No cleanup of the file can hide it.
+ * `twndesban2.pyc`'s basic-stats step, `_apply_desban`, copies exactly 18 vars:
  *
- * So the boundary is: **the city comes from the friend, the account history
- * stays yours.** Everything below is frozen at our own value on every mode.
- * `Achievement_*` joins by prefix because the restore copies every one of them
- * wholesale (265 on a real run) and a lifetime achievement count that jumps to
- * a stranger's is the same anomaly as the level.
+ *   levelup, money, moneyCash, EarnedCoins, residents, wheatCounter,
+ *   plowFieldsAchiev, defaultOrdersCount, match3Life, Match3Lives_infTime,
+ *   Achievement_IncreasedPopulation, Achievement_PlowedFields,
+ *   Achievement_BuiltFactories, Achievement_SpentCoins, Achievement_EarneCoins,
+ *   spentCash, earnedCash, timeInGame
  *
- * Not in this set, and still copied: `residents`, `wheatCounter`,
- * `plowFieldsAchiev`, `defaultOrdersCount`, `match3Life`, `Match3Lives_infTime`,
- * `WareHouseCashUpgrade`, `WHUdup`, `ExpandLevel` — city state, which follows
- * the town it describes. Copying a friend's buildings while keeping your own
- * population and barn would leave the city disagreeing with itself.
+ * The names deliberately left out of `INICIAL_VARS` appear **nowhere** in that
+ * code — the strings exist in the module only for `get_xml_stats`, the stats
+ * *display* — and each of them is a lifetime fact Playrix holds against the
+ * **account** rather than against the town:
+ *
+ * - `gameStartDate`          account creation time. Ours reads 1130782500 on a
+ *                            real save while a fetched donor reads 1356976800:
+ *                            two different players, and the cheapest kind of
+ *                            mismatch for a server to read.
+ * - `RegataTasksCompleted`   lifetime regatta counter — the field AGENTS
+ *                            already records as being read on upload.
+ * - `FirstAttemptM3Levels`   lifetime match-3 counter (5698 -> 92524 across one
+ *                            real copy).
+ * - `FullCardCollections`    lifetime collection progress.
+ * - `LivesSent`, `Achievement_Teamwork`   lifetime social counters.
+ *
+ * For the same reason the blanket achievement loop that used to run here is
+ * gone: `for (m of fr.matchAll(/<Var name="(Achievement_[^"]+)"/))` copied
+ * **every** achievement the donor held — 265 entries on a real run — while the
+ * reference tool copies five. Those five remain in `INICIAL_VARS`.
+ *
+ * Everything the reference tool does copy still moves: level, experience,
+ * money, residents, orders, barn, expansions, tutorial state. "Basic stats"
+ * still reads as the friend's city; this is the whole of what it stopped
+ * touching.
  */
-const ACCOUNT_HISTORY_VARS = new Set([
-  "levelup", "experience", "money", "moneyCash",
-  "EarnedCoins", "spentCash", "earnedCash",
-  "gameStartDate", "timeInGame",
-  "RegataTasksCompleted", "FirstAttemptM3Levels",
-  "LivesSent", "Achievement_Teamwork",
-  "FullCardCollections",
-]);
-
-const isAccountHistory = (name: string) =>
-  ACCOUNT_HISTORY_VARS.has(name) || /^Achievement_/i.test(name);
-
-/**
- * Re-assert our own history over whatever the merge wrote.
- *
- * Runs as a single pass so a name our save carries twice keeps two copies (a
- * genuine save may hold up to 35 duplicated var names) and the donor's surplus
- * is dropped rather than left in place. A history var the donor brought that we
- * never had is removed outright — importing a stranger's lifetime counter is
- * exactly what this exists to prevent. Anything of ours a cloned block
- * overwrote is written back through `insertInsideRoot`, so it lands before
- * `</Global>` and never past `</root>` where the game would not read it.
- */
-function keepOwnHistory(before: string, merged: string): string {
-  const ours = new Map<string, string[]>();
-  for (const m of before.matchAll(/<Var\s+name="([^"]+)"[^>]*?(?:\/>|>[\s\S]*?<\/Var\s*>)/gi)) {
-    const name = m[1]!;
-    if (!isAccountHistory(name)) continue;
-    const list = ours.get(name);
-    if (list) list.push(m[0]!);
-    else ours.set(name, [m[0]!]);
-  }
-
-  const taken = new Map<string, number>();
-  let out = merged.replace(/<Var\s+name="([^"]+)"[^>]*?(?:\/>|>[\s\S]*?<\/Var\s*>)/gi, (full, name: string) => {
-    if (!isAccountHistory(name)) return full;
-    const list = ours.get(name);
-    if (!list) return "";
-    const i = taken.get(name) ?? 0;
-    if (i >= list.length) return "";
-    taken.set(name, i + 1);
-    return list[i]!;
-  });
-
-  for (const [name, list] of ours) {
-    const used = taken.get(name) ?? 0;
-    for (let i = used; i < list.length; i++) out = insertInsideRoot(out, list[i]!);
-  }
-  return out;
-}
-
 const TUTORIAL_DONE = [
   "StartTutorialFinished",
   "SecondStartTutorialFinished",
@@ -1106,9 +1075,10 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
     const val = readVarLoose(fr, name);
     if (val != null) own = writeVar(own, name, scrub(val));
   }
-  for (const m of fr.matchAll(/<Var\s+name="(Achievement_[^"]+)"\s+v="([^"]*)"/gi)) {
-    own = writeVar(own, m[1]!, scrub(m[2]!));
-  }
+  // Deliberately not `every Achievement_* the donor holds`. The reference tool
+  // copies five; this loop used to copy all 265 of a real high-level city onto
+  // an account that never earned them, and a lifetime achievement count is
+  // tracked against the player, not the town. See the note above TUTORIAL_DONE.
   if (mode !== "inicial") {
     for (const tag of ["TownGround", "Buildings"]) own = cloneMain(fr, own, tag, scrub).xml;
     for (const tag of COMPLETO_BLOCKS) own = cloneSimple(fr, own, tag, scrub).xml;
@@ -1132,11 +1102,6 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
   }
 
   own = skipTutorials(own, fr);
-  // Applied on every mode, last: the city comes from the donor, the account
-  // history stays ours. Placing it after the block copies means it also undoes
-  // a history var a cloned block brought in, and before the identity gate so a
-  // refused merge is what the gate sees.
-  own = keepOwnHistory(before, own);
   assertNoForeignIdentity(before, own, fr);
   return own;
 }

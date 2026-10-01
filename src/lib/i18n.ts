@@ -159,7 +159,7 @@ const vi = {
  restoreFull: "Full city",
  restoreAll: "All",
  restoreKeepOwn:
-   "Thành phố lấy của bạn, còn cấp độ / tiền / XP / regata / thành tích vẫn giữ nguyên của bạn — Playrix lưu riêng các số đó nên sao chép qua là bị khoá.",
+   "Thành phố, cấp độ, tiền và XP lấy của bạn bè — regata, thẻ, thành tích và ngày tạo tài khoản vẫn giữ của bạn. Playrix lưu các số đó riêng cho từng người nên sao chép qua là bị khoá.",
  empty: "Kết nối emulator thật bằng ADB để tự động tải save.",
  emptyCta: "Chọn máy ADB rồi Kết nối để tải save.",
  demoHint: "Key gắn đúng mã máy phía trên. Hết hạn thì gửi mã máy để gia hạn — Client không cấp key.",
@@ -504,7 +504,7 @@ const en: typeof vi = {
  restoreFull: "Full city",
  restoreAll: "All",
  restoreKeepOwn:
-   "The city comes from your friend — level, money, XP, regatta and achievements stay yours. Playrix keeps its own copy of those numbers, so copying them across is what gets an account banned.",
+   "The friend's city is what a restore copies — level, money and XP come with it. Regatta tasks, card collections, achievements and the day the account started stay yours: Playrix keeps those per player, so copying them across is what gets an account banned.",
  empty: "Connect a real emulator with ADB to load the save automatically.",
  emptyCta: "Pick an ADB device and Connect to load the save.",
  demoHint: "The key binds to the machine id above. Client never issues keys.",

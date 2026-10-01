@@ -171,11 +171,15 @@ test("unban: restore applies the friend's city state and re-encodes a valid save
   const out = studio.applyUnban(token, sessionId, "completo");
   assert.equal(out.unban?.applied, true);
   const xml = Buffer.from(out.fileB64!, "base64").toString("utf8");
-  // City state follows the city it describes …
-  assert.match(xml, /<Var name="residents"\s+v="9000"/);
-  // … but the account history is Playrix's record of *this* player.
-  assert.match(xml, /<Var name="levelup"\s+v="1"/, "our level must not become the friend's");
-  assert.match(xml, /<Var name="FullCardCollections"\s+v="2"/, "nor our lifetime collection count");
+  // The friend's city is what a restore is for — their level, their town.
+  assert.match(xml, /<Var name="levelup"\s+v="42"/, "the friend's level is the point of the button");
+  assert.match(xml, /<Var name="residents"\s+v="9000"/, "and so is their population");
+  // …but a lifetime counter Playrix holds against *this* player never moves.
+  assert.match(
+    xml,
+    /<Var name="FullCardCollections"\s+v="2"/,
+    "our collection progress is not the friend's to lend",
+  );
   balanced(xml);
 
   // The pushed file must load back into a fresh session without loss.
@@ -1596,15 +1600,13 @@ const LEVEL_DONOR = [
   '<TownGround ver="2"><row j="0" v="FRIENDTOWN"/></TownGround><Buildings><Object id="friend1"/></Buildings>',
 ].join("");
 
-test("copy: the friend's town is taken, the account history stays ours", () => {
-  // The restore used to move `levelup` and `experience` straight across from
-  // the donor. On a real pair that meant a level-999 save left the merge
-  // claiming 1089 levels, 3.37 billion XP, 44911 regatta tasks and 92524
-  // match-3 levels the player never earned here — a set of numbers that is
-  // internally consistent (so every shape and progression gate stayed quiet)
-  // and yet contradicts what Playrix has stored for this account. That
-  // contradiction cannot be cleaned up inside the file, so the copy stops
-  // making it: the city comes from the friend, the history stays ours.
+test("copy: the friend's city is taken, their lifetime counters are not", () => {
+  // What a restore copies is decided by the reference tool, not by taste: its
+  // basic-stats step moves level, experience and money, and never moves a
+  // lifetime fact Playrix holds against the *player*. So the friend's level
+  // and town land here; what must *not* move is pinned on the HISTORY_*
+  // fixtures below. Measured the other way round (freeze everything) this
+  // button copied nothing at all, which is not what "Basic stats" promises.
   const snap = townSession(LEVEL_OWN);
   studio.attachFriendXml(token, snap.sessionId, LEVEL_DONOR);
   const out = studio.applySave({ token, sessionId: snap.sessionId, unbanMode: "novo" });
@@ -1612,14 +1614,14 @@ test("copy: the friend's town is taken, the account history stays ours", () => {
 
   assert.match(xml, /FRIENDTOWN/, "the friend's layout is what a city copy is for");
   assert.match(xml, /id="friend1"/, "and so are their buildings");
-  assert.match(xml, /name="levelup" v="30"/, "our level must not become the donor's 1089");
-  assert.match(xml, /name="experience" v="172109"/, "nor the XP behind it");
+  assert.match(xml, /name="levelup" v="1089"/, "the level follows the donor");
+  assert.match(xml, /name="experience" v="3370037992"/, "and the XP that earned it follows the level");
   assert.doesNotThrow(() => assertNoForeignIdentity(LEVEL_OWN, xml, LEVEL_DONOR));
   balanced(xml);
   assert.deepEqual(
     progressionProblems(LEVEL_OWN, xml, LEVEL_DONOR),
     [],
-    "nothing moved in the progression set, so there is nothing to refuse",
+    "level and XP came from one account, so there is nothing to refuse",
   );
 
   // The exact shape an ungated copy used to produce: the level from one
@@ -1651,8 +1653,9 @@ test("copy: the friend's town is taken, the account history stays ours", () => {
 });
 
 /**
- * The boundary the restore now draws: everything Playrix holds its own record
- * of stays ours, everything that describes the town follows the friend.
+ * The boundary a restore draws, measured from the reference tool rather than
+ * guessed: what it moves is level, experience and money; what it never touches
+ * is a lifetime fact or an achievement outside its own five.
  */
 const HISTORY_OWN = [
   '<?xml version="1.0" encoding="utf-8"?>',
@@ -1696,11 +1699,18 @@ const HISTORY_DONOR = [
   '<TownGround ver="2"><row j="0" v="FRIENDTOWN"/></TownGround><Buildings><Object id="friend1"/></Buildings>',
 ].join("");
 
-test("copy: the numbers Playrix keeps its own record of stay ours, on every mode", () => {
+test("copy: the city follows the friend on every mode, its lifetime counters do not", () => {
+  // The reference tool's basic-stats step moves level, experience and money
+  // and never moves a lifetime fact Playrix holds against the *player*. Both
+  // halves matter: freezing everything made "Basic stats" copy nothing at all,
+  // while the earlier copy took `gameStartDate` and 263 achievements along
+  // with it — the account's history, not the town's.
   const frozen = [
-    "levelup", "experience", "money", "moneyCash",
     "RegataTasksCompleted", "FirstAttemptM3Levels", "FullCardCollections",
-    "Achievement_BuiltHouses", "gameStartDate", "timeInGame",
+    "Achievement_BuiltHouses", "gameStartDate",
+  ];
+  const takes = [
+    "levelup", "experience", "money", "moneyCash", "timeInGame",
   ];
 
   const readVal = (doc: string, name: string) =>
@@ -1715,6 +1725,11 @@ test("copy: the numbers Playrix keeps its own record of stay ours, on every mode
       const now = readVal(xml, name);
       const was = readVal(HISTORY_OWN, name);
       assert.equal(now, was, `${mode}: ${name} moved off our value (${was} -> ${now})`);
+    }
+    for (const name of takes) {
+      const now = readVal(xml, name);
+      const theirs = readVal(HISTORY_DONOR, name);
+      assert.equal(now, theirs, `${mode}: ${name} is the city's own number and must follow it`);
     }
 
     // A lifetime achievement the donor has and we never had is not imported.
