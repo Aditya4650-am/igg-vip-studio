@@ -456,16 +456,51 @@ function findDataElemBlock(xml: string, name: string) {
   return null;
 }
 
-function copyDataElemByName(src: string, tgt: string, name: string, scrub = scrubber(src, tgt)) {
-  const srcBlk = findDataElemBlock(src, name);
-  if (!srcBlk) return tgt;
-  const block = scrub(srcBlk.block);
-  const tgtBlk = findDataElemBlock(tgt, name);
-  if (tgtBlk) return tgt.slice(0, tgtBlk.start) + block + tgt.slice(tgtBlk.end);
-  for (const c of ["</Global>", "</root>", "</Root>"]) {
-    if (tgt.includes(c)) return tgt.replace(c, block + "\n" + c);
+/**
+ * The four profile lists a full restore takes from the friend — and only
+ * those. Measured against `twndesban2.pyc`: its `_apply_desban` loops exactly
+ * `UnlockedBadges` / `UnlockedExpRanks` / `UnlockedFrames` / `UnlockedStyles`
+ * through `_clone_dataelem` and never replaces `PlayerProfile` or `Configs`
+ * as a whole (those two names appear there only as *insertion* points for a
+ * list the donor is missing).
+ *
+ * Replacing the pair wholesale is what this did, which also imported the
+ * donor's `UnlockedThemes`, their five `New*` "not reviewed yet" markers and
+ * any `BadgeFrameIncident*` flag — none of which the reference copies, none
+ * of which a restore is for, and one of which (`NewExpRanks`) is state the
+ * Profile tool deliberately stopped writing.
+ *
+ * A list our save does not carry is inserted *inside* `<Configs>`, never
+ * beside it: a DataElem the game only reads under `PlayerProfile > Configs`
+ * placed anywhere else is well-formed XML that changes nothing in game.
+ */
+const PROFILE_CLONE_LISTS = ["UnlockedBadges", "UnlockedExpRanks", "UnlockedFrames", "UnlockedStyles"];
+
+function copyProfileLists(src: string, tgt: string, scrub: (s: string) => string): string {
+  let out = tgt;
+  for (const name of PROFILE_CLONE_LISTS) {
+    const s = findDataElemBlock(src, name);
+    if (!s) continue;
+    const block = scrub(s.block);
+    const t = findDataElemBlock(out, name);
+    if (t) {
+      out = out.slice(0, t.start) + block + out.slice(t.end);
+      continue;
+    }
+    const cfg = findDataElemBlock(out, "Configs");
+    const close = cfg ? cfg.block.lastIndexOf("</DataElem>") : -1;
+    if (cfg && close >= 0) {
+      out = out.slice(0, cfg.start + close) + "\n          " + block + out.slice(cfg.start + close);
+      continue;
+    }
+    for (const c of ["</Global>", "</root>", "</Root>"]) {
+      if (out.includes(c)) {
+        out = out.replace(c, block + "\n" + c);
+        break;
+      }
+    }
   }
-  return tgt + "\n" + block;
+  return out;
 }
 
 function isTutorialName(name: string) {
@@ -1110,11 +1145,10 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
       for (const tag of NOVO_BLOCKS) own = cloneSimple(fr, own, tag, scrub).xml;
     }
 
-    // v1.15 also restores the profile/config DataElem blocks for every full
-    // restore mode. These are distinct from the Unlocked* profile CSV fields
-    // handled by the normal Profile tool.
-    own = copyDataElemByName(fr, own, "PlayerProfile", scrub);
-    own = copyDataElemByName(fr, own, "Configs", scrub);
+    // The profile lists a full restore takes — badges, titles, frames and
+    // styles — and nothing else inside the donor's Configs. These are distinct
+    // from the Unlocked* profile CSV fields handled by the normal Profile tool.
+    own = copyProfileLists(fr, own, scrub);
   }
 
   own = skipTutorials(own, fr);

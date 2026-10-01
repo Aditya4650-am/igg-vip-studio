@@ -1098,6 +1098,27 @@ six files. The ban itself cannot be reproduced from here. The changes below
 are the gaps the audit found, not a proven root cause — **do not record this
 as solved.**
 
+**One profile defect *was* later proved — in the restore, not the writer
+(2026-10-01).** `applyDesban`'s full modes replaced `PlayerProfile` **and**
+`Configs` wholesale with the friend's, which is exactly how the badges /
+frames / styles in that report arrived. The reference tool does not do that:
+its `_apply_desban` loops exactly four DataElems — `UnlockedBadges`,
+`UnlockedExpRanks`, `UnlockedFrames`, `UnlockedStyles` — through
+`_clone_dataelem`, and `PlayerProfile` / `Configs` occur in that function only
+as *insertion* points for a list the donor is missing. The wholesale replace
+therefore also imported the donor's `UnlockedThemes`, their `New*` "not
+reviewed yet" markers (`NewExpRanks` carries values on real saves, and those
+markers are state the Profile tool deliberately stopped writing) and any
+`BadgeFrameIncident*` flag — seven DataElems no restore is for and the
+reference never copies. `copyProfileLists()` now takes the four and inserts a
+missing one *inside* `<Configs>` rather than beside it. Measured on six real
+restores: the four arrive from the friend, all seven others keep our own value,
+and every push gate still passes. This narrows the report's trigger; it does
+**not** root-cause the ban.
+
+Guard rail: `copy: a full restore takes the friend's badges, frames, styles and
+titles — nothing else in their Configs`.
+
 **Profile writer (`injectProfile`), three hardenings:**
 
 - The `findConfigsSpan() === null` fallback wrote the `<DataElem>` before

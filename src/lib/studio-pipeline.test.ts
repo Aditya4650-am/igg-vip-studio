@@ -8,7 +8,7 @@ process.env.IGG_VIP_URL = "";
 const studio = await import("./server/studio.server.ts");
 const { verifyLicenseKey } = await import("./server/license.server.ts");
 const { findUnbalancedTag } = await import("./server/township/xml-edit.server.ts");
-const { assertNoForeignIdentity } = await import("./server/township/desban.server.ts");
+const { assertNoForeignIdentity, applyDesban } = await import("./server/township/desban.server.ts");
 const { avatarEmoji, avatarIconPath, AVATAR_EMOJIS, AVATAR_ICON_MAX, AVATAR_MAX } =
   await import("./catalogs.ts");
 const { iconForBarn } = await import("./game-icon-map.ts");
@@ -1744,6 +1744,86 @@ test("copy: the city follows the friend on every mode, its lifetime counters do 
     assert.deepEqual(saveShapeProblems(xml), [], `${mode}: what leaves must satisfy every rule`);
     assert.deepEqual(progressionProblems(HISTORY_OWN, xml, HISTORY_DONOR), [], `${mode}: nothing regressed`);
   }
+});
+
+test("copy: a full restore takes the friend's badges, frames, styles and titles — nothing else in their Configs", () => {
+  // The reference tool's `_apply_desban` loops exactly four Unlocked*
+  // DataElems through `_clone_dataelem` and never replaces `PlayerProfile` or
+  // `Configs` as a whole — those two names appear there only as *insertion*
+  // points. Replacing the pair wholesale (what this did) also imported the
+  // donor's themes, their `New*` "not reviewed yet" markers and any
+  // `BadgeFrameIncident*` flag: none of them copied by the reference, none of
+  // them what a restore is for, and `New*` is state the Profile tool
+  // deliberately stopped writing.
+  const mk = (cityId: string, kids: string[]) =>
+    [
+      '<?xml version="1.0" encoding="utf-8"?>',
+      "<Global>",
+      `<Var name="cityId" v="${cityId}" t="s"/>`,
+      '<DataElem name="PlayerProfile" type="Data">',
+      '<DataElem name="Configs" type="Data">',
+      ...kids,
+      "</DataElem>",
+      "</DataElem>",
+      "</Global>",
+    ].join("");
+
+  const own = mk("ME12345678", [
+    '<DataElem name="NewExpRanks" type="s" value="OURNEW"/>',
+    '<DataElem name="NewBadges" type="s" value=""/>',
+    '<DataElem name="UnlockedThemes" type="s" value="ourtheme"/>',
+    '<DataElem name="BadgeFrameIncident3410VictimGrantChecked" type="b" value="true"/>',
+    '<DataElem name="UnlockedBadges" type="s" value="b1"/>',
+    '<DataElem name="UnlockedExpRanks" type="s" value="e1"/>',
+    '<DataElem name="UnlockedFrames" type="s" value="f1"/>',
+  ]);
+  const donor = mk("FRD123456", [
+    '<DataElem name="NewExpRanks" type="s" value="THEIRNEW"/>',
+    '<DataElem name="NewBadges" type="s" value="thb"/>',
+    '<DataElem name="UnlockedThemes" type="s" value="theirtheme"/>',
+    '<DataElem name="BadgeFrameIncident3410VictimGrantChecked" type="b" value="false"/>',
+    '<DataElem name="UnlockedBadges" type="s" value="b9,b8"/>',
+    '<DataElem name="UnlockedExpRanks" type="s" value="e9"/>',
+    '<DataElem name="UnlockedFrames" type="s" value="f9"/>',
+    '<DataElem name="UnlockedStyles" type="s" value="s9"/>',
+  ]);
+
+  const out = applyDesban(own, donor, "novo");
+
+  // The four lists the reference clones all arrive from the friend …
+  for (const v of ["b9,b8", "e9", "f9", "s9"]) {
+    assert.ok(out.includes(`value="${v}"`), `the friend's profile list ${v} must arrive`);
+  }
+  assert.ok(!out.includes('value="b1"'), "our own badges are what a full restore replaces");
+
+  // … and the three DataElems it never clones stay ours.
+  for (const [what, v] of [
+    ["NewExpRanks marker", "OURNEW"],
+    ["UnlockedThemes", "ourtheme"],
+    ["BadgeFrameIncident flag", 'BadgeFrameIncident3410VictimGrantChecked" type="b" value="true'],
+  ] as const) {
+    assert.ok(out.includes(v), `the donor's ${what} must not arrive; ours stays`);
+  }
+  assert.ok(!out.includes("THEIRNEW") && !out.includes("theirtheme"), "no donor state beyond the four lists");
+
+  // One Configs, one of each list — a second copy is a store the game reads
+  // whichever it finds first while the other sits dead.
+  assert.equal((out.match(/<DataElem name="Configs"/g) ?? []).length, 1, "no second Configs");
+  for (const f of ["UnlockedBadges", "UnlockedExpRanks", "UnlockedFrames", "UnlockedStyles"]) {
+    assert.equal((out.match(new RegExp(`<DataElem name="${f}"`, "g")) ?? []).length, 1, `exactly one ${f}`);
+  }
+
+  // The list our save had no room for is inserted *inside* Configs, never
+  // beside it — a DataElem the game reads only under PlayerProfile > Configs
+  // placed anywhere else is well-formed XML that changes nothing in game.
+  const cfgOpen = out.indexOf('<DataElem name="Configs"');
+  const styles = out.indexOf('name="UnlockedStyles"');
+  const cfgClose = out.indexOf("</DataElem>", cfgOpen);
+  assert.ok(cfgOpen >= 0 && styles > cfgOpen && styles < cfgClose, "the missing list lands inside Configs");
+
+  balanced(out);
+  assert.doesNotThrow(() => assertNoForeignIdentity(own, out, donor), "the friend's cityId stays theirs");
+  assert.ok(out.includes('v="ME12345678"'), "our cityId is what leaves");
 });
 
 const DECOR_OWN = [
