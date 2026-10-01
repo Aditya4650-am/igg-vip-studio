@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CHAT_EMOJI_IDS } from "./chat-emoji.server";
 import { decodeContainer, extractXml, shellErrorMessage } from "./save-decode.server";
-import { writeVar } from "./vars.server";
+import { readCoopId, writeVar } from "./vars.server";
 import { attrValue, insertInsideRoot } from "./xml-edit.server";
 
 // Current Township API metadata, matching the reference client's defaults in
@@ -495,81 +495,6 @@ function cloneSimple(src: string, tgt: string, tag: string, scrub = scrubber(src
     if (tgt.includes(c)) return { xml: tgt.replace(c, block + "\n" + c), action: "insert" };
   }
   return { xml: tgt + "\n" + block, action: "insert" };
-}
-
-function findDataElemBlock(xml: string, name: string) {
-  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`<DataElem\\b(?=[^>]*\\bname="${esc}")[^>]*>`, "i");
-  const m = re.exec(xml);
-  if (!m || m.index === undefined) return null;
-  const start = m.index;
-  const openTag = m[0];
-  if (/\/\>\s*$/i.test(openTag)) return { start, end: start + openTag.length, block: openTag };
-  let depth = 1;
-  let pos = start + openTag.length;
-  const token = /<\/DataElem\s*>|<DataElem\b[^>]*>/gi;
-  token.lastIndex = pos;
-  let hit: RegExpExecArray | null;
-  while ((hit = token.exec(xml))) {
-    const t = hit[0];
-    if (/^<\/DataElem/i.test(t)) {
-      depth--;
-      if (depth === 0) {
-        const end = hit.index + t.length;
-        return { start, end, block: xml.slice(start, end) };
-      }
-    } else if (!/\/\s*>$/.test(t)) {
-      depth++;
-    }
-  }
-  return null;
-}
-
-/**
- * The four profile lists a full restore takes from the friend — and only
- * those. Measured against `twndesban2.pyc`: its `_apply_desban` loops exactly
- * `UnlockedBadges` / `UnlockedExpRanks` / `UnlockedFrames` / `UnlockedStyles`
- * through `_clone_dataelem` and never replaces `PlayerProfile` or `Configs`
- * as a whole (those two names appear there only as *insertion* points for a
- * list the donor is missing).
- *
- * Replacing the pair wholesale is what this did, which also imported the
- * donor's `UnlockedThemes`, their five `New*` "not reviewed yet" markers and
- * any `BadgeFrameIncident*` flag — none of which the reference copies, none
- * of which a restore is for, and one of which (`NewExpRanks`) is state the
- * Profile tool deliberately stopped writing.
- *
- * A list our save does not carry is inserted *inside* `<Configs>`, never
- * beside it: a DataElem the game only reads under `PlayerProfile > Configs`
- * placed anywhere else is well-formed XML that changes nothing in game.
- */
-const PROFILE_CLONE_LISTS = ["UnlockedBadges", "UnlockedExpRanks", "UnlockedFrames", "UnlockedStyles"];
-
-function copyProfileLists(src: string, tgt: string, scrub: (s: string) => string): string {
-  let out = tgt;
-  for (const name of PROFILE_CLONE_LISTS) {
-    const s = findDataElemBlock(src, name);
-    if (!s) continue;
-    const block = scrub(s.block);
-    const t = findDataElemBlock(out, name);
-    if (t) {
-      out = out.slice(0, t.start) + block + out.slice(t.end);
-      continue;
-    }
-    const cfg = findDataElemBlock(out, "Configs");
-    const close = cfg ? cfg.block.lastIndexOf("</DataElem>") : -1;
-    if (cfg && close >= 0) {
-      out = out.slice(0, cfg.start + close) + "\n          " + block + out.slice(cfg.start + close);
-      continue;
-    }
-    for (const c of ["</Global>", "</root>", "</Root>"]) {
-      if (out.includes(c)) {
-        out = out.replace(c, block + "\n" + c);
-        break;
-      }
-    }
-  }
-  return out;
 }
 
 function isTutorialName(name: string) {
@@ -1108,6 +1033,34 @@ function stashIds(xml: string): string[] {
   return [...block.matchAll(/<Building\b[^>]*?\bid="([^"]+)"/g)].map((m) => m[1]!);
 }
 
+/**
+ * Every clone step ends by proving it left the co-op alone.
+ *
+ * Which team a save belongs to is account identity, not town data: `<MyClan
+ * id>` and `<Var name="MyClanId">` say *who* is in the file, and a copy that
+ * moved either one would ship a file claiming a clan it has never joined. The
+ * restore has never written them (measured across all three modes over every
+ * save pair in the corpus), so this never fires today — it is here so that a
+ * future block list which starts covering `<MyClan>` fails loudly in the
+ * function that did it, instead of on a user's account at their first message
+ * in a co-op chat.
+ *
+ * Both fields are compared separately rather than as one resolved id: a step
+ * that updated only one of the two is exactly the split the shape gate refuses
+ * later, and catching it here names the step.
+ */
+export function assertCoopIdentityKept(before: string, after: string) {
+  const a = readCoopId(before);
+  const b = readCoopId(after);
+  if (a.tag === b.tag && a.v === b.v) return;
+  throw new Error(
+    `Không đẩy file lên máy: bước sao chép này đã đổi co-op của save ` +
+      `(<MyClan id> ${a.tag ?? "-"} -> ${b.tag ?? "-"}, MyClanId ${a.v ?? "-"} -> ${b.v ?? "-"}). ` +
+      "Co-op là danh tính của tài khoản, không phải dữ liệu của thành phố — " +
+      "sao chép nó sẽ khiến save của bạn khai bạn là thành viên một nhóm mà bạn chưa tham gia.",
+  );
+}
+
 export function cloneDecorOnly(ownXml: string, friendXml: string) {
   let own = ownXml.replace(/^\uFEFF/, "");
   const before = own;
@@ -1120,14 +1073,12 @@ export function cloneDecorOnly(ownXml: string, friendXml: string) {
     own = r.xml;
     if (r.action !== "missing_src") blocks.push(`${tag}:${r.action}`);
   }
-  const em = readVarLoose(fr, "UnlockedChatEmoji");
-  if (em != null) {
-    own = writeVar(own, "UnlockedChatEmoji", scrub(em));
-    vars.push("UnlockedChatEmoji");
-  } else {
-    own = unlockEmoji(own);
-    vars.push("UnlockedChatEmoji:full");
-  }
+  // `UnlockedChatEmoji` is deliberately NOT copied either — the donor's
+  // sticker set is what *they* earned, and neither branch below is ours to
+  // write: taking theirs installs ~100 ids this account has never unlocked,
+  // and `unlockEmoji()` with no ids would install the whole catalog. The
+  // explicit Sticker action in the Decor tab is where unlocking happens, and
+  // that is the user asking for it by name.
   for (const m of fr.matchAll(/<Var\s+name="((?:skin_|Skin_|decor_|Decor_)[^"]+)"\s+v="([^"]*)"/gi)) {
     own = writeVar(own, m[1]!, scrub(m[2]!));
     vars.push(m[1]!);
@@ -1139,6 +1090,7 @@ export function cloneDecorOnly(ownXml: string, friendXml: string) {
   if (ours.length) own = maxBuildingsStash(own, ours, 10);
   own = maxBuildingsStash(own, [], 10);
   own = maxFragments(own);
+  assertCoopIdentityKept(before, own);
   assertNoForeignIdentity(before, own, fr);
   return { xml: own, report: { blocks, vars } };
 }
@@ -1174,6 +1126,7 @@ export function cloneTownLayout(ownXml: string, friendXml: string) {
     err.code = TOWN_UNCHANGED;
     throw err;
   }
+  assertCoopIdentityKept(before, own);
   assertNoForeignIdentity(before, own, fr);
   return { xml: own, report: { blocks, vars: [] } };
 }
@@ -1185,6 +1138,61 @@ export function isTownUnchanged(e: unknown): boolean {
   return !!e && typeof e === "object" && (e as { code?: string }).code === TOWN_UNCHANGED;
 }
 
+/**
+ * Restore a friend's city over ours — **the city, never the person**.
+ *
+ * This is the one section of the restore written from a ban report rather than
+ * from a diff, so the measurement is on file. Reported 2026-10-01: *"after copy
+ * all city then I join the Co-op and type something, or send a request for barn
+ * items or stickers in coop chat, then I got instant ban."* The discriminator
+ * the user gave — basic stats is clean, the full copy bans — is exactly which
+ * modes write **profile identity**: `inicial` writes none of it (0 writes over
+ * every real save pair), `completo` / `novo` wrote all three of
+ *
+ * 1. `UnlockedChatEmoji` — the chat **sticker** set: overwrote our own list
+ *    with the donor's, or created one where the save had none;
+ * 2. `Unlocked_ava*` — which **profile pictures** this account has: 27 on our
+ *    own saves, 386 on the donor's;
+ * 3. the four **profile lists** in `PlayerProfile > Configs` — badges, frames,
+ *    styles and exp ranks, 0 / 0 / 0 / 0 on our own saves against 19 / 15 / 9 /
+ *    20 on the donor's.
+ *
+ * All three are shown next to your name in the co-op roster and chat, which is
+ * where the report happens — and a sticker message exercises (1) directly.
+ *
+ * **What the known-good saves show.** Both were supplied as *"complete town,
+ * co-op chat, no ban"*. `mGameInfo.current.xml` (cityId `hfPOr0EVvk`, clan
+ * `Aw7HZlqQcc`) carries *none* of the donor's cosmetics: no `UnlockedChatEmoji`
+ * var at all, 27 avatars against the donor's 386, empty badge/frame/style/exp
+ * rank lists against 19/15/9/20, and an all-`Default` `<Skins>` block against
+ * the donor's `SP9` / event skins. `mGameInfo.current-2.xml` (cityId
+ * `tRTNVz89bq`, clan `1HEBicgyar`) carries its **own** instead: 8/10/4
+ * badges/frames/styles, its own `,sp1,,sp4,…` sticker list, 27 avatars.
+ *
+ * How the first one was made is worth stating precisely, because it decides
+ * what it proves: `ab46f0b`'s `INICIAL_VARS` already held `gameStartDate`,
+ * `FirstAttemptM3Levels`, `LivesSent`, `FullCardCollections`,
+ * `RegataTasksCompleted` and `Achievement_Teamwork`, and its `inicial` copied
+ * no town — so that save is **basic stats + clone town layout**, i.e. the two
+ * features the user separately calls clean, not a `completo` output. It never
+ * took the donor's cosmetics because no step it went through copies them.
+ * So what it establishes is a *shape*: **the donor's town and lifetime history
+ * on our own profile identity** is a save that was pushed, joined to a co-op
+ * and chatted in without a ban. The full copy is that same shape *plus* the
+ * donor's avatars, stickers and badges — and that plus is what this refuses.
+ *
+ * It is identity and cosmetics, not town state: none of it says anything about
+ * the city that was transplanted, so leaving it alone cannot make the town
+ * inconsistent — the opposite of `TOWN_HISTORY_VARS`, where the counters *do*
+ * have to follow the town. Unlocking any of the three stays where it was, in
+ * the feature that asks for it by name: `injectAvatars` / `unlockAllAvatars`
+ * and the Profile tab for pictures and badges, `unlockEmoji` for stickers.
+ *
+ * **Honest limit.** This removes a measured difference between a save that was
+ * known to be safe and one that was reported banned; it does not identify
+ * Playrix's rule, and no tool can. A green gate means "nothing provably
+ * wrong", never "cannot be banned".
+ */
 export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" | "completo" | "novo") {
   let own = ownXml.replace(/^\uFEFF/, "");
   const before = own;
@@ -1223,9 +1231,18 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
     for (const tag of ["TownGround", "Buildings"]) own = cloneMain(fr, own, tag, scrub).xml;
     for (const tag of COMPLETO_BLOCKS) own = cloneSimple(fr, own, tag, scrub).xml;
 
-    for (const m of fr.matchAll(/<Var\s+name="(Unlocked_ava\d+)"\s+v="([^"]*)"/gi)) own = writeVar(own, m[1]!, scrub(m[2]!));
-    const emoji = readVarLoose(fr, "UnlockedChatEmoji");
-    if (emoji != null) own = writeVar(own, "UnlockedChatEmoji", scrub(emoji));
+    // The donor's **profile identity** is not the town's to give: avatars and
+    // chat stickers both used to be copied here, and neither is city data.
+    // `Unlocked_ava*` is which profile pictures this account has (27 on our
+    // own saves, 386 on the donor's) and `UnlockedChatEmoji` is its chat
+    // sticker set — see `applyDesban`'s note for the full measurement. Both are
+    // written only by `completo` / `novo`, never by `inicial`, and both are
+    // shown next to your name in the co-op roster and chat, which is exactly
+    // where the 2026-10-01 ban report happens. The Profile and Decor tabs' own
+    // actions are where unlocking either one is the user asking by name.
+    //
+    // `skin_` / `decor_` vars stay: they describe how *this* town's buildings
+    // look, so they follow the town the way `TOWN_HISTORY_VARS` does.
     for (const m of fr.matchAll(/<Var\s+name="((?:skin_|Skin_|decor_|Decor_)[^"]+)"\s+v="([^"]*)"/gi)) {
       own = writeVar(own, m[1]!, scrub(m[2]!));
     }
@@ -1234,13 +1251,14 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
       for (const tag of NOVO_BLOCKS) own = cloneSimple(fr, own, tag, scrub).xml;
     }
 
-    // The profile lists a full restore takes — badges, titles, frames and
-    // styles — and nothing else inside the donor's Configs. These are distinct
-    // from the Unlocked* profile CSV fields handled by the normal Profile tool.
-    own = copyProfileLists(fr, own, scrub);
+    // The donor's `PlayerProfile` / `Configs` are left alone entirely — their
+    // badges, frames, styles, exp ranks and titles are profile identity, the
+    // same class as the avatars and stickers above, and a full restore takes
+    // the city rather than the person. See `applyDesban`'s note.
   }
 
   own = skipTutorials(own, fr);
+  assertCoopIdentityKept(before, own);
   assertNoForeignIdentity(before, own, fr);
   return own;
 }

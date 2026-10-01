@@ -1,3 +1,5 @@
+import { attrValue } from "./xml-edit.server";
+
 /** All igg-vip-tool Data fields (same Var names as the original Python tool). */
 export const FIELD_MAP: Record<string, string> = {
   tca: "moneyCash",
@@ -71,6 +73,35 @@ export function readAnyVar(xml: string, names: readonly string[]): string | null
     if (v != null && v !== "") return v;
   }
   return null;
+}
+
+/**
+ * The two places a save declares the co-op (clan) it belongs to, kept apart on
+ * purpose: `<MyClan id="...">` on the element and `<Var name="MyClanId">`.
+ * `null` means "this document does not carry that field at all", which is
+ * different from `""` — an empty id is the game's own "not in a co-op".
+ *
+ * Measured on every save on file (7/7): the two always carry the same value,
+ * and `<RegataCenter clanId>` / `<Regata clanId>` agree with them wherever they
+ * appear. Two of those saves declare no co-op and both fields are `""` or
+ * absent together, so "absent" and "empty" both mean the same thing to a
+ * reader — only the *split* is an anomaly.
+ *
+ * Co-op membership is account state, not town state: which team this file
+ * claims to be in is part of whose file it is, so a copy that moved it would
+ * hand the server a file disagreeing with itself about its own team. Nothing
+ * here writes it; this reader exists so the restore and the push gate can both
+ * prove that.
+ */
+export function readCoopId(xml: string): { tag: string | null; v: string | null } {
+  const t = /<MyClan\b[^>]*>/i.exec(xml);
+  return { tag: t ? attrValue(t[0], "id") : null, v: readVar(xml, "MyClanId") };
+}
+
+/** True when a save carries both co-op fields and they name different clans. */
+export function coopIdSplit(xml: string): boolean {
+  const { tag, v } = readCoopId(xml);
+  return tag != null && v != null && tag !== v;
 }
 
 export function writeVar(xml: string, varName: string, value: string): string {

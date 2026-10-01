@@ -34,7 +34,7 @@ import { AVATAR_MAX } from "../../catalogs";
 import { RAW_PROFILE } from "../catalogs.data.server";
 import { WHUDUP_XOR } from "./barn.server";
 import { CHAT_EMOJI_IDS } from "./chat-emoji.server";
-import { readVar } from "./vars.server";
+import { coopIdSplit, readVar } from "./vars.server";
 import { attrValue, findUnbalancedTag } from "./xml-edit.server";
 
 /**
@@ -184,6 +184,21 @@ function shapeProblems(xml: string, known: DonorIds | null): string[] {
       out.add(`chat-emoji-unknown:${id}`);
     }
   }
+
+  // ---- co-op identity is declared in exactly one place ------------------
+  // Joining a co-op and typing in its chat is the first moment the client's
+  // clan state is read against the account Playrix holds, so a file naming two
+  // different teams at once is a shape no save on file has: 7/7 agree between
+  // `<MyClan id>` and `<Var name="MyClanId">`, including the two saves that
+  // declare no co-op at all (both empty, or both absent). Reported 2026-10-01
+  // as an instant ban on the first message typed after a full-city copy, so it
+  // gets a key of its own here rather than being left to the identity guard,
+  // which only looks at cityId / deviceId / `user=`.
+  //
+  // Per-document on purpose, unlike the counters: an in-game join writes both
+  // fields together, so it raises no new key and never blocks the next push —
+  // only an edit that moves one and not the other does.
+  if (coopIdSplit(xml)) out.add("coop-id-mismatch");
 
   // ---- profile lists ----------------------------------------------------
   for (const [field, group] of Object.entries(PROFILE_FIELDS)) {

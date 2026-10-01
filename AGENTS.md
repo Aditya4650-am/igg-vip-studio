@@ -1168,14 +1168,24 @@ therefore also imported the donor's `UnlockedThemes`, their `New*` "not
 reviewed yet" markers (`NewExpRanks` carries values on real saves, and those
 markers are state the Profile tool deliberately stopped writing) and any
 `BadgeFrameIncident*` flag — seven DataElems no restore is for and the
-reference never copies. `copyProfileLists()` now takes the four and inserts a
-missing one *inside* `<Configs>` rather than beside it. Measured on six real
-restores: the four arrive from the friend, all seven others keep our own value,
-and every push gate still passes. This narrows the report's trigger; it does
-**not** root-cause the ban.
+reference never copies. The first step was `copyProfileLists()`: take those
+four and insert a missing one *inside* `<Configs>` rather than beside it.
 
-Guard rail: `copy: a full restore takes the friend's badges, frames, styles and
-titles — nothing else in their Configs`.
+That was then **narrowed to none of them** — a full restore now leaves
+`PlayerProfile` / `Configs` untouched altogether, and `copyProfileLists()` plus
+its `findDataElemBlock()` helper are deleted rather than left uncalled. See
+*Co-op chat: the profile identity the full copy was wearing* below: the
+measured known-good full copy holds 0/0/0/0 badges/frames/styles/exp-ranks
+against the donor's 19/15/9/20, so the reference tool's four-list clone is
+outvoted by the save that was actually pushed, joined to a co-op and chatted in
+without a ban. This narrows the report's trigger; it does **not** root-cause
+the ban.
+
+Guard rail: `copy: a full restore takes the town — never the donor's profile
+identity inside Configs` (renamed from the old `copy: a full restore takes the
+friend's badges, frames, styles and titles — nothing else in their Configs`,
+whose assertions were inverted rather than dropped — the four still arrive
+*nowhere*, and ours survives list for list).
 
 **Profile writer (`injectProfile`), three hardenings:**
 
@@ -1600,6 +1610,111 @@ does not), `copy: the friend's city is taken, their lifetime counters are not`
 (all three modes × both halves of the boundary, plus the donor-only achievement
 never appearing). All five push gates were then run over the 12 real restores
 above: **zero refusals**.
+
+### Co-op chat: the profile identity the full copy was wearing (2026-10-01)
+
+Reported right after the date fix came back clean: *"after copy all city then I
+join the Co-op in game and then type something or send request of barn items or
+stickers or etc in coop chat, then I got instant ban."* The discriminator is the
+one that has held all along — **basic stats is clean, the full copy bans** —
+and it points at something narrower than the town.
+
+`inicial` writes no **profile identity**; `completo` / `novo` wrote all three of
+
+| field | what it is | our saves | donor |
+| --- | --- | --- | --- |
+| `UnlockedChatEmoji` | chat **sticker** unlock list | absent / own | `,st79,,st34,…,desc,…` (107 ids) |
+| `Unlocked_ava*` | **profile pictures** this account has | 27 | 386 |
+| `UnlockedBadges/Frames/Styles/ExpRanks` in `PlayerProfile > Configs` | **badges, frames, styles, exp ranks** | 0 / 0 / 0 / 0 | 19 / 15 / 9 / 20 |
+
+All three are rendered next to your name in the co-op roster and chat — which is
+where the report happens — and a sticker message exercises the first one
+directly. None of them says anything about the city that was transplanted, so
+leaving them alone cannot make the town inconsistent: the opposite of
+`TOWN_HISTORY_VARS`, where the counters *do* have to follow the town.
+
+**The two known-good saves, and what they actually prove.** Both were supplied
+as *"complete town, co-op chat, no ban"*, and both keep their **own**
+throughout — `mGameInfo.current.xml` (cityId `hfPOr0EVvk`, clan `Aw7HZlqQcc`)
+has no `UnlockedChatEmoji` var at all, 27 avatars, empty profile lists and an
+all-`Default` `<Skins>` block; `mGameInfo.current-2.xml` (cityId `tRTNVz89bq`,
+clan `1HEBicgyar`) has its own `,sp1,,sp4,…`, its own 8/10/4 badges/frames/
+styles, 27 avatars.
+
+Provenance matters, because it decides what the first one is evidence of:
+`ab46f0b`'s `INICIAL_VARS` **already contained** `gameStartDate`,
+`FirstAttemptM3Levels`, `LivesSent`, `FullCardCollections`,
+`RegataTasksCompleted` and `Achievement_Teamwork`, and its `inicial` copied no
+town — so that file is **basic stats + clone town layout**, i.e. the two
+features the user separately calls clean, *not* a `completo` output. It never
+wore the donor's cosmetics because no step it went through copies them. So what
+it establishes is a **shape**: *the donor's town and lifetime history on our own
+profile identity* is a save that was pushed, joined to a co-op and chatted in
+without a ban. The full copy is that same shape **plus** the donor's avatars,
+stickers and badges — and that plus is what was removed.
+
+**The change** — one rule, in `applyDesban`'s `mode !== "inicial"` block:
+*the restore takes the city, never the person*.
+
+- the `UnlockedChatEmoji` write and the `Unlocked_ava*` loop are gone;
+- `copyProfileLists()` and its `findDataElemBlock()` helper are **deleted**, not
+  merely uncalled — `PlayerProfile` / `Configs` are now left alone entirely.
+  This *narrows* the earlier rule from the ban-protection pass below rather than
+  reversing it: that pass had already stopped the wholesale replace which
+  imported the donor's themes, `New*` markers and `BadgeFrameIncident*` flag,
+  and the answer turns out to be none of it. The reference tool's
+  `_apply_desban` does clone those four lists — it is outvoted here by the
+  measured known-good shape, which holds none of the donor's.
+- `skin_` / `decor_` vars **stay**: they describe how this town's buildings
+  look, so they follow the town.
+
+Unlocking any of the three stays where it was, in the feature that asks by name:
+`injectAvatars` / `unlockAllAvatars` and the Profile tab for pictures and
+badges, `unlockEmoji` / the Decor tab's Sticker action for stickers.
+
+Measured on the real known-good save against the same donor: a full copy went
+from **+571 / +595 added vars to +212 / +236** (the ~359 avatars gone) and from
++23.9 KB / +36.5 KB to +8.0 KB / +20.6 KB, with **zero** occurrences of any of
+the three fields in any mode's change list. All 18 real save-pair × mode
+combinations still report `shape=[-] prog=[-]`.
+
+**Co-op identity gets its own two rules**, because clan membership is the other
+half of *"whose file is this"* and the identity guard only looks at cityId /
+deviceId / `user=`. `readCoopId()` / `coopIdSplit()` live in `vars.server.ts`
+and read the two places a save declares a clan — `<MyClan id>` and
+`<Var name="MyClanId">`:
+
+- `coop-id-mismatch` joins `shapeProblems`, **per-document on purpose**: 7/7
+  saves on file agree between the two fields (including the two that declare no
+  co-op at all), and an *in-game* join writes both together, so it raises no new
+  key and never blocks the next push. Only an edit that moves one and not the
+  other does. Deliberately **not** a loaded-vs-pushed `coop-id-changed` key:
+  `s.loadedXml` is assigned only in `connectLoad`, so a co-op joined in game
+  would make every later push of that session refuse — a false refusal on a
+  legitimate action, which is worse than the gap it would close.
+- `assertCoopIdentityKept(before, after)` runs in all three clone functions
+  right beside `assertNoForeignIdentity`. Nothing writes those fields today, so
+  it never fires — it exists so a future block list which starts covering
+  `<MyClan>` fails inside the function that did it, rather than on a user's
+  account at their first message in a co-op chat.
+
+Guard rails: `copy: no restore mode takes the friend's chat stickers, avatars or
+co-op` (all three modes × both sticker shapes × the decor clone, over the donor
+with and without a list — the `unlockEmoji()` bulk-unlock fallback is pinned
+too), `copy: a full restore takes the town — never the donor's profile identity
+inside Configs` (nothing donor-side arrives, ours survives list for list, a list
+we never had is not created), and `co-op: a save that disagrees with itself about
+its own clan is refused` (caught, arrived-that-way passes, no-co-op passes,
+**an in-game join with a friend still fetched stays pushable**). The first was
+mutation-tested: restoring the `UnlockedChatEmoji` write makes it fail on
+`completo: our stickers are ours — the donor's list must not be installed`.
+
+**Honest limit, unchanged.** This removes a measured difference between a save
+that was known to be safe and one that was reported banned; it does not identify
+Playrix's rule, and no tool can. Read a green gate as "nothing provably wrong",
+never as "cannot be banned". The reported save itself was never captured, so if
+this does not settle it the next step is to get that file — the same
+side-by-side method that found `experience` and the date.
 
 ## Avatar icons
 
