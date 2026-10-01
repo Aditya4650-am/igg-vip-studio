@@ -23,9 +23,11 @@ const INICIAL_VARS = [
   "levelup", "money", "moneyCash", "EarnedCoins", "residents", "wheatCounter",
   "plowFieldsAchiev", "defaultOrdersCount", "match3Life", "Match3Lives_infTime",
   "spentCash", "earnedCash", "timeInGame",
-  // Deliberately absent — lifetime facts Playrix tracks against the *player*,
-  // which the reference tool's basic-stats step never copies either (see the
-  // disassembly note above TUTORIAL_DONE):
+  // Deliberately absent — lifetime facts Playrix tracks against the *player*
+  // rather than the town. The reference tool's 18-name tuple leaves all eight
+  // out too, though its FIELD_MAP stats loop does re-add the first six — so
+  // excluding them is a deliberate divergence, not a match (see the note above
+  // TUTORIAL_DONE). The last two are absent from that tool entirely.
   //   gameStartDate, RegataTasksCompleted, FirstAttemptM3Levels,
   //   FullCardCollections, LivesSent, Achievement_Teamwork,
   //   Achievement_BuiltHouses, Achievement_CompleteMatch3Levels
@@ -77,31 +79,44 @@ const NOVO_BLOCKS = ["Minigames", "DSCollapseQuests", "QuestsBook", "DSCollectio
  *   Achievement_BuiltFactories, Achievement_SpentCoins, Achievement_EarneCoins,
  *   spentCash, earnedCash, timeInGame
  *
- * The names deliberately left out of `INICIAL_VARS` appear **nowhere** in that
- * code — the strings exist in the module only for `get_xml_stats`, the stats
- * *display* — and each of them is a lifetime fact Playrix holds against the
- * **account** rather than against the town:
+ * It writes in **two** passes, and that distinction matters:
  *
- * - `gameStartDate`          account creation time. Ours reads 1130782500 on a
- *                            real save while a fetched donor reads 1356976800:
- *                            two different players, and the cheapest kind of
- *                            mismatch for a server to read.
- * - `RegataTasksCompleted`   lifetime regatta counter — the field AGENTS
- *                            already records as being read on upload.
- * - `FirstAttemptM3Levels`   lifetime match-3 counter (5698 -> 92524 across one
- *                            real copy).
+ * 1. the 18-name tuple above, via its own `copy_var`;
+ * 2. `FIELD_MAP`, eleven display stats it also *writes* — `money`, `levelup`,
+ *    `moneyCash`, three match-3 level vars, `expeditionEnergy` and six
+ *    lifetime fields: `FirstAttemptM3Levels`, `LivesSent`,
+ *    `Achievement_Teamwork`, `FullCardCollections`, `RegataTasksCompleted`,
+ *    `gameStartDate`.
+ *
+ * So the tuple leaves those six out but `FIELD_MAP` puts them back. An earlier
+ * revision of this note claimed they occur in that module only for
+ * `get_xml_stats` — **false**: `FIELD_MAP` is a module global, so its strings
+ * never appear among `_apply_desban`'s own constants, and a search that stops
+ * at the tuple misses them. We exclude them anyway; that is a deliberate
+ * divergence from the reference tool, taken because each is a lifetime fact
+ * Playrix holds against the **account** and none of them describes the town:
+ *
+ * - `gameStartDate`          one value per player — 1130782500, 1658707200,
+ *                            1785587932, 1356976800, 1744643813 across five
+ *                            saves — and the cheapest kind of mismatch for a
+ *                            server to read.
+ * - `RegataTasksCompleted`   9868 -> 44911 across one real copy.
+ * - `FirstAttemptM3Levels`   5698 -> 92524 across the same copy.
  * - `FullCardCollections`    lifetime collection progress.
  * - `LivesSent`, `Achievement_Teamwork`   lifetime social counters.
  *
  * For the same reason the blanket achievement loop that used to run here is
  * gone: `for (m of fr.matchAll(/<Var name="(Achievement_[^"]+)"/))` copied
  * **every** achievement the donor held — 265 entries on a real run — while the
- * reference tool copies five. Those five remain in `INICIAL_VARS`.
+ * reference tool copies five through the tuple plus `Achievement_Teamwork`
+ * through `FIELD_MAP`. `Achievement_BuiltHouses` and
+ * `Achievement_CompleteMatch3Levels` are absent from it entirely.
  *
- * Everything the reference tool does copy still moves: level, experience,
- * money, residents, orders, barn, expansions, tutorial state. "Basic stats"
- * still reads as the friend's city; this is the whole of what it stopped
- * touching.
+ * Everything else still moves: level, money, residents, orders, barn,
+ * expansions, tutorial state — plus `experience`, which the reference tool
+ * does not copy but our own `level-up-without-experience` gate requires to
+ * arrive with the level. "Basic stats" still reads as the friend's city; this
+ * is the whole of what it stopped touching.
  */
 const TUTORIAL_DONE = [
   "StartTutorialFinished",
@@ -1076,7 +1091,8 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
     if (val != null) own = writeVar(own, name, scrub(val));
   }
   // Deliberately not `every Achievement_* the donor holds`. The reference tool
-  // copies five; this loop used to copy all 265 of a real high-level city onto
+  // copies five through its tuple and `Achievement_Teamwork` through its
+  // FIELD_MAP stats; this loop copied all 265 of a real high-level city onto
   // an account that never earned them, and a lifetime achievement count is
   // tracked against the player, not the town. See the note above TUTORIAL_DONE.
   if (mode !== "inicial") {

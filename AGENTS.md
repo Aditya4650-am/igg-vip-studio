@@ -1274,11 +1274,20 @@ and `INICIAL_VARS` now ships exactly those 18 and nothing else:
   `defaultOrdersCount`, `match3Life`, `Match3Lives_infTime` and its five
   achievements (`IncreasedPopulation`, `PlowedFields`, `BuiltFactories`,
   `SpentCoins`, `EarneCoins`).
-- `gameStartDate`, `RegataTasksCompleted`, `FirstAttemptM3Levels`,
-  `FullCardCollections`, `LivesSent` and `Achievement_Teamwork` occur in that
-  file **only** inside `get_xml_stats`, its stats display — never in
-  `_apply_desban`. They are lifetime facts Playrix holds against the player,
-  so they are out of `INICIAL_VARS`.
+- The reference tool copies **two** ways: the 18-name tuple, then an
+  eleven-entry `FIELD_MAP` of display stats it also *writes* — `money`,
+  `levelup`, `moneyCash`, three match-3 level vars, `expeditionEnergy`, and
+  six lifetime fields (`FirstAttemptM3Levels`, `LivesSent`,
+  `Achievement_Teamwork`, `FullCardCollections`, `RegataTasksCompleted`,
+  `gameStartDate`). So the tuple leaves those six out but `FIELD_MAP` puts
+  them back. **An earlier revision of this note claimed the six occur in that
+  module only for `get_xml_stats` — false, and do not repeat it**: `FIELD_MAP`
+  is a module global, so its strings never show up among `_apply_desban`'s own
+  constants and a search that stops at the tuple misses them. We exclude the
+  six anyway — a *deliberate divergence*, each being a lifetime fact with one
+  value per player and no bearing on the town (measured: `gameStartDate` reads
+  1130782500 / 1658707200 / 1785587932 / 1356976800 / 1744643813 across five
+  different `cityId`s).
 - The blanket `for (m of fr.matchAll(/<Var name="(Achievement_[^"]+)"/))` loop
   is **gone**: it copied ~265 donor achievements wholesale where the reference
   tool copies five. `Achievement_BuiltHouses` and
