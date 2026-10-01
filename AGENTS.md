@@ -1288,21 +1288,21 @@ experience  2436381253 -> 3370037992     (fc_ok      172109 -> 3370037992)
 ```
 
 Everything else HEAD writes was **already** written by `ab46f0b` and drew no
-ban, and HEAD touches strictly *fewer* variables than that baseline did — so the
-restore's delta from the loaded file was a strict subset of the proven-good one
-**plus exactly one addition**. `experience` joined `INICIAL_VARS` in `4f5a37a`
-at 05:05 on 2026-10-01, five hours *after* the working window, and the gate went
-in with it.
+ban. `experience` joined `INICIAL_VARS` in `4f5a37a` at 05:05 on 2026-10-01,
+five hours *after* the working window, and the gate went in with it.
 
 It is a cumulative counter Playrix keeps per account and it moved by up to
 **933,656,739 in a single sync**.
 
 **So `experience` is out of `INICIAL_VARS` again**, and after the change the
-"newly changed" count reads **0** on all four pairs. This *narrows* the copy
-relative to `ab46f0b` rather than reverting to it: HEAD still keeps our own
-`gameStartDate`, `RegataTasksCompleted` and the ~260 achievements, so the delta
-is a strict subset of the baseline's, which cannot be a new anomaly by
-construction — those exact values were pushed in the working window.
+"newly changed" count reads **0** on all four pairs.
+
+> **The table above only measured one direction, and that was the whole
+> problem.** It asked *"what does HEAD write that `ab46f0b` never wrote?"* and
+> never asked the reverse — *"`ab46f0b` wrote what HEAD no longer does?"*. The
+> reverse is direction `[B]`, it holds **56 values** in every mode, and it is
+> what broke full-city copy. See *Full-city copy: the date that stayed behind*
+> below before reasoning from `[A]` alone.
 
 **The `level-up-without-experience` gate needed a matching change or it would
 have refused every restore.** With `experience` no longer copied, a restore
@@ -1324,13 +1324,110 @@ its narrow donor excuse; do not re-derive a ban story from it.
 Guard rails: `copy: the friend's city is taken, their lifetime counters are not`
 asserts `experience` **stays ours** and that the copy's own level is excused
 while a hand-typed one is refused; `copy: the city follows the friend on every
-mode, its lifetime counters do not` puts `experience` in the `frozen` list for
-all three modes.
+mode; its account history follows only when the town does` splits the boundary
+by mode — history frozen in `inicial`, following the town in `completo` /
+`novo`, and `experience` outside both.
 
 **Still not root-caused.** One candidate narrowed from a diff is not a ban
 mechanism: this says *what changed*, not *why Playrix acted*. The pre-ban save
 is gone and there is no way to test server acceptance locally, so the limit
 stands — a green gate means "nothing provably wrong", never "cannot be banned".
+
+### Full-city copy: the date that stayed behind (2026-10-01)
+
+Reported the same morning, right after basic stats came back clean: *"its
+perfect for basic stats, but i copy all city then after 1 min or less still got
+banned … the date issue because my original city date is shown not the copy
+town date after copy the town."*
+
+**The blind spot, which is the whole lesson.** The baseline comparison above
+asked only **[A] what does HEAD write that `ab46f0b` never wrote?** — got
+`experience`, then `0`, and stopped. It never asked the reverse. Running the
+same side-by-side pairs over **all three modes** in that direction:
+
+| direction | `inicial` | `completo` | `novo` |
+| --- | ---: | ---: | ---: |
+| **[A]** written by HEAD, never by `ab46f0b` | 0 | 0 | 0 |
+| **[B]** written by `ab46f0b`, never by HEAD | **56** | **56** | **56** |
+
+A one-directional diff of two outputs cannot see a *removal*. `[B]` is headed
+by **`gameStartDate` in 4/4 save pairs**, then `FirstAttemptM3Levels`,
+`RegataTasksCompleted`, `LivesSent`, `FullCardCollections`,
+`Achievement_Teamwork` and ~50 more `Achievement_*` — exactly the eight
+lifetime fields plus the blanket achievement loop that `a883243` (08:54,
+"copy the reference tool's own 18 vars") took out. That commit landed **five
+hours after the working window**, and the reported symptom is its direct
+product: the friend's town arrived, the friend's founding date did not.
+
+**Why the town decides it, and not the level.** `inicial` clones no
+`TownGround` / `Buildings`, so it changes a handful of flat vars and there is
+nothing in the file for a lifetime counter to contradict — it kept working with
+this set absent, which is a measured fact and the reason it stays trimmed.
+`completo` / `novo` transplant the friend's whole town, and then the file says
+*veteran account* in the museum, zoo, trains, expansions and decor while
+saying *founded two months ago, 5 friends ever helped, 136 regatta tasks* in
+the counters. That contradiction sits **inside the blocks just copied**, a far
+cheaper thing for a server to read than a level/XP pair — and it is present in
+every full-city push and in no basic-stats push, which is the split that was
+actually observed.
+
+**What the reference tool says, which was read too narrowly before.** Its
+basic-stats tuple has five achievements, and that is where the earlier
+"the reference tool copies five" claim came from. But `_apply_desban` — the
+function whose docstring is *"Desban completo: copia TUDO do XML do amigo"*
+and which is the step that also clones `TownGround + Buildings` — lists
+outright:
+
+```
+  Achievement_* vars, Common_prevQuestId, lastContiniouslyCompletedQuest,
+  QB_* quests, HarvestForTime, SeasonTicketCenter, MapOrders, …
+── Clone Decor completo ───
+  TownGround + Buildings, FIELD_MAP stats, Skins, BuildingsStash,
+  Stickers, Badges, Titulos, Molduras, Estilos, Avatares
+```
+
+`FIELD_MAP` carries `gameStartDate`, `FirstAttemptM3Levels`, `LivesSent`,
+`Achievement_Teamwork`, `FullCardCollections` and `RegataTasksCompleted`. So
+the reference copies history **with** the town and the blanket `Achievement_*`
+loop was never wrong for the full modes — only for `inicial`.
+
+**The fix: `TOWN_HISTORY_VARS` plus the achievement loop, inside
+`if (mode !== "inicial")`.** `inicial` is byte-for-byte what it was; the two
+town modes regain the 56 values. `experience` stays out of both. Measured after
+the change, same four save pairs:
+
+| direction | `inicial` | `completo` | `novo` |
+| --- | ---: | ---: | ---: |
+| **[A]** | 0 | 0 | 0 |
+| **[B]** | 56 *(by design)* | **0** | **0** |
+
+and the per-pair change counts now equal the baseline exactly —
+`455/818/421/92` for `completo`, `470/837/445/168` for `novo` — i.e. a full-city
+push is once again variable-for-variable what ran in the working window. All
+18 real save-pair × mode combinations pass every gate with zero refusals.
+
+**New gate: `town-copied-city-date:<ours>-><donor>`,** in
+`progressionProblems`. It fires only when the town block actually moved
+(`elementSpan` compare of `TownGround` / `Buildings` between loaded and pushed)
+*and* the pushed `gameStartDate` is demonstrably still ours while the donor
+declares a different one. Keying on the town rather than on the level is what
+keeps basic stats pressable — the level/XP rule already excuses a townless
+restore, and refusing that would break the one mode proven clean. A save that
+already disagreed on arrival, a town that did not move, and a donor with no
+date all gain no rule.
+
+Guard rails: `progression: a town that came from the friend must not keep our
+founding date` pins the firing shape, the refusal, the two silent cases and
+both no-rule cases, so a future trim of `TOWN_HISTORY_VARS` cannot quietly
+reintroduce the report. `unban: restore applies the friend's city state and
+re-encodes a valid save` asserts both halves of the split — `completo` takes the
+friend's `FullCardCollections`, `inicial` keeps ours.
+
+**Honest limit, unchanged.** This restores byte-parity with the build the user
+calls good, and it makes the one thing they could *see* match the copy. It is
+still a diff, not a mechanism: it says what changed, not why Playrix acted, and
+there is no way to test server acceptance locally. A green gate means
+"nothing provably wrong", never "cannot be banned".
 
 ### What a restore copies is the reference tool's own 18 vars (2026-10-01)
 
@@ -1385,16 +1482,21 @@ and `INICIAL_VARS` now ships exactly those 18 and nothing else:
   them back. **An earlier revision of this note claimed the six occur in that
   module only for `get_xml_stats` — false, and do not repeat it**: `FIELD_MAP`
   is a module global, so its strings never show up among `_apply_desban`'s own
-  constants and a search that stops at the tuple misses them. We exclude the
-  six anyway — a *deliberate divergence*, each being a lifetime fact with one
-  value per player and no bearing on the town (measured: `gameStartDate` reads
-  1130782500 / 1658707200 / 1785587932 / 1356976800 / 1744643813 across five
-  different `cityId`s).
+  constants and a search that stops at the tuple misses them. The six are
+  excluded from `INICIAL_VARS`, which is the `inicial` mode's whole copy set —
+  they are copied by `TOWN_HISTORY_VARS` when the town is copied, because that
+  is where a lifetime fact stops being ours to keep (see *Full-city copy: the
+  date that stayed behind* above). Measured across the corpus they are one value
+  per player: `gameStartDate` reads 1130782500 / 1658707200 / 1785587932 /
+  1356976800 / 1744643813 across five different `cityId`s.
 - The blanket `for (m of fr.matchAll(/<Var name="(Achievement_[^"]+)"/))` loop
-  is **gone**: it copied ~265 donor achievements wholesale where the reference
-  tool copies five. `Achievement_BuiltHouses` and
-  `Achievement_CompleteMatch3Levels` were dropped from `INICIAL_VARS` for the
-  same reason — they are not among those five.
+  does **not** run for `inicial`: there it would copy ~265 donor achievements
+  onto a save that gains no town to justify them. It runs for `completo` /
+  `novo`, where the reference tool's own "Desban completo" docstring says
+  `Achievement_* vars` and where `ab46f0b` ran it too. `Achievement_BuiltHouses`
+  and `Achievement_CompleteMatch3Levels` were dropped from `INICIAL_VARS` for
+  the same reason — they are not among those five — and arrive with the loop in
+  the town modes.
 - Ours adds three names the reference has no need of: `WareHouseCashUpgrade`,
   `WHUdup` and `ExpandLevel`, which describe the town and follow it. `experience`
   was briefly a fourth and is **gone again** — see *The one value that changed
@@ -1410,15 +1512,22 @@ and `INICIAL_VARS` now ships exactly those 18 and nothing else:
 `RegataTasksCompleted`, `FirstAttemptM3Levels`,
 `FullCardCollections`, `LivesSent`, `Achievement_Teamwork`,
 `Achievement_BuiltHouses` and `Achievement_CompleteMatch3Levels` are untouched
-in **every one of the 12 rows**, and no achievement outside the reference
-tool's five is created anywhere. The 263 additions are `skipTutorials` flags
-and `Minigames` state — client state, not account history.
+in **every `inicial` row**, and no achievement outside the reference tool's
+five is created there. The 263 additions are `skipTutorials` flags and
+`Minigames` state — client state, not account history.
 
-**"Basic stats" takes the friend's city again.** What it stops taking is the
-account behind it: the day the account started, the lifetime regatta /
-match-3 / card / social counters, and the ~260 achievements a high-level city
-carries. The tab says so under the buttons (`restoreKeepOwn`, updated in `vi`
-and `en`; the other 18 locale packs are `Partial` and fall back).
+The same nine are **not** untouched in `completo` / `novo`: they follow the
+donor with `TOWN_HISTORY_VARS` and the achievement loop, which is the whole
+point of the split. `experience` is the one exception in *all three* modes.
+
+**"Basic stats" takes the friend's city again, but only its city.** What it
+still does not take is the account behind it: the day the account started, the
+lifetime regatta / match-3 / card / social counters, and the ~260 achievements
+a high-level city carries — those belong to a town, so `inicial` (which copies
+no `TownGround` / `Buildings`) keeps ours, and `completo` / `novo` take the
+friend's with the town they just transplanted. The tab says so under the
+buttons (`restoreKeepOwn`, updated in `vi` and `en`; the other 18 locale packs
+are `Partial` and fall back).
 
 **Honest limit, unchanged:** this removes the contradiction Playrix can
 *measure against its own records*. It does not make an account un-bannable, and

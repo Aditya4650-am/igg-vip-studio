@@ -174,13 +174,30 @@ test("unban: restore applies the friend's city state and re-encodes a valid save
   // The friend's city is what a restore is for — their level, their town.
   assert.match(xml, /<Var name="levelup"\s+v="42"/, "the friend's level is the point of the button");
   assert.match(xml, /<Var name="residents"\s+v="9000"/, "and so is their population");
-  // …but a lifetime counter Playrix holds against *this* player never moves.
+  // `completo` transplants the town, so the history describing the account
+  // behind it arrives in the same step (`TOWN_HISTORY_VARS`): a file holding
+  // the friend's museum, zoo and expansions while dating the city to *our*
+  // creation is the mismatch reported on 2026-10-01.
   assert.match(
     xml,
-    /<Var name="FullCardCollections"\s+v="2"/,
-    "our collection progress is not the friend's to lend",
+    /<Var name="FullCardCollections"\s+v="7"/,
+    "a town transplant brings the lifetime counters that describe it",
   );
   balanced(xml);
+
+  // Basic stats moves no town, so it moves no lifetime fact either — the split
+  // the evidence supports: `inicial` is the mode proven clean with this set
+  // absent, and it must stay exactly that.
+  const second = load();
+  studio.attachFriendXml(token, second.sessionId, friendSave);
+  const basic = studio.applyUnban(token, second.sessionId, "inicial");
+  const basicXml = Buffer.from(basic.fileB64!, "base64").toString("utf8");
+  assert.match(
+    basicXml,
+    /<Var name="FullCardCollections"\s+v="2"/,
+    "our collection progress is not the friend's to lend when no town is copied",
+  );
+  balanced(basicXml);
 
   // The pushed file must load back into a fresh session without loss.
   const reloaded = studio.connectLoad(token, "test-device", undefined, undefined, out.fileB64!);
@@ -1669,10 +1686,75 @@ test("copy: the friend's city is taken, their lifetime counters are not", () => 
   );
 });
 
+test("progression: a town that came from the friend must not keep our founding date", () => {
+  // Reported verbatim on 2026-10-01: "my original city date is shown, not the
+  // copy town date, after copy the town". The town and the date it was founded
+  // have to arrive together — `gameStartDate` was the first of the 56 values
+  // the proven-good baseline `ab46f0b` wrote and this stopped writing, in 4/4
+  // save pairs. This gate exists so a future trim of `TOWN_HISTORY_VARS` cannot
+  // quietly reintroduce it, and it must stay silent on the mode it must not
+  // break.
+  const townOnly = HISTORY_OWN
+    .replace('v="MYTOWN"', 'v="FRIENDTOWN"')
+    .replace('id="mine1"', 'id="friend1"')
+    .replace('name="levelup" v="30"', 'name="levelup" v="1089"');
+
+  // Town transplanted, date left ours — the exact reported shape.
+  assert.deepEqual(
+    progressionProblems(HISTORY_OWN, townOnly, HISTORY_DONOR),
+    ["town-copied-city-date:1658707200->1356976800"],
+    "the mismatch the report describes must be named",
+  );
+  assert.throws(
+    () => assertProgressionsSafe(HISTORY_OWN, townOnly, HISTORY_DONOR),
+    /town-copied-city-date/,
+    "and it must be refused, not merely logged",
+  );
+
+  // Town and date both from the friend — what `completo` / `novo` now produce.
+  const townAndDate = townOnly.replace('v="1658707200"', 'v="1356976800"');
+  assert.deepEqual(
+    progressionProblems(HISTORY_OWN, townAndDate, HISTORY_DONOR),
+    [],
+    "a date that followed the town is not a mismatch",
+  );
+
+  // Basic stats copies no town, so there is nothing in the file for the date to
+  // contradict — this is the mode proven clean today and it must stay pressable.
+  const basic = HISTORY_OWN.replace('name="levelup" v="30"', 'name="levelup" v="1089"');
+  assert.deepEqual(
+    progressionProblems(HISTORY_OWN, basic, HISTORY_DONOR),
+    [],
+    "a townless restore is not held to the town's founding date",
+  );
+
+  // A save that already disagreed on arrival, or a donor with no date at all,
+  // gains no rule of its own.
+  assert.deepEqual(
+    progressionProblems(townOnly, townOnly.replace('v="1658707200"', 'v="1111111111"'), HISTORY_DONOR),
+    [],
+    "a town that did not move cannot be the reason",
+  );
+  const noDonorDate = HISTORY_DONOR.replace(/<Var name="gameStartDate"[^>]*\/>/, "");
+  assert.deepEqual(
+    progressionProblems(HISTORY_OWN, townOnly, noDonorDate),
+    [],
+    "a donor that declares no date excuses the comparison",
+  );
+});
+
 /**
- * The boundary a restore draws, measured from the reference tool rather than
- * guessed: what it moves is level, experience and money; what it never touches
- * is a lifetime fact or an achievement outside its own five.
+ * The boundary a restore draws, measured from the reference tool and from the
+ * user's own proven-good baseline rather than guessed.
+ *
+ * It is **two** boundaries, because the town decides it. `inicial` moves level
+ * and money and never touches a lifetime fact or an achievement outside its
+ * own five. `completo` / `novo` also move the town, and then the history
+ * describing the account behind that town has to move with it — which is
+ * exactly what `TOWN_HISTORY_VARS` plus the `Achievement_*` loop do, and
+ * exactly what the reference tool's "Desban completo" docstring and `ab46f0b`
+ * both specify. `experience` is outside both boundaries: it is the one value a
+ * restore ever wrote that the no-ban baseline never touched.
  */
 const HISTORY_OWN = [
   '<?xml version="1.0" encoding="utf-8"?>',
@@ -1716,17 +1798,23 @@ const HISTORY_DONOR = [
   '<TownGround ver="2"><row j="0" v="FRIENDTOWN"/></TownGround><Buildings><Object id="friend1"/></Buildings>',
 ].join("");
 
-test("copy: the city follows the friend on every mode, its lifetime counters do not", () => {
-  // The reference tool's basic-stats step moves level and money and never
-  // moves a lifetime fact Playrix holds against the *player*. Both halves
-  // matter: freezing everything made "Basic stats" copy nothing at all, while
-  // the earlier copy took `gameStartDate` and 263 achievements along with it —
-  // the account's history, not the town's. `experience` sits with the frozen
-  // group: it is the one value a restore writes that the no-ban baseline
-  // never touched, so it is never copied either.
-  const frozen = [
+test("copy: the city follows the friend on every mode; its account history follows only when the town does", () => {
+  // Both halves matter. Freezing everything made "Basic stats" copy nothing at
+  // all; letting `inicial` take the history as well is not what the evidence
+  // supports either — it moves no town, so there is nothing in the file for a
+  // lifetime counter to contradict. The town-copying modes are the other side
+  // of the same coin: they transplant the friend's museum, zoo, trains and
+  // expansions, and a file doing that while dating the city to *our* creation
+  // and claiming *our* 136 regatta tasks is the mismatch reported on
+  // 2026-10-01 ("my original city date is shown, not the copy town date, after
+  // copy the town"). Measured: those 56 values are exactly what the proven-good
+  // baseline `ab46f0b` wrote and this stopped writing.
+  //
+  // `experience` sits outside both: it is the one value a restore ever wrote
+  // that the no-ban baseline never touched, so it is copied in no mode.
+  const history = [
     "RegataTasksCompleted", "FirstAttemptM3Levels", "FullCardCollections",
-    "Achievement_BuiltHouses", "gameStartDate", "experience",
+    "Achievement_BuiltHouses", "gameStartDate",
   ];
   const takes = [
     "levelup", "money", "moneyCash", "timeInGame",
@@ -1739,20 +1827,38 @@ test("copy: the city follows the friend on every mode, its lifetime counters do 
     const snap = townSession(HISTORY_OWN);
     studio.attachFriendXml(token, snap.sessionId, HISTORY_DONOR);
     const xml = studio.applySave({ token, sessionId: snap.sessionId, unbanMode: mode }).xml!;
+    const withTown = mode !== "inicial";
 
-    for (const name of frozen) {
+    for (const name of history) {
       const now = readVal(xml, name);
-      const was = readVal(HISTORY_OWN, name);
-      assert.equal(now, was, `${mode}: ${name} moved off our value (${was} -> ${now})`);
+      if (withTown) {
+        const theirs = readVal(HISTORY_DONOR, name);
+        assert.equal(now, theirs, `${mode}: ${name} describes the town and must follow it`);
+      } else {
+        const was = readVal(HISTORY_OWN, name);
+        assert.equal(now, was, `${mode}: ${name} moved off our value (${was} -> ${now})`);
+      }
     }
+    // Outside both boundaries — never copied, in any mode.
+    assert.equal(
+      readVal(xml, "experience"),
+      readVal(HISTORY_OWN, "experience"),
+      `${mode}: experience is the one value the no-ban baseline never wrote`,
+    );
     for (const name of takes) {
       const now = readVal(xml, name);
       const theirs = readVal(HISTORY_DONOR, name);
       assert.equal(now, theirs, `${mode}: ${name} is the city's own number and must follow it`);
     }
 
-    // A lifetime achievement the donor has and we never had is not imported.
-    assert.ok(!xml.includes("Achievement_OnlyTheirs"), `${mode}: a stranger's achievement count must not appear`);
+    // A lifetime achievement outside its own five arrives with the town — the
+    // reference tool's "Desban completo" says `Achievement_* vars` outright —
+    // and is exactly what a townless basic-stats pass must never import.
+    if (withTown) {
+      assert.ok(xml.includes("Achievement_OnlyTheirs"), `${mode}: the town's achievements arrive with it`);
+    } else {
+      assert.ok(!xml.includes("Achievement_OnlyTheirs"), `${mode}: a stranger's achievement count must not appear`);
+    }
 
     // City state and layout are what the copy is for.
     assert.match(xml, /name="residents" v="85380"/, `${mode}: population follows the town`);

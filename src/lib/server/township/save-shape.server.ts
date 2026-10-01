@@ -354,6 +354,20 @@ function readLevel(xml: string): number | null {
 }
 
 /**
+ * The raw text of `<tag…>` — paired or self-closing — or `null` when the save
+ * carries none. Compared across two documents to answer "did this town block
+ * actually move?", which is the only thing `town-copied-city-date` keys off:
+ * a whole-block compare, so a save whose town is byte-identical after the push
+ * (or one that never had a town) can never trip the rule.
+ */
+function elementSpan(xml: string, tag: string): string | null {
+  const paired = new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?</${tag}>`, "i").exec(xml);
+  if (paired) return paired[0];
+  const self = new RegExp(`<${tag}\\b[^>]*/>`, "i").exec(xml);
+  return self ? self[0] : null;
+}
+
+/**
  * Every `<Upgrade>` family row keyed `tag:id` -> `level`.
  *
  * The rows are matched exactly the way `upgrade-slx` matches them: a tag
@@ -380,7 +394,7 @@ function upgradeLevels(xml: string): Map<string, number> {
  *
  * Unlike the key-diff above, this one is naturally a pair: a regression only
  * exists *between* two documents, so it is compared directly against the save
- * as it was loaded. Three rules, all measured:
+ * as it was loaded. Four rules, all measured:
  *
  * - `regata-tasks-completed-lower` — `RegataTasksCompleted` is a lifetime
  *   counter (136 .. 44911 across the corpus) and the Stats tab exposes it as
@@ -457,6 +471,44 @@ export function progressionProblems(
     const donorLevel = donor ? readLevel(donor) : null;
     const fromCopy = donorLevel !== null && lvlAfter === donorLevel;
     if (!fromCopy) out.push(`level-up-without-experience:${lvlBefore}->${lvlAfter}`);
+  }
+
+  // The town and the date it was founded have to arrive together.
+  //
+  // `inicial` transplants no town, so it can leave `gameStartDate` alone and
+  // still be internally consistent — which is why this is gated on the town
+  // actually moving rather than on the level: the level/XP rule above already
+  // excuses a basic-stats restore, and refusing that would break the one
+  // restore mode proven clean today.
+  //
+  // `completo` / `novo` do transplant it, and when they do the file then
+  // claims a friend's museum, zoo, trains, expansions and decor while dating
+  // the city to *our* creation. Measured on the user's own report of
+  // 2026-10-01 ("my original city date is shown, not the copy town date, after
+  // copy the town") and on the side-by-side run against the proven-good
+  // baseline: `gameStartDate` is the first of the 56 values `ab46f0b` wrote
+  // and HEAD stopped writing, in 4/4 save pairs. The reference tool's
+  // "Desban completo" copies it through `FIELD_MAP` in the same pass as
+  // `TownGround + Buildings`.
+  //
+  // Fires only when the pushed date is demonstrably still ours (unchanged from
+  // load) while the donor carries a different one — a save that already
+  // disagreed on arrival, or a donor with no date at all, gains no rule.
+  const townMoved =
+    elementSpan(loaded, "TownGround") !== elementSpan(pushed, "TownGround") ||
+    elementSpan(loaded, "Buildings") !== elementSpan(pushed, "Buildings");
+  if (townMoved && donor) {
+    const dateBefore = readCounter(loaded, "gameStartDate");
+    const dateAfter = readCounter(pushed, "gameStartDate");
+    const dateDonor = readCounter(donor, "gameStartDate");
+    if (
+      dateDonor !== null &&
+      dateAfter !== null &&
+      dateAfter !== dateDonor &&
+      (dateBefore === null || dateAfter === dateBefore)
+    ) {
+      out.push(`town-copied-city-date:${dateAfter}->${dateDonor}`);
+    }
   }
 
   return out;

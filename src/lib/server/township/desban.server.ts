@@ -75,6 +75,50 @@ const INICIAL_VARS = [
  * justify putting `experience` back.
  */
 
+/**
+ * Account history that follows the town — **only** in the modes that copy the
+ * town (`completo` / `novo`), never in `inicial`.
+ *
+ * Measured on 2026-10-01 against the user's own proven-good baseline
+ * (`ab46f0b`, the 11:00-11:40pm window): running both implementations side by
+ * side over four real save pairs in *both directions* gives
+ *
+ *   [A] written by HEAD, never by ab46f0b ................ 0  (all three modes)
+ *   [B] written by ab46f0b, never by HEAD ............... 56 (all three modes)
+ *
+ * so a restore today is the proven-good one **minus 56 values**, and `[B]` is
+ * headed by `gameStartDate` in 4/4 pairs. That is the reported symptom
+ * verbatim — *"my original city date is shown, not the copy town date, after
+ * copy the town"* — and it is exactly what the reference tool's own
+ * "Desban completo" docstring says to copy:
+ *
+ *   > `Achievement_* vars, ... MapOrders, fielditself, CHT_* hints, _state
+ *   > tutorial vars` / `TownGround + Buildings, FIELD_MAP stats, Skins,
+ *   > BuildingsStash, Stickers, Badges, Titulos, Molduras, Estilos, Avatares`
+ *
+ * `FIELD_MAP` carries `gameStartDate`, `FirstAttemptM3Levels`, `LivesSent`,
+ * `Achievement_Teamwork`, `FullCardCollections` and `RegataTasksCompleted`.
+ *
+ * **Why the town decides it.** `inicial` does not clone `TownGround` /
+ * `Buildings`, so it changes a handful of flat vars and there is nothing in the
+ * file for them to contradict — it works today with this set absent, and stays
+ * exactly as it is. `completo` / `novo` transplant the friend's whole town: the
+ * museum, zoo, trains, expansions and decor all say "veteran account" while
+ * our own counters said "founded two months ago, 5 friends ever helped, 136
+ * regatta tasks". The contradiction then sits *inside the blocks just copied*,
+ * which is a far cheaper thing for a server to read than a level/XP pair.
+ * Copying the history with the town is what removes it, and it is what both
+ * the reference tool and the no-ban build did.
+ *
+ * `experience` is still **not** here — see the note above `INICIAL_VARS`.
+ * Nothing here is a value Playrix holds against *our* account once the town it
+ * describes belongs to the friend.
+ */
+export const TOWN_HISTORY_VARS = [
+  "gameStartDate", "FirstAttemptM3Levels", "LivesSent",
+  "FullCardCollections", "RegataTasksCompleted",
+];
+
 const COMPLETO_BLOCKS = [
   "Zoo", "ZooInfo", "ZooQuests", "ArtInfo", "Ernie", "Trains", "IslandsInfo",
   "WildPark", "WildParkStash", "BuildingsStash", "AirInfo", "MapOrders",
@@ -1150,12 +1194,32 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
     const val = readVarLoose(fr, name);
     if (val != null) own = writeVar(own, name, scrub(val));
   }
-  // Deliberately not `every Achievement_* the donor holds`. The reference tool
-  // copies five through its tuple and `Achievement_Teamwork` through its
-  // FIELD_MAP stats; this loop copied all 265 of a real high-level city onto
-  // an account that never earned them, and a lifetime achievement count is
-  // tracked against the player, not the town. See the note above TUTORIAL_DONE.
+  // The old rule here was "deliberately not `every Achievement_*` the donor
+  // holds" — the reference tool copies five. That reading came from its
+  // basic-stats tuple, but its **"Desban completo"** docstring (the step that
+  // also clones `TownGround + Buildings`) says `Achievement_* vars` outright,
+  // and the proven-good baseline ran the loop in every mode. It is therefore
+  // tied to the town above rather than to `inicial`, which is the split the
+  // evidence actually supports: 0 values newly written vs `ab46f0b`, and the
+  //56-value gap closed. See `TOWN_HISTORY_VARS`.
   if (mode !== "inicial") {
+    // History follows the town. See `TOWN_HISTORY_VARS`: the town transplant
+    // above/below only stays internally consistent if the counters describing
+    // the account behind it arrive in the same step. The reference tool's
+    // "Desban completo" docstring lists `Achievement_* vars` and its FIELD_MAP
+    // lifetime stats in the same pass as `TownGround + Buildings`, and the
+    // proven-good baseline (`ab46f0b`) ran the achievement loop before its
+    // `inicial` early return — HEAD's trimmed set is what the 56-value gap in
+    // `[B]` is made of. `inicial` deliberately gets none of this: it copies no
+    // town, so there is nothing in the file for these to contradict.
+    for (const name of TOWN_HISTORY_VARS) {
+      const val = readVarLoose(fr, name);
+      if (val != null) own = writeVar(own, name, scrub(val));
+    }
+    for (const m of fr.matchAll(/<Var\s+name="(Achievement_[^"]+)"\s+v="([^"]*)"/gi)) {
+      own = writeVar(own, m[1]!, scrub(m[2]!));
+    }
+
     for (const tag of ["TownGround", "Buildings"]) own = cloneMain(fr, own, tag, scrub).xml;
     for (const tag of COMPLETO_BLOCKS) own = cloneSimple(fr, own, tag, scrub).xml;
 
