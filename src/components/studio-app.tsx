@@ -4092,6 +4092,13 @@ function Unban({
             </Button>
           </div>
           <p className="mt-2 text-xs text-muted">{tr("restoreKeepOwn")}</p>
+          {session.accountAge?.fresh ? (
+            <p className="mt-2 text-xs font-medium text-warning">
+              {(session.accountAge.why === "hours" ? tr("acctFreshHours") : tr("acctFresh"))
+                .replace("{d}", String(session.accountAge.days ?? "?"))
+                .replace("{h}", String(session.accountAge.hours ?? "?"))}
+            </p>
+          ) : null}
           {session.unban.applied ? (
             <p className="mt-2 text-xs text-primary">
               {tr("unbanOk")} · {session.unban.mode}
@@ -4107,6 +4114,13 @@ function Unban({
         <div className="min-w-0 flex-1">
           <h3 className="font-semibold">{tr("copySection")}</h3>
           <p className="text-sm text-muted">{tr("copySectionHint")}</p>
+          {session.accountAge?.fresh ? (
+            <p className="mt-2 text-xs font-medium text-warning">
+              {(session.accountAge.why === "hours" ? tr("acctFreshHours") : tr("acctFresh"))
+                .replace("{d}", String(session.accountAge.days ?? "?"))
+                .replace("{h}", String(session.accountAge.hours ?? "?"))}
+            </p>
+          ) : null}
           {!session.friendCity ? (
             <p className="mt-3 text-xs text-warning">{tr("copyNeedFetch")}</p>
           ) : (

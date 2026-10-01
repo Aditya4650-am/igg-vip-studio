@@ -1874,6 +1874,87 @@ has just been sent safely. That is not a mechanism for why Playrix acted, and
 no tool can promise 100% protection: read a green gate as "nothing provably
 wrong", never as "cannot be banned".
 
+### Co-op chat: the ban tracked the *account*, not the file (2026-10-02)
+
+Reported with the sticker half already fixed: *"when i msg in coop chat i got not
+ban, only when i send a already collected copy town stickers in coop chat then i
+got ban"* — then, after the sticker fix, a **barn item request** in co-op chat
+banned too, while yesterday's city could do messages, stickers and barn requests
+freely. The banned save was supplied (`mGameInfo.current-8.xml`), which makes
+this the first ban on file with a clean before/after pair to read.
+
+**Every identity field is the account's own, so the copy leaked nobody's
+identity.** `cityId jWAxOAHPKo`, `deviceId db2a8097…`, `gameId
+01102026-201250`, `TermsAcceptTime 2026-10-01 20:12` — none of them the donor's
+(`3ZVJSA080P` / `c9fbd5c5…`), the donor's `cityId` appearing only twice (the
+allowed friend-reference count). The co-op is own too: `<MyClan geoip="IN">`
+against the donor's `geoip="BD"`, and `prevMyClanId=H7rpbUMqEQ` differs from the
+donor's `WV3tyE1tzH`. The empty `<MyClan id="">` is the account being kicked
+*after* the ban, not a copied field. All push gates return `[]` with the donor
+attached — byte-identical to the clean city.
+
+**What the file does say is that the account is brand new and wearing a
+14-year-old city.** Measured:
+
+| field | clean `current-7` | banned `current-8` | donor `fc_big` |
+| --- | ---: | ---: | ---: |
+| `DaysEnteredGame` | **2** | **0** | 16 |
+| first seen | 2026-09-30 18:39 | **2026-10-01 20:18** | — |
+| `gameStartDate` (claimed) | 2018-03-22 | **2012-12-31** = donor's | 2012-12-31 |
+| avatars | 27 | **386** = donor's | 386 |
+| card collections | 15 | **216** = donor's | 216 |
+| regatta tasks | 4907 | **44912** = donor's | 44911 |
+| residents / cap | 68085 / 76315 | **85380 / 85445** = donor's | 85380 / 85445 |
+| town name | `god of war` | **`Ts Premium 3`** = donor's | `Ts Premium 3` |
+
+1528 of the banned save's values now equal the donor's, **593 of which are
+values the clean city never had** — and `DaysEnteredGame` is *not* among them
+(banned 0, donor 16), which is what proves the field describes this account
+rather than anything a copy brought in.
+
+### The age warning: a warning, never a gate
+
+`src/lib/account-age.ts` — browser-safe and pure, like `regatta.ts`.
+`accountAgeInfo(xml)` reads `DaysEnteredGame` and `firstVisitTime` in one pass
+(attribute order varies, so both are pulled out of each `<Var>` tag rather than
+assuming one precedes the other) and the snapshot exposes it as
+`session.accountAge`. The Unban tab prints `acctFresh` / `acctFreshHours` above
+the restore buttons and above the copy section when `fresh` is set. **Push stays
+enabled** — the user picked a warning over a block.
+
+- `ACCOUNT_MIN_DAYS = 1`, `ACCOUNT_MIN_HOURS = 24`.
+- **`DaysEnteredGame` is the only signal allowed to fire on its own**, because
+  it is the one the clean/banned split is **5/5** on:
+
+  | save | outcome | `DaysEnteredGame` | warns |
+  | --- | --- | ---: | --- |
+  | `mGameInfo.current.xml` | clean | 1 | no |
+  | `mGameInfo.current-2.xml` | clean | 1 | no |
+  | `mGameInfo.current-7.xml` | clean | 2 | no |
+  | `mGameInfo.current-3.xml` | banned | 0 | **yes** |
+  | `mGameInfo.current-8.xml` | banned | 0 | **yes** |
+
+- **`firstVisitTime` is context only and may not OR in while the counter
+  exists.** Measured: it reads **7 h on `current.xml`, a city whose install was
+  already 25.8 h old** — the game refreshes it on a launch or an update, so it
+  is not install time. An earlier OR-condition tripped that proven-clean city,
+  which is exactly how a warning earns itself an ignore button. It acts only as
+  the fallback for a save that declares no `DaysEnteredGame` at all.
+- A restore never copies either field, so the warning cannot be "fixed" by the
+  copy it is warning about.
+
+Guard rail: `src/lib/account-age.test.ts` — the two thresholds, the banned
+shape warning as `days` with ~3 h of context, the established city staying
+quiet, no-fields gaining no rule of its own, the `hours` fallback, attribute
+order, the `firstVisitTime`-does-not-override regression (the `current.xml`
+shape), and `applyDesban` + `cloneDecorOnly` across all three modes leaving
+`DaysEnteredGame` at 0 and the donor's `firstVisitTime` out.
+
+**Honest limit, unchanged.** This predicts from five saves and reports one
+measurable fact — the account has not counted a day — not the rule Playrix
+enforces. Read a green gate as "nothing provably wrong", never as "cannot be
+banned".
+
 ### Population over its own cap (2026-10-01)
 
 The banned save arrived (`mGameInfo.current-3.xml`, 783,809 B) and every probe of

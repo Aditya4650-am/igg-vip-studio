@@ -1,4 +1,5 @@
 import { requireToken } from "./license.server";
+import { accountAgeInfo } from "../account-age";
 import {
   decryptStream,
   postProcessDecrypt,
@@ -999,6 +1000,7 @@ export function snapshot(s: Session) {
     trainMax: trainMax || undefined,
     islandMax: islandMax || undefined,
     upgradeCaps: { factory: UPGRADE_REF_CAP.Factory, train: UPGRADE_REF_CAP.Train, island: UPGRADE_REF_CAP.Island },
+    accountAge: accountAgeInfo(s.rawXml ?? ""),
     log: s.log.slice(-12).map(safeLogLine),
   };
 }
