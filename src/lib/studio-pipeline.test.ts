@@ -8,6 +8,7 @@ process.env.IGG_VIP_URL = "";
 const studio = await import("./server/studio.server.ts");
 const { verifyLicenseKey } = await import("./server/license.server.ts");
 const { findUnbalancedTag } = await import("./server/township/xml-edit.server.ts");
+const { assertNoForeignIdentity } = await import("./server/township/desban.server.ts");
 const { avatarEmoji, avatarIconPath, AVATAR_EMOJIS, AVATAR_ICON_MAX, AVATAR_MAX } =
   await import("./catalogs.ts");
 const { iconForBarn } = await import("./game-icon-map.ts");
@@ -30,8 +31,10 @@ const ownSave = [
   '<?xml version="1.0" encoding="utf-8"?>',
   "<Global>",
   '<Var name="FullCardCollections" v="2" t="i"/>',
+  '<Var name="residents" v="500" t="i"/>',
   '<Var name="StartTutorialFinished" v="0" t="i"/>',
   '<Var name="levelup" v="1" t="i"/>',
+  '<SeasonTicket id="800" premium="0" score="0" startTime="1500000000" endTime="4102444800" theme="summer"/>',
   '<Version version="35.1.0" FVer="3510"/>',
   '<AWS cityId="owncity01"/>',
   "</Global>",
@@ -41,6 +44,7 @@ const friendSave = [
   '<?xml version="1.0" encoding="utf-8"?>',
   "<Global>",
   '<Var name="FullCardCollections" v="7" t="i"/>',
+  '<Var name="residents" v="9000" t="i"/>',
   '<Var name="levelup" v="42" t="i"/>',
   '<Var name="StartTutorialFinished" v="1" t="i"/>',
   "</Global>",
@@ -161,13 +165,17 @@ test("decoration: stash is created inside root and is not duplicated", () => {
   assert.equal(second.xml!.match(/<BuildingsStash>/g)?.length, 1, "must not duplicate the stash");
 });
 
-test("unban: restore applies friend stats and re-encodes a valid save", () => {
+test("unban: restore applies the friend's city state and re-encodes a valid save", () => {
   const { sessionId } = load();
   studio.attachFriendXml(token, sessionId, friendSave);
   const out = studio.applyUnban(token, sessionId, "completo");
   assert.equal(out.unban?.applied, true);
   const xml = Buffer.from(out.fileB64!, "base64").toString("utf8");
-  assert.match(xml, /<Var name="levelup"\s+v="42"/);
+  // City state follows the city it describes …
+  assert.match(xml, /<Var name="residents"\s+v="9000"/);
+  // … but the account history is Playrix's record of *this* player.
+  assert.match(xml, /<Var name="levelup"\s+v="1"/, "our level must not become the friend's");
+  assert.match(xml, /<Var name="FullCardCollections"\s+v="2"/, "nor our lifetime collection count");
   balanced(xml);
 
   // The pushed file must load back into a fresh session without loss.
@@ -1588,30 +1596,36 @@ const LEVEL_DONOR = [
   '<TownGround ver="2"><row j="0" v="FRIENDTOWN"/></TownGround><Buildings><Object id="friend1"/></Buildings>',
 ].join("");
 
-test("copy: the donor's level arrives with the experience that earned it", () => {
-  // A restore used to move `levelup` and leave `experience` behind — the one
-  // field out of the tool's twenty stat fields that stayed ours — so the
-  // pushed save claimed 1089 levels with a level-30 player's XP. That pair
-  // appears in no game-written save and is arithmetically impossible, which
-  // is the cheapest kind of anomaly for a server to read.
+test("copy: the friend's town is taken, the account history stays ours", () => {
+  // The restore used to move `levelup` and `experience` straight across from
+  // the donor. On a real pair that meant a level-999 save left the merge
+  // claiming 1089 levels, 3.37 billion XP, 44911 regatta tasks and 92524
+  // match-3 levels the player never earned here — a set of numbers that is
+  // internally consistent (so every shape and progression gate stayed quiet)
+  // and yet contradicts what Playrix has stored for this account. That
+  // contradiction cannot be cleaned up inside the file, so the copy stops
+  // making it: the city comes from the friend, the history stays ours.
   const snap = townSession(LEVEL_OWN);
   studio.attachFriendXml(token, snap.sessionId, LEVEL_DONOR);
   const out = studio.applySave({ token, sessionId: snap.sessionId, unbanMode: "novo" });
   const xml = out.xml!;
 
-  assert.match(xml, /name="levelup" v="1089"/, "the level follows the donor");
-  assert.match(xml, /name="experience" v="3370037992"/, "and the XP that earned it follows the level");
+  assert.match(xml, /FRIENDTOWN/, "the friend's layout is what a city copy is for");
+  assert.match(xml, /id="friend1"/, "and so are their buildings");
+  assert.match(xml, /name="levelup" v="30"/, "our level must not become the donor's 1089");
+  assert.match(xml, /name="experience" v="172109"/, "nor the XP behind it");
+  assert.doesNotThrow(() => assertNoForeignIdentity(LEVEL_OWN, xml, LEVEL_DONOR));
   balanced(xml);
   assert.deepEqual(
     progressionProblems(LEVEL_OWN, xml, LEVEL_DONOR),
     [],
-    "level and XP came from one account, so there is nothing to refuse",
+    "nothing moved in the progression set, so there is nothing to refuse",
   );
 
-  // The exact shape the copy used to produce: the level from one account, the
-  // XP still ours. Refused with a donor in hand and refused without one —
-  // having fetched a friend excuses nothing, because the pair is wrong on its
-  // face.
+  // The exact shape an ungated copy used to produce: the level from one
+  // account, the XP still ours. Refused with a donor in hand and refused
+  // without one — having fetched a friend excuses nothing, because the pair is
+  // wrong on its face.
   const mixed = LEVEL_OWN.replace('name="levelup" v="30"', 'name="levelup" v="1089"');
   assert.deepEqual(progressionProblems(LEVEL_OWN, mixed), ["level-up-without-experience:30->1089"]);
   assert.throws(() => assertProgressionsSafe(LEVEL_OWN, mixed), /level-up-without-experience/);
@@ -1634,6 +1648,87 @@ test("copy: the donor's level arrives with the experience that earned it", () =>
     [],
     "a save with no experience var to compare against is not held to the rule",
   );
+});
+
+/**
+ * The boundary the restore now draws: everything Playrix holds its own record
+ * of stays ours, everything that describes the town follows the friend.
+ */
+const HISTORY_OWN = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  "<Global>",
+  '<Var name="cityId" v="ME12345678" t="s"/>',
+  '<Var name="levelup" v="30" t="i"/>',
+  '<Var name="experience" v="172109" t="i"/>',
+  '<Var name="money" v="1000" t="i"/>',
+  '<Var name="moneyCash" v="50" t="i"/>',
+  '<Var name="RegataTasksCompleted" v="136" t="i"/>',
+  '<Var name="FirstAttemptM3Levels" v="12" t="i"/>',
+  '<Var name="FullCardCollections" v="3" t="i"/>',
+  '<Var name="Achievement_BuiltHouses" v="4" t="i"/>',
+  '<Var name="gameStartDate" v="1658707200" t="i"/>',
+  '<Var name="timeInGame" v="100" t="i"/>',
+  '<Var name="residents" v="500" t="i"/>',
+  '<Var name="ExpandLevel" v="3" t="i"/>',
+  "</Global>",
+  '<TownGround ver="2"><row j="0" v="MYTOWN"/></TownGround><Buildings><Object id="mine1"/></Buildings>',
+].join("");
+
+const HISTORY_DONOR = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  "<Global>",
+  '<Var name="cityId" v="FRD123456" t="s"/>',
+  '<Var name="deviceId" v="dead-beef" t="s"/>',
+  '<Var name="levelup" v="1089" t="i"/>',
+  '<Var name="experience" v="3370037992" t="i"/>',
+  '<Var name="money" v="1460975" t="i"/>',
+  '<Var name="moneyCash" v="7414192" t="i"/>',
+  '<Var name="RegataTasksCompleted" v="44911" t="i"/>',
+  '<Var name="FirstAttemptM3Levels" v="92524" t="i"/>',
+  '<Var name="FullCardCollections" v="216" t="i"/>',
+  '<Var name="Achievement_BuiltHouses" v="900" t="i"/>',
+  '<Var name="gameStartDate" v="1356976800" t="i"/>',
+  '<Var name="timeInGame" v="11897" t="i"/>',
+  '<Var name="Achievement_OnlyTheirs" v="77" t="i"/>',
+  '<Var name="residents" v="85380" t="i"/>',
+  '<Var name="ExpandLevel" v="387" t="i"/>',
+  "</Global>",
+  '<TownGround ver="2"><row j="0" v="FRIENDTOWN"/></TownGround><Buildings><Object id="friend1"/></Buildings>',
+].join("");
+
+test("copy: the numbers Playrix keeps its own record of stay ours, on every mode", () => {
+  const frozen = [
+    "levelup", "experience", "money", "moneyCash",
+    "RegataTasksCompleted", "FirstAttemptM3Levels", "FullCardCollections",
+    "Achievement_BuiltHouses", "gameStartDate", "timeInGame",
+  ];
+
+  const readVal = (doc: string, name: string) =>
+    new RegExp(`<Var\\s+name="${name}"[^>]*\\bv="([^"]*)"`, "i").exec(doc)?.[1] ?? null;
+
+  for (const mode of ["inicial", "completo", "novo"] as const) {
+    const snap = townSession(HISTORY_OWN);
+    studio.attachFriendXml(token, snap.sessionId, HISTORY_DONOR);
+    const xml = studio.applySave({ token, sessionId: snap.sessionId, unbanMode: mode }).xml!;
+
+    for (const name of frozen) {
+      const now = readVal(xml, name);
+      const was = readVal(HISTORY_OWN, name);
+      assert.equal(now, was, `${mode}: ${name} moved off our value (${was} -> ${now})`);
+    }
+
+    // A lifetime achievement the donor has and we never had is not imported.
+    assert.ok(!xml.includes("Achievement_OnlyTheirs"), `${mode}: a stranger's achievement count must not appear`);
+
+    // City state and layout are what the copy is for.
+    assert.match(xml, /name="residents" v="85380"/, `${mode}: population follows the town`);
+    assert.match(xml, /name="ExpandLevel" v="387"/, `${mode}: expansions follow the town`);
+
+    assert.doesNotThrow(() => assertNoForeignIdentity(HISTORY_OWN, xml, HISTORY_DONOR), `${mode}: identity`);
+    balanced(xml);
+    assert.deepEqual(saveShapeProblems(xml), [], `${mode}: what leaves must satisfy every rule`);
+    assert.deepEqual(progressionProblems(HISTORY_OWN, xml, HISTORY_DONOR), [], `${mode}: nothing regressed`);
+  }
 });
 
 const DECOR_OWN = [
@@ -1725,7 +1820,7 @@ test("a refused regatta does not leave a half-applied restore behind", () => {
   const applied = studio.applySave({ token, sessionId: solo.sessionId, unbanMode: "completo" });
   assert.match(
     Buffer.from(applied.fileB64!, "base64").toString("utf8"),
-    /<Var name="levelup"\s+v="42"/,
+    /<Var name="residents"\s+v="9000"/,
     "the restore on its own must really rewrite the file, or the check below passes for the wrong reason",
   );
 

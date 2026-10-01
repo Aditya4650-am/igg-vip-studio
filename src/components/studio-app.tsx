@@ -4091,6 +4091,7 @@ function Unban({
               {tr("restoreAll")}
             </Button>
           </div>
+          <p className="mt-2 text-xs text-muted">{tr("restoreKeepOwn")}</p>
           {session.unban.applied ? (
             <p className="mt-2 text-xs text-primary">
               {tr("unbanOk")} · {session.unban.mode}

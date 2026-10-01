@@ -432,7 +432,68 @@ function mergeUnique(a: string[], b: string[]) {
   return [...set];
 }
 
+/**
+ * Everything `applySave` can rewrite, captured as one unit.
+ *
+ * The `prevXml` held inside the function only ever restored `rawXml` on the
+ * *push-gate* refusal at the very end. A writer that **throws** instead —
+ * "Không có thẻ nào thay đổi", "Không có hiện vật nào thay đổi", "Không thấy
+ * Zoo", "Invalid barn upgrades", an unbalanced document — escaped the function
+ * with every earlier queued edit still sitting in the session, so the user was
+ * told the batch failed while the restore/clone they had queued was left in
+ * place and applied a second time on the next Save & push. That is the same
+ * bug `applyRegatta` was fixed for, one level up: it is not specific to any
+ * feature, so the fix is not either.
+ *
+ * `profile` / `skins` / `items` / `barn` are copied one level deep because
+ * those writers assign *into* them (`s.barn.upgrades = …`, `s.profile[g] = …`)
+ * rather than replacing the object; the rest are only ever reassigned.
+ */
+const keepEdits = (s: Session) => ({
+  rawXml: s.rawXml,
+  unban: s.unban,
+  regatta: s.regatta,
+  stats: s.stats,
+  profile: { ...s.profile },
+  avatars: s.avatars,
+  skins: { ...s.skins },
+  items: { ...s.items },
+  decor: s.decor,
+  season: s.season,
+  barn: { ...s.barn },
+});
+
+type Edits = ReturnType<typeof keepEdits>;
+
+const restoreEdits = (s: Session, keep: Edits) => {
+  s.rawXml = keep.rawXml;
+  s.unban = keep.unban;
+  s.regatta = keep.regatta;
+  s.stats = keep.stats;
+  s.profile = keep.profile;
+  s.avatars = keep.avatars;
+  s.skins = keep.skins;
+  s.items = keep.items;
+  s.decor = keep.decor;
+  s.season = keep.season;
+  s.barn = keep.barn;
+};
+
 export function applySave(p: SavePayload) {
+  // Snapshotted before anything runs, so every exit — a thrown refusal as well
+  // as a gate refusal — lands back on the file the session arrived holding.
+  // `s.log` is deliberately not restored: the "rejected" line it may already
+  // have pushed is the one honest record of what happened.
+  const keep = keepEdits(requireSession(p.sessionId, p.token));
+  try {
+    return applySaveEdits(p);
+  } catch (e) {
+    restoreEdits(requireSession(p.sessionId, p.token), keep);
+    throw e;
+  }
+}
+
+function applySaveEdits(p: SavePayload) {
   const s = requireSession(p.sessionId, p.token);
   if (!s.rawXml) throw new Error("Load mGameInfo trước");
   const revealed = revealSave(p);
@@ -710,8 +771,10 @@ export function applySeason(token: string, sessionId: string) {
   const s = requireSession(sessionId, token);
   const prevXml = s.rawXml;
   const prevSeason = s.season;
-  s.season = { premium: true, score: 1002 };
+  // Assigned *after* the injector returns: `injectSeason` refuses to invent a
+  // ticket, and the session must not claim a season it never wrote.
   if (s.rawXml) s.rawXml = injectSeason(s.rawXml);
+  s.season = { premium: true, score: 1002 };
   // Logged after the gates accept, like `applySave`, so a refusal leaves no
   // line behind claiming the season was applied to a file that was rolled back.
   const fileB64 = encodeOrRollback(s, "Season rejected by push gate", () => {

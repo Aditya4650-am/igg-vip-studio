@@ -1224,9 +1224,86 @@ Two changes:
 large level or money jump stays visible against that history whatever the file
 says internally. This removes a *provable* contradiction, not the general risk
 of adopting another player's progression — read a green gate as "nothing
-measurably wrong", never as "cannot be banned".
+measurably wrong", never as "cannot be banned". The next section closes that
+remaining gap for the restore path.
 
-Guard rail: `copy: the donor's level arrives with the experience that earned it`.
+Guard rail: `copy: the friend's town is taken, the account history stays ours`
+(its second half still pins `level-up-without-experience`).
+
+### The restore copies the city, not the account history (2026-10-01)
+
+Reported as *"when i copy the only basic stat and open game instant ban"* — and
+earlier, *"basic stats, full city, all, complete city all got banned"*. Every one
+of those five buttons is the same code path, so the cause had to be in
+`applyDesban`, and the first hypothesis (foreign identity) was measured and
+**ruled out**: running all three modes on real saves, `inicial` leaks **zero**
+new `cityId` / `deviceId` / `user=` values and the identity gate stays green.
+
+What the numbers showed instead. On the real pair `mGameInfo_decoded.xml`
+(level 999) copying `fc_big` (level 1089), `inicial` alone moved **190 vars**
+and wrote:
+
+```
+levelup              999      -> 1089
+experience           2436381253 -> 3370037992
+money                3089645  -> 1460975
+RegataTasksCompleted 9868     -> 44911
+FirstAttemptM3Levels 5698     -> 92524
+gameStartDate        1130782500 -> 1356976800
+```
+
+Every shape gate, the progression gate and the identity gate all passed — and
+that is the point. The merged file was *internally* consistent (level and XP
+arrive as a matched pair), so nothing in the save contradicted itself; the
+contradiction is against **Playrix's stored record of this account**. A save
+cannot be cleaned up into agreement with something that is not in the file.
+
+So the boundary moved instead of being policed: **the city comes from the
+friend, the account history stays yours.**
+
+- `ACCOUNT_HISTORY_VARS` + every `Achievement_*` (prefix) are re-asserted to
+  our own value at the end of `applyDesban` on **all three modes**:
+  `levelup`, `experience`, `money`, `moneyCash`, `EarnedCoins`, `spentCash`,
+  `earnedCash`, `gameStartDate`, `timeInGame`, `RegataTasksCompleted`,
+  `FirstAttemptM3Levels`, `LivesSent`, `Achievement_Teamwork`,
+  `FullCardCollections`.
+- A history var the donor has and we never had is **removed**, not imported —
+  the restore copies ~265 `Achievement_*` entries wholesale and a lifetime
+  achievement count that jumps to a stranger is the same anomaly as the level.
+- Still copied, because city state must follow the town it describes:
+  `residents`, `wheatCounter`, `plowFieldsAchiev`, `defaultOrdersCount`,
+  `match3Life`, `Match3Lives_infTime`, `WareHouseCashUpgrade`, `WHUdup`,
+  `ExpandLevel`, plus `TownGround` / `Buildings` / the block lists and
+  `skipTutorials`. Copying a friend's buildings while keeping your own
+  population and barn would leave the city disagreeing with itself.
+- `keepOwnHistory()` runs as a **single pass** so a name our save carries twice
+  keeps two copies (a genuine save may hold up to 35 duplicated var names) and
+  the donor's surplus is dropped rather than left behind; whatever a cloned
+  block overwrote is written back through `insertInsideRoot`.
+
+**Effect, measured on real saves:** `inicial` on the level-999 pair now reports
+`levelup=999 experience=2436381253 money=3089645 regataDone=9868` — all ours —
+and moves only `residents`, `ExpandLevel`, `WareHouseCashUpgrade`, `WHUdup`.
+Vars moved fell 190 -> 123, and `Achievement_* added = 0` (the ~263 names a
+copy still adds are `skipTutorials` tutorial flags and `Minigames` state, both
+client state rather than account history).
+
+**This is why "Basic stats" no longer changes level or money.** It was never a
+safe button — it was the smallest of the five and the one that produced the
+instant ban. Its remaining job is city state (population, orders, barn,
+expansions, tutorial skip), which is now the whole of what a stats copy can
+safely do. The tab says so under the buttons (`restoreKeepOwn`, added to `vi`
+and `en`; the other 18 locale packs are `Partial` and fall back).
+
+**Honest limit, unchanged:** this removes the contradiction Playrix can
+*measure against its own records*. It does not make an account un-bannable, and
+a ban cannot be reproduced here — treat a green gate as "nothing provably
+wrong", never as "cannot be banned".
+
+Guard rail: `copy: the numbers Playrix keeps its own record of stay ours, on
+every mode` — runs all three modes and pins each history field individually,
+the donor-only achievement never appearing, city state following the donor, and
+identity/shape/progression all green.
 
 ## Avatar icons
 

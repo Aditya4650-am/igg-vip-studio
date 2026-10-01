@@ -154,7 +154,16 @@ export function injectSeason(xml: string, premium = "1", score = "1002") {
     const tag = selfClosing ? `<SeasonTicket${attrs}/>` : `<SeasonTicket${attrs}>`;
     return text.slice(0, m.index) + tag + text.slice(m.index + m[0].length);
   }
-  return insertBeforeRoot(text, `<SeasonTicket premium="${premium}" score="${score}"/>`);
+  // Never invent one. Measured on the corpus: 5/5 saves that hold a ticket
+  // carry a fat tag — `id`, `startTime`, `endTime`, `theme` and ~30 more
+  // attributes — because a ticket is a *window onto a running season*. The
+  // only bare `<SeasonTicket premium="1" score="1002"/>` ever produced was
+  // this tool's, on a save with no season at all: a card the game cannot
+  // place in any season, which reads as nothing happening at best.
+  throw new Error(
+    "Save không có SeasonTicket — mùa này chưa chạy trong thành phố nên không có thẻ mùa để mua. " +
+      "Mở Season trong game rồi Load lại.",
+  );
 }
 
 export function injectAvatars(xml: string, selection: string[], maxAva = AVATAR_MAX) {
@@ -210,31 +219,48 @@ export function injectSkins(xml: string, selection: Record<string, string[]>) {
     }
     return seen.join("|") + (seen.length ? "|" : "");
   };
-  const blockM = text.match(/<Skins\b[^>]*>[\s\S]*?<\/Skins\s*>/i);
-  if (!blockM || blockM.index === undefined) {
-    const lines = ["<Skins>"];
+  const rows = () => {
+    const lines: string[] = [];
     for (const [tid, parts] of Object.entries(wanted)) {
       lines.push(`  <type id="${tid}" available="${merge(catalog[tid] ?? "", parts)}" needViewUpgradeEffect="0"/>`);
     }
-    lines.push("</Skins>");
-    return insertBeforeRoot(text, lines.join("\n"));
-  }
-  let block = blockM[0];
-  for (const [tid, parts] of Object.entries(wanted)) {
-    const esc = tid.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pat = new RegExp(`(<type\\b[^>]*\\bid="${esc}"[^>]*\\bavailable=")([^"]*)(")`, "i");
-    if (pat.test(block)) {
-      block = block.replace(pat, (_, a, old, c) => `${a}${merge(old, parts)}${c}`);
-      continue;
+    return lines.join("\n");
+  };
+  // Paired first: `<Skins a="b"/>` matches `<Skins\b[^>]*>`, so a self-closing
+  // store would otherwise be read as an opener with no closer and the writer
+  // would append a *second* `<Skins>` — two stores for one save, and the game
+  // reads only whichever it meets first.
+  const blockM = /<Skins\b(?![^>]*\/>)[^>]*>[\s\S]*?<\/Skins\s*>/i.exec(text);
+  if (blockM && blockM.index !== undefined) {
+    let block = blockM[0];
+    for (const [tid, parts] of Object.entries(wanted)) {
+      const esc = tid.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const pat = new RegExp(`(<type\\b[^>]*\\bid="${esc}"[^>]*\\bavailable=")([^"]*)(")`, "i");
+      if (pat.test(block)) {
+        block = block.replace(pat, (_, a, old, c) => `${a}${merge(old, parts)}${c}`);
+        continue;
+      }
+      const patB = new RegExp(`(<type\\b[^>]*\\bavailable=")([^"]*)("[^>]*\\bid="${esc}")`, "i");
+      if (patB.test(block)) {
+        block = block.replace(patB, (_, a, old, c) => `${a}${merge(old, parts)}${c}`);
+        continue;
+      }
+      block = block.replace(/<\/Skins\s*>/i, `  <type id="${tid}" available="${merge("", parts)}" needViewUpgradeEffect="0"/>\n</Skins>`);
     }
-    const patB = new RegExp(`(<type\\b[^>]*\\bavailable=")([^"]*)("[^>]*\\bid="${esc}")`, "i");
-    if (patB.test(block)) {
-      block = block.replace(patB, (_, a, old, c) => `${a}${merge(old, parts)}${c}`);
-      continue;
-    }
-    block = block.replace(/<\/Skins\s*>/i, `  <type id="${tid}" available="${merge("", parts)}" needViewUpgradeEffect="0"/>\n</Skins>`);
+    return text.slice(0, blockM.index) + block + text.slice(blockM.index + blockM[0].length);
   }
-  return text.slice(0, blockM.index) + block + text.slice(blockM.index + blockM[0].length);
+
+  // A self-closing `<Skins/>` is the game's own empty store. Expand it where it
+  // stands rather than inserting a second block beside it.
+  const selfM = /<Skins\b([^>]*?)\/>/i.exec(text);
+  if (selfM && selfM.index !== undefined) {
+    return (
+      text.slice(0, selfM.index) +
+      `<Skins${selfM[1] ?? ""}>\n${rows()}\n</Skins>` +
+      text.slice(selfM.index + selfM[0].length)
+    );
+  }
+  return insertBeforeRoot(text, `<Skins>\n${rows()}\n</Skins>`);
 }
 
 const KEY_MAP: Record<string, string> = {

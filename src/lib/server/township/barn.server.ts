@@ -12,7 +12,15 @@ export const BARN_CAPACITY_MAP: Record<number, number> = {
   10000: 747585,
 };
 
-const WHUDUP_XOR = 0x1eadabcc;
+/**
+ * `WHUdup` is `WareHouseCashUpgrade` **duplicated**, masked with this — the
+ * name is the whole spec. Measured on the corpus: `WHUdup ^ 0x1eadabcc ===
+ * WareHouseCashUpgrade` holds on 5 of 6 saves, and the single file where it
+ * fails is `mGameInfo.current.xml`, this tool's own earlier output. One
+ * constant, imported by the push gate as well, so the writer and the rule that
+ * polices it can never drift apart.
+ */
+export const WHUDUP_XOR = 0x1eadabcc;
 
 const PREFIX = [
   "action", "unlocked", "match3", "m3", "cmm", "season", "tutorial",
@@ -84,9 +92,14 @@ export function barnInfo(xml: string) {
 export function applyBarnCapacity(xml: string, upgrades: number) {
   if (!(upgrades in BARN_CAPACITY_MAP)) throw new Error("Invalid barn upgrades");
   const capacity = BARN_CAPACITY_MAP[upgrades]!;
-  const whudup = upgrades ^ WHUDUP_XOR;
   let text = writeVar(xml, "WareHouseCashUpgrade", String(capacity));
-  text = writeVar(text, "WHUdup", String(whudup));
+  // Mirror the value just written rather than the tier. Storing the tier in
+  // one field and the capacity in the other produced the only pair in the
+  // corpus where the two disagree — and under *either* reading of which one
+  // the game follows, a "duplicate" that does not duplicate is wrong. Note
+  // this is also what every real save looks like: they hold the same number in
+  // both fields, so `barnInfo` reports `upgrades === capacity` for them too.
+  text = writeVar(text, "WHUdup", String((capacity ^ WHUDUP_XOR) >>> 0));
   return text;
 }
 

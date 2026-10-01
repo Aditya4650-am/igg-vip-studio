@@ -32,7 +32,9 @@
  */
 import { AVATAR_MAX } from "../../catalogs";
 import { RAW_PROFILE } from "../catalogs.data.server";
+import { WHUDUP_XOR } from "./barn.server";
 import { CHAT_EMOJI_IDS } from "./chat-emoji.server";
+import { readVar } from "./vars.server";
 import { attrValue, findUnbalancedTag } from "./xml-edit.server";
 
 /**
@@ -250,6 +252,54 @@ function shapeProblems(xml: string, known: DonorIds | null): string[] {
   for (const m of xml.matchAll(/<Var\b(?=[^>]*\bname="([^"]*)")(?=[^>]*\bt="i")[^>]*>/g)) {
     const v = attrValue(m[0], "v");
     if (v !== null && v !== "" && !/^-?\d+$/.test(v)) out.add(`var-int:${m[1]}`);
+  }
+
+  // ---- the warehouse "duplicate" actually duplicates ---------------------
+  // `WHUdup` is `WareHouseCashUpgrade` masked with a fixed key; the name is
+  // the whole spec. Measured on the corpus: the relation holds on 5 of 6
+  // saves, and the one file it fails on is `mGameInfo.current.xml`, this
+  // tool's own earlier output. Under *either* reading of which of the two
+  // numbers the game follows, a duplicate that does not match its original is
+  // a save disagreeing with itself in a field a server reads for free.
+  const whu = readVar(xml, "WareHouseCashUpgrade");
+  const dup = readVar(xml, "WHUdup");
+  if (whu !== null && dup !== null && /^-?\d+$/.test(whu) && /^-?\d+$/.test(dup)) {
+    if (((Number(dup) ^ WHUDUP_XOR) >>> 0) !== (Number(whu) >>> 0)) out.add("whudup-mismatch");
+  }
+
+  // ---- <SeasonTicket> carries its window ---------------------------------
+  // A ticket is a window onto a running season: 5/5 saves that have one carry
+  // `startTime` and `endTime` beside `id`, `theme` and ~25 more attributes.
+  // The only bare `<SeasonTicket premium="1" score="1002"/>` ever produced was
+  // this tool's, written on a save with no season at all — a card no season on
+  // the server can claim. A save with no ticket at all is *not* a problem:
+  // absence is a state the game itself writes between seasons.
+  const season = /<SeasonTicket\b[^>]*>/i.exec(xml);
+  if (season && (!attrValue(season[0], "startTime") || !attrValue(season[0], "endTime"))) {
+    out.add("season-ticket-bare");
+  }
+
+  // A `<Skins>` holding `<type>` rows and none of the `<item>` rows was
+  // considered as a rule and then dropped: measured on the corpus it can only
+  // be produced by this tool's from-scratch writer, which runs on a save that
+  // has *no* Skins store at all — so there were no equipped skins to lose and
+  // nothing the block contradicts. It is unobserved (0 of 6 saves) rather than
+  // wrong, unlike an unknown id, and keeping it made the Skins tab unable to
+  // ever run on the one save shape that needs it. `injectSkins` merging into a
+  // store that already has items — the shape every real save has — still
+  // leaves those items in place, untouched.
+
+  // ---- GivingOffersDeferred is a `name:qty` list --------------------------
+  // Every save carrying the var holds it empty (3/3) and no save on file has a
+  // populated one, so the only thing that can honestly be asserted is that
+  // what we wrote parses as the pairs the writer emits. A value the game
+  // cannot parse would take the whole save down with it, rather than quietly
+  // granting nothing.
+  const offers = /<Var\b(?=[^>]*\bname="GivingOffersDeferred")[^>]*\bv="([^"]*)"/i.exec(xml)
+    ?? /<Var\b(?=[^>]*\bv="([^"]*)")[^>]*\bname="GivingOffersDeferred"/i.exec(xml);
+  const offersValue = offers ? (offers[1] ?? "") : null;
+  if (offersValue) {
+    if (offersValue.split(",").some((seg) => !/^[^:,\s]+:\d+$/.test(seg.trim()))) out.add("offers-shape");
   }
 
   return [...out];

@@ -56,11 +56,16 @@ test("season rewrites a paired SeasonTicket without leaving a stray closer", () 
   assert.match(children, /<Reward id="2"\/>/);
 });
 
-test("season upserts the element when the save has none", () => {
-  const out = injectSeason('<Global><AWS cityId="c1"/></Global>');
+test("season refuses to invent a ticket the save does not have", () => {
+  // No SeasonTicket means no season is running, so the only thing a writer
+  // could produce is a bare `<SeasonTicket premium="1" score="1002"/>` with no
+  // window — a card no season on the server can claim. 5/5 saves that hold a
+  // ticket carry `startTime`/`endTime`, so absence is refused, not filled in.
+  assert.throws(() => injectSeason('<Global><AWS cityId="c1"/></Global>'), /không có SeasonTicket/);
+  // A save that *does* have one still round-trips.
+  const out = injectSeason('<Global><SeasonTicket id="800" startTime="1" endTime="2"/></Global>');
   wellFormed(out);
-  assert.match(out, /<SeasonTicket premium="1" score="1002"\/>/);
-  assert.ok(out.indexOf("SeasonTicket") < out.indexOf("</Global>"));
+  assert.match(out, /premium="1"/);
 });
 
 // A regatta window straddling "now" plus the one real completed record this

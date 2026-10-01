@@ -56,6 +56,84 @@ const COMPLETO_BLOCKS = [
 // DataStoreCollection either.
 const NOVO_BLOCKS = ["Minigames", "DSCollapseQuests", "QuestsBook", "DSCollection"];
 
+/**
+ * Account history — the numbers Playrix keeps **its own** copy of for your
+ * account and compares against when you upload.
+ *
+ * Measured by running all three restore modes over real saves: `inicial` alone
+ * moved ~190 vars, and on a level-999 save copying a level-1089 city it wrote
+ * `levelup 999 -> 1089`, `experience 2436381253 -> 3370037992`,
+ * `RegataTasksCompleted 9868 -> 44911` and `FirstAttemptM3Levels 5698 -> 92524`
+ * — every one of them a field the player never earned on this account, in a
+ * single sync. The file stayed internally consistent (level and XP arrive as a
+ * matched pair, so the shape and progression gates both stayed quiet), and the
+ * identity gate found zero leaked cityId/deviceId/user values — yet that is the
+ * upload that gets flagged, because the contradiction is against Playrix's
+ * records rather than inside the save. No cleanup of the file can hide it.
+ *
+ * So the boundary is: **the city comes from the friend, the account history
+ * stays yours.** Everything below is frozen at our own value on every mode.
+ * `Achievement_*` joins by prefix because the restore copies every one of them
+ * wholesale (265 on a real run) and a lifetime achievement count that jumps to
+ * a stranger's is the same anomaly as the level.
+ *
+ * Not in this set, and still copied: `residents`, `wheatCounter`,
+ * `plowFieldsAchiev`, `defaultOrdersCount`, `match3Life`, `Match3Lives_infTime`,
+ * `WareHouseCashUpgrade`, `WHUdup`, `ExpandLevel` — city state, which follows
+ * the town it describes. Copying a friend's buildings while keeping your own
+ * population and barn would leave the city disagreeing with itself.
+ */
+const ACCOUNT_HISTORY_VARS = new Set([
+  "levelup", "experience", "money", "moneyCash",
+  "EarnedCoins", "spentCash", "earnedCash",
+  "gameStartDate", "timeInGame",
+  "RegataTasksCompleted", "FirstAttemptM3Levels",
+  "LivesSent", "Achievement_Teamwork",
+  "FullCardCollections",
+]);
+
+const isAccountHistory = (name: string) =>
+  ACCOUNT_HISTORY_VARS.has(name) || /^Achievement_/i.test(name);
+
+/**
+ * Re-assert our own history over whatever the merge wrote.
+ *
+ * Runs as a single pass so a name our save carries twice keeps two copies (a
+ * genuine save may hold up to 35 duplicated var names) and the donor's surplus
+ * is dropped rather than left in place. A history var the donor brought that we
+ * never had is removed outright — importing a stranger's lifetime counter is
+ * exactly what this exists to prevent. Anything of ours a cloned block
+ * overwrote is written back through `insertInsideRoot`, so it lands before
+ * `</Global>` and never past `</root>` where the game would not read it.
+ */
+function keepOwnHistory(before: string, merged: string): string {
+  const ours = new Map<string, string[]>();
+  for (const m of before.matchAll(/<Var\s+name="([^"]+)"[^>]*?(?:\/>|>[\s\S]*?<\/Var\s*>)/gi)) {
+    const name = m[1]!;
+    if (!isAccountHistory(name)) continue;
+    const list = ours.get(name);
+    if (list) list.push(m[0]!);
+    else ours.set(name, [m[0]!]);
+  }
+
+  const taken = new Map<string, number>();
+  let out = merged.replace(/<Var\s+name="([^"]+)"[^>]*?(?:\/>|>[\s\S]*?<\/Var\s*>)/gi, (full, name: string) => {
+    if (!isAccountHistory(name)) return full;
+    const list = ours.get(name);
+    if (!list) return "";
+    const i = taken.get(name) ?? 0;
+    if (i >= list.length) return "";
+    taken.set(name, i + 1);
+    return list[i]!;
+  });
+
+  for (const [name, list] of ours) {
+    const used = taken.get(name) ?? 0;
+    for (let i = used; i < list.length; i++) out = insertInsideRoot(out, list[i]!);
+  }
+  return out;
+}
+
 const TUTORIAL_DONE = [
   "StartTutorialFinished",
   "SecondStartTutorialFinished",
@@ -1031,33 +1109,34 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
   for (const m of fr.matchAll(/<Var\s+name="(Achievement_[^"]+)"\s+v="([^"]*)"/gi)) {
     own = writeVar(own, m[1]!, scrub(m[2]!));
   }
-  if (mode === "inicial") {
-    own = skipTutorials(own, fr);
-    assertNoForeignIdentity(before, own, fr);
-    return own;
+  if (mode !== "inicial") {
+    for (const tag of ["TownGround", "Buildings"]) own = cloneMain(fr, own, tag, scrub).xml;
+    for (const tag of COMPLETO_BLOCKS) own = cloneSimple(fr, own, tag, scrub).xml;
+
+    for (const m of fr.matchAll(/<Var\s+name="(Unlocked_ava\d+)"\s+v="([^"]*)"/gi)) own = writeVar(own, m[1]!, scrub(m[2]!));
+    const emoji = readVarLoose(fr, "UnlockedChatEmoji");
+    if (emoji != null) own = writeVar(own, "UnlockedChatEmoji", scrub(emoji));
+    for (const m of fr.matchAll(/<Var\s+name="((?:skin_|Skin_|decor_|Decor_)[^"]+)"\s+v="([^"]*)"/gi)) {
+      own = writeVar(own, m[1]!, scrub(m[2]!));
+    }
+
+    if (mode === "novo") {
+      for (const tag of NOVO_BLOCKS) own = cloneSimple(fr, own, tag, scrub).xml;
+    }
+
+    // v1.15 also restores the profile/config DataElem blocks for every full
+    // restore mode. These are distinct from the Unlocked* profile CSV fields
+    // handled by the normal Profile tool.
+    own = copyDataElemByName(fr, own, "PlayerProfile", scrub);
+    own = copyDataElemByName(fr, own, "Configs", scrub);
   }
-
-  for (const tag of ["TownGround", "Buildings"]) own = cloneMain(fr, own, tag, scrub).xml;
-  for (const tag of COMPLETO_BLOCKS) own = cloneSimple(fr, own, tag, scrub).xml;
-
-  for (const m of fr.matchAll(/<Var\s+name="(Unlocked_ava\d+)"\s+v="([^"]*)"/gi)) own = writeVar(own, m[1]!, scrub(m[2]!));
-  const emoji = readVarLoose(fr, "UnlockedChatEmoji");
-  if (emoji != null) own = writeVar(own, "UnlockedChatEmoji", scrub(emoji));
-  for (const m of fr.matchAll(/<Var\s+name="((?:skin_|Skin_|decor_|Decor_)[^"]+)"\s+v="([^"]*)"/gi)) {
-    own = writeVar(own, m[1]!, scrub(m[2]!));
-  }
-
-  if (mode === "novo") {
-    for (const tag of NOVO_BLOCKS) own = cloneSimple(fr, own, tag, scrub).xml;
-  }
-
-  // v1.15 also restores the profile/config DataElem blocks for every full
-  // restore mode. These are distinct from the Unlocked* profile CSV fields
-  // handled by the normal Profile tool.
-  own = copyDataElemByName(fr, own, "PlayerProfile", scrub);
-  own = copyDataElemByName(fr, own, "Configs", scrub);
 
   own = skipTutorials(own, fr);
+  // Applied on every mode, last: the city comes from the donor, the account
+  // history stays ours. Placing it after the block copies means it also undoes
+  // a history var a cloned block brought in, and before the identity gate so a
+  // refused merge is what the gate sees.
+  own = keepOwnHistory(before, own);
   assertNoForeignIdentity(before, own, fr);
   return own;
 }
