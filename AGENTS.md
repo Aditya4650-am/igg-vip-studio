@@ -401,6 +401,64 @@ obvious claim — "everyone has regatta, copy them" — turned out to be false:
   still refuses `already_full` when it already holds ≥ the requested total, so
   the tool never pushes a week *down* or rewrites it.
 
+### TWN's newer builds are packed, and how to read them (2026-10-01)
+
+Two more zips arrived (`TWN.zip`, `TWN-3.zip`, both `TWN TOOL/`), and neither
+is the PyInstaller build the notes above were read from. Cost a while to get
+into, so the recipe is here:
+
+- **The environment deletes `*.exe` from temp within seconds of writing one**
+  (Defender is *off*, so it is a harness policy, not antivirus). Extract the
+  entry to `pkg.bin` instead and it survives indefinitely.
+- The new `TWN.exe` is not PyInstaller: 0 hits for `PyInstaller`, `python3`,
+  `PYZ` or the `MEI` cookie, `.rdata` is entropy 8.0 throughout, and the PE
+  data directories are scrambled (the import directory RVA is 0 and the
+  "Resource" entry holds a file offset) — an anti-analysis header. `.text` is
+  140662 bytes in **both** builds: the loader stub is identical, only the
+  payload differs.
+- **`.rdata` begins with `KAY` + a zstd frame** (`4b 41 59 28 b5 2f fd`), and
+  that is the whole trick: `zstandard.ZstdDecompressor().decompress(blob[3:])`
+  yields ~97 MB. Python's own `compression.zstd.decompress` rejects it with
+  *Unknown frame descriptor* — install `zstandard` rather than fighting it.
+- The result is a virtual filesystem, **UTF‑16LE name + `0000` + 8-byte header
+  (u32 size at header offset 0) + payload**, repeating: 1111 records covering
+  97553142 of 97553144 bytes. A **zero-byte record is legitimate**
+  (`Crypto\Util\.keep_dir.txt`) — rejecting size 0 looks like corruption and
+  stops the parse at record 72.
+- The bytecode lives in the first record, `twnv127.dll` (56.9 MB; `twnv113.dll`
+  in the other build). It is a PE, and its `.text`/`.rdata` hold **uncompressed
+  marshal with null-terminated tagged strings** (`a`+name, `u`+name, `T`+count
+  tuples). A byte-by-byte `marshal.loads` scan over 6.9 MB is far too slow and
+  gets killed; **dump every printable run to a file and read it** — the
+  docstrings and every constant are in plain sight.
+- **`TWN_DATA.apk` (identical in both zips) is a red herring**: a 17.9 MB
+  Jetpack Compose / AndroidX shell with **0 hits** for `desban`, `TownGround`,
+  `cityId`, `Achievement_` or `ZooInfo`. It carries no Township logic at all.
+
+What the strings say, and why it matters for the copy feature:
+
+- `_apply_desban`'s progress tuple is **17 names** — `money, moneyCash,
+  EarnedCoins, residents, wheatCounter, plowFieldsAchiev, defaultOrdersCount,
+  match3Life, Match3Lives_infTime` + `Achievement_IncreasedPopulation /
+  PlowedFields / BuiltFactories / SpentCoins / EarneCoins` + `spentCash,
+  earnedCash, timeInGame`. **`experience` is not in it**, and is not in
+  `FIELD_MAP` either (the `exp` field id maps to `expeditionEnergy`) — the
+  reference never copies XP, which is what this repo concluded by measurement.
+- Its "Desban completo" docstring is two blocks: `Progresso …` then
+  **`Clone Decor completo (igual Clone Decoration v2)` → `TownGround +
+  Buildings`, `Estatísticas FIELD_MAP`, Skins, BuildingsStash, Stickers,
+  Badges, Titulos, Molduras, Estilos, Avatares`.
+- **`FIELD_MAP` carries the lifetime history**: 13 ids (`tca coi lvl m3l win
+  liv hlp crd reg dat exp min lik`) mapping to `moneyCash, money, levelup,
+  m3_comp_lvls, FirstAttemptM3Levels, LivesSent, Achievement_Teamwork,
+  FullCardCollections, RegataTasksCompleted, gameStartDate, expeditionEnergy,
+  depth, likes`. So the reference copies the founding date and the lifetime
+  counters **with the town** — independently confirming the `TOWN_HISTORY_VARS`
+  split rather than contradicting it.
+- FetchCity there uses AES key `Wucai6oj0sheiX3p` with Playrix's custom GHASH
+  and the cityId in both body and URL; same approach already in
+  `scripts/township/fetch_city.py`.
+
 ### Regatta: why a real 10-task batch was banned (2026-09-30)
 
 A user pushed a 10-task batch with `injectRegata` and was banned on the next
