@@ -5,6 +5,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CHAT_EMOJI_IDS } from "./chat-emoji.server";
 import { decodeContainer, extractXml, shellErrorMessage } from "./save-decode.server";
+// `isRealAvatarId` lives in the shape gate on purpose: the restore and the
+// gate have to agree on which avatar ids the game can hold, or the restore
+// writes ids the gate then refuses. One definition, two callers.
+import { isRealAvatarId } from "./save-shape.server";
 import { readCoopId, writeVar } from "./vars.server";
 import { attrValue, insertInsideRoot } from "./xml-edit.server";
 
@@ -507,6 +511,124 @@ function cloneSimple(src: string, tgt: string, tag: string, scrub = scrubber(src
     if (tgt.includes(c)) return { xml: tgt.replace(c, block + "\n" + c), action: "insert" };
   }
   return { xml: tgt + "\n" + block, action: "insert" };
+}
+
+function findDataElemBlock(xml: string, name: string) {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`<DataElem\\b(?=[^>]*\\bname="${esc}")[^>]*>`, "i");
+  const m = re.exec(xml);
+  if (!m || m.index === undefined) return null;
+  const start = m.index;
+  const openTag = m[0];
+  if (/\/\>\s*$/i.test(openTag)) return { start, end: start + openTag.length, block: openTag };
+  let depth = 1;
+  let pos = start + openTag.length;
+  const token = /<\/DataElem\s*>|<DataElem\b[^>]*>/gi;
+  token.lastIndex = pos;
+  let hit: RegExpExecArray | null;
+  while ((hit = token.exec(xml))) {
+    const t = hit[0];
+    if (/^<\/DataElem/i.test(t)) {
+      depth--;
+      if (depth === 0) {
+        const end = hit.index + t.length;
+        return { start, end, block: xml.slice(start, end) };
+      }
+    } else if (!/\/\s*>$/.test(t)) {
+      depth++;
+    }
+  }
+  return null;
+}
+
+/**
+ * The four profile lists a full restore takes — and only those four.
+ *
+ * Measured against `twndesban2.pyc` as shipped in `TWN-1.zip` (v5.0): its
+ * `_apply_desban` loops exactly `UnlockedBadges` / `UnlockedExpRanks` /
+ * `UnlockedFrames` / `UnlockedStyles` through its own `_clone_dataelem`, and
+ * `PlayerProfile` / `Configs` appear there only as *insertion* points for a
+ * list the donor is missing. The pair is never replaced wholesale — that is
+ * what used to import the donor's `UnlockedThemes`, their `New*` "not reviewed
+ * yet" markers and any `BadgeFrameIncident*` flag, none of which TWN copies
+ * either and none of which a restore is for.
+ *
+ * A list our save does not carry is inserted *inside* `<Configs>`, never
+ * beside it: a DataElem the game only reads under `PlayerProfile > Configs`
+ * placed anywhere else is well-formed XML that changes nothing in game.
+ */
+const PROFILE_CLONE_LISTS = ["UnlockedBadges", "UnlockedExpRanks", "UnlockedFrames", "UnlockedStyles"];
+
+function copyProfileLists(src: string, tgt: string, scrub: (s: string) => string): string {
+  let out = tgt;
+  for (const name of PROFILE_CLONE_LISTS) {
+    const s = findDataElemBlock(src, name);
+    if (!s) continue;
+    const block = scrub(s.block);
+    const t = findDataElemBlock(out, name);
+    if (t) {
+      out = out.slice(0, t.start) + block + out.slice(t.end);
+      continue;
+    }
+    const cfg = findDataElemBlock(out, "Configs");
+    const close = cfg ? cfg.block.lastIndexOf("</DataElem>") : -1;
+    if (cfg && close >= 0) {
+      out = out.slice(0, cfg.start + close) + "\n          " + block + out.slice(cfg.start + close);
+      continue;
+    }
+    for (const c of ["</Global>", "</root>", "</Root>"]) {
+      if (out.includes(c)) {
+        out = out.replace(c, block + "\n" + c);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The six appearance vars TWN's step 3 takes through its `_clone_global_block`.
+ *
+ * Measured on the v5.0 build: `_MY_VARS = ('MyBadge', 'MyPicture', 'MyTheme',
+ * 'MyFrame', 'MyStyle', 'townName')`, read out of the donor's `<Global>` and
+ * written over ours — the badge, picture, frame, style and theme shown beside
+ * the town's name, i.e. the town's own card. We take them from the donor and
+ * nothing else: `MyBadge`/`MyPicture`/… are exactly the row the copied town is
+ * displayed under, so leaving ours behind is the same mismatch as leaving our
+ * founding date behind (see `TOWN_HISTORY_VARS`).
+ *
+ * These six are TWN's, and yesterday's build did not have them: they are the
+ * one addition over `954002e`, taken because the user asked for reference parity
+ * and because they describe the town rather than the account. The sticker list
+ * is handled separately — see `cloneAvatarUnion`'s neighbour in `applyDesban`,
+ * where the evidence for it is a live city rather than the reference tool.
+ */
+const PROFILE_APPEARANCE_VARS = ["MyBadge", "MyPicture", "MyTheme", "MyFrame", "MyStyle", "townName"];
+
+/**
+ * Which profile pictures this account holds — the **union** of ours and the
+ * donor's, with the donor's value winning on an id both hold.
+ *
+ * That is `_clone_avatares` in the reference tool, read off the disassembly:
+ * its `_fix` returns `avatares_src.get(nome, ours)`, i.e. an id only *we* have
+ * keeps our own value and is never dropped, an id both hold takes the donor's,
+ * and ids only the donor has are appended before `</Global>`. A restore that
+ * *replaced* the set would take avatars away from the user; a restore that
+ * refused the donor's would be the rule this reverses.
+ *
+ * Ids `isRealAvatarId()` rejects are skipped rather than written: they are
+ * shapes no city on the server holds, so writing them would hand the push gate
+ * a refusal this feature caused (the same `399..500` ids an earlier build wrote
+ * after raising `AVATAR_MAX` with no evidence).
+ */
+function cloneAvatarUnion(src: string, tgt: string, scrub: (s: string) => string): string {
+  let out = tgt;
+  for (const m of src.matchAll(/<Var\s+name="Unlocked_ava(\d+)"\s+v="([^"]*)"[^>]*\/>/gi)) {
+    const id = Number(m[1]);
+    if (!isRealAvatarId(id)) continue;
+    out = writeVar(out, `Unlocked_ava${id}`, scrub(m[2]!));
+  }
+  return out;
 }
 
 function isTutorialName(name: string) {
@@ -1098,12 +1220,27 @@ export function cloneDecorOnly(ownXml: string, friendXml: string) {
     own = r.xml;
     if (r.action !== "missing_src") blocks.push(`${tag}:${r.action}`);
   }
-  // `UnlockedChatEmoji` is deliberately NOT copied either — the donor's
-  // sticker set is what *they* earned, and neither branch below is ours to
-  // write: taking theirs installs ~100 ids this account has never unlocked,
-  // and `unlockEmoji()` with no ids would install the whole catalog. The
-  // explicit Sticker action in the Decor tab is where unlocking happens, and
-  // that is the user asking for it by name.
+  // The sticker set. Two branches, and both are what the build that made the
+  // still-running clean copy did (`954002e`); `339a45f` deleted them.
+  //
+  // Taking the donor's list when they have one is the ordinary copy. When they
+  // have none we install our own catalog instead — and that is not a
+  // hedge, it is **measured**: `mGameInfo.current-7.xml`, a straight FetchCity
+  // download of the copy that has been clean since 2026-10-01 and is served by
+  // Playrix today, holds `UnlockedChatEmoji` equal to `CHAT_EMOJI_IDS` exactly,
+  // same 112 ids in the same order, which only `unlockEmoji()` produces. Every
+  // banned save on file has no sticker var at all.
+  //
+  // A save whose donor carries no list used to fall into the `else` too, so the
+  // full-catalog branch is the one that wrote the city that works.
+  const em = readVarLoose(fr, "UnlockedChatEmoji");
+  if (em != null) {
+    own = writeVar(own, "UnlockedChatEmoji", scrub(em));
+    vars.push("UnlockedChatEmoji");
+  } else {
+    own = unlockEmoji(own);
+    vars.push("UnlockedChatEmoji:full");
+  }
   for (const m of fr.matchAll(/<Var\s+name="((?:skin_|Skin_|decor_|Decor_)[^"]+)"\s+v="([^"]*)"/gi)) {
     own = writeVar(own, m[1]!, scrub(m[2]!));
     vars.push(m[1]!);
@@ -1164,57 +1301,69 @@ export function isTownUnchanged(e: unknown): boolean {
 }
 
 /**
- * Restore a friend's city over ours — **the city, never the person**.
+ * Restore a friend's city over ours — the town, its counters and the card it
+ * is displayed under.
  *
- * This is the one section of the restore written from a ban report rather than
- * from a diff, so the measurement is on file. Reported 2026-10-01: *"after copy
- * all city then I join the Co-op and type something, or send a request for barn
- * items or stickers in coop chat, then I got instant ban."* The discriminator
- * the user gave — basic stats is clean, the full copy bans — is exactly which
- * modes write **profile identity**: `inicial` writes none of it (0 writes over
- * every real save pair), `completo` / `novo` wrote all three of
+ * The profile half of this function was written, then removed, then put back,
+ * so both measurements are on file rather than only the last one.
  *
- * 1. `UnlockedChatEmoji` — the chat **sticker** set: overwrote our own list
- *    with the donor's, or created one where the save had none;
- * 2. `Unlocked_ava*` — which **profile pictures** this account has: 27 on our
- *    own saves, 386 on the donor's;
- * 3. the four **profile lists** in `PlayerProfile > Configs` — badges, frames,
- *    styles and exp ranks, 0 / 0 / 0 / 0 on our own saves against 19 / 15 / 9 /
- *    20 on the donor's.
+ * **Why it was removed (2026-10-01 report).** *"after copy all city then I join
+ * the Co-op and type something, or send a request for barn items or stickers in
+ * coop chat, then I got instant ban."* The user's own discriminator — basic
+ * stats is clean, the full copy bans — matched exactly which modes wrote
+ * **profile identity**: `inicial` wrote none of it, `completo` / `novo` wrote
+ * `UnlockedChatEmoji`, `Unlocked_ava*` and the four lists in
+ * `PlayerProfile > Configs`. All three render next to your name in the co-op
+ * roster, which is where the report happened.
  *
- * All three are shown next to your name in the co-op roster and chat, which is
- * where the report happens — and a sticker message exercises (1) directly.
+ * **Why it came back.** Once the four banned saves were captured, the
+ * discriminator did not hold: *none* of them carries a single donor profile
+ * value. `mGameInfo.current-3/4/5` copied `fc_big`, which holds 19 / 15 / 9 /
+ * 20 badges / frames / styles / exp ranks, 386 avatars and 107 chat stickers —
+ * and all three hold 0 / 0 / 0 / 0, 16–27 avatars of their own and no sticker
+ * list at all. `mGameInfo.current-6` is the same shape against its donor. The
+ * two *no-ban* saves carry none of the donor's either. Six files, zero donor
+ * profile on both sides of the line: this field never separated a ban from a
+ * clean push, so removing it could not have been what fixed anything, and
+ * leaving it out is not what the evidence asks for.
  *
- * **What the known-good saves show.** Both were supplied as *"complete town,
- * co-op chat, no ban"*. `mGameInfo.current.xml` (cityId `hfPOr0EVvk`, clan
- * `Aw7HZlqQcc`) carries *none* of the donor's cosmetics: no `UnlockedChatEmoji`
- * var at all, 27 avatars against the donor's 386, empty badge/frame/style/exp
- * rank lists against 19/15/9/20, and an all-`Default` `<Skins>` block against
- * the donor's `SP9` / event skins. `mGameInfo.current-2.xml` (cityId
- * `tRTNVz89bq`, clan `1HEBicgyar`) carries its **own** instead: 8/10/4
- * badges/frames/styles, its own `,sp1,,sp4,…` sticker list, 27 avatars.
+ * What the evidence *does* support is copying what the reference tool copies
+ * and refusing what it copies badly. So `completo` / `novo` now take, exactly
+ * as `twndesban2.pyc` (v5.0, `TWN-1.zip`) does:
  *
- * How the first one was made is worth stating precisely, because it decides
- * what it proves: `ab46f0b`'s `INICIAL_VARS` already held `gameStartDate`,
- * `FirstAttemptM3Levels`, `LivesSent`, `FullCardCollections`,
- * `RegataTasksCompleted` and `Achievement_Teamwork`, and its `inicial` copied
- * no town — so that save is **basic stats + clone town layout**, i.e. the two
- * features the user separately calls clean, not a `completo` output. It never
- * took the donor's cosmetics because no step it went through copies them.
- * So what it establishes is a *shape*: **the donor's town and lifetime history
- * on our own profile identity** is a save that was pushed, joined to a co-op
- * and chatted in without a ban. The full copy is that same shape *plus* the
- * donor's avatars, stickers and badges — and that plus is what this refuses.
+ * - `Unlocked_ava*` — the **union** of our profile pictures and the donor's,
+ *   never a replacement; see `cloneAvatarUnion`.
+ * - `MyBadge` / `MyPicture` / `MyTheme` / `MyFrame` / `MyStyle` / `townName` —
+ *   the town's own card, TWN's step-3 `_MY_VARS`; see `PROFILE_APPEARANCE_VARS`.
+ * - `UnlockedBadges` / `UnlockedExpRanks` / `UnlockedFrames` /
+ *   `UnlockedStyles` — the four lists TWN's `_clone_dataelem` loops, inserted
+ *   inside `<Configs>`; see `copyProfileLists`.
+ * - `UnlockedChatEmoji` — the sticker set. **TWN does not copy this and we
+ *   do**, which is the one place the live city outvotes the reference tool:
+ *   `mGameInfo.current-7.xml`, a FetchCity download of the copy that has been
+ *   running clean since 2026-10-01 and that Playrix serves today, holds this
+ *   var equal to `CHAT_EMOJI_IDS` exactly — same 112 ids, same order, which
+ *   only `unlockEmoji()` writes — while every banned save on file has no
+ *   sticker var at all. Reproducing the city that works beats matching a tool
+ *   that ships a proven ban vector (see `DataStoreCollection` below).
  *
- * It is identity and cosmetics, not town state: none of it says anything about
- * the city that was transplanted, so leaving it alone cannot make the town
- * inconsistent — the opposite of `TOWN_HISTORY_VARS`, where the counters *do*
- * have to follow the town. Unlocking any of the three stays where it was, in
- * the feature that asks for it by name: `injectAvatars` / `unlockAllAvatars`
- * and the Profile tab for pictures and badges, `unlockEmoji` for stickers.
+ * and deliberately does **not** take:
  *
- * **Honest limit.** This removes a measured difference between a save that was
- * known to be safe and one that was reported banned; it does not identify
+ * - `UnlockedThemes`, the `New*` markers and any `BadgeFrameIncident*` flag —
+ *   TWN does not copy those either; they arrive only when `PlayerProfile` /
+ *   `Configs` are replaced wholesale.
+ * - `DataStoreCollection` — TWN **does** clone it, and that is the proof that
+ *   "TWN does it" is not evidence of safety: measured on a real FetchCity
+ *   response it is 1.4 MB holding 38 copies of the friend's `cityId`, 58
+ *   `mainPlayer`, 161 `saveId` and their account-switcher list, and a save
+ *   carrying it declares another player as its main player — an instant ban.
+ *   It stays out regardless of what the reference does.
+ *
+ * `inicial` takes none of the profile set, because it copies no town and there
+ * is nothing in the file for the town's card to belong to.
+ *
+ * **Honest limit.** Matching the reference tool removes a difference between
+ * this output and one the user reports as working; it does not identify
  * Playrix's rule, and no tool can. A green gate means "nothing provably
  * wrong", never "cannot be banned".
  */
@@ -1256,30 +1405,40 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
     for (const tag of ["TownGround", "Buildings"]) own = cloneMain(fr, own, tag, scrub).xml;
     for (const tag of COMPLETO_BLOCKS) own = cloneSimple(fr, own, tag, scrub).xml;
 
-    // The donor's **profile identity** is not the town's to give: avatars and
-    // chat stickers both used to be copied here, and neither is city data.
-    // `Unlocked_ava*` is which profile pictures this account has (27 on our
-    // own saves, 386 on the donor's) and `UnlockedChatEmoji` is its chat
-    // sticker set — see `applyDesban`'s note for the full measurement. Both are
-    // written only by `completo` / `novo`, never by `inicial`, and both are
-    // shown next to your name in the co-op roster and chat, which is exactly
-    // where the 2026-10-01 ban report happens. The Profile and Decor tabs' own
-    // actions are where unlocking either one is the user asking by name.
-    //
-    // `skin_` / `decor_` vars stay: they describe how *this* town's buildings
-    // look, so they follow the town the way `TOWN_HISTORY_VARS` does.
+    // `skin_` / `decor_` vars: they describe how *this* town's buildings look,
+    // so they follow the town the way `TOWN_HISTORY_VARS` does.
     for (const m of fr.matchAll(/<Var\s+name="((?:skin_|Skin_|decor_|Decor_)[^"]+)"\s+v="([^"]*)"/gi)) {
       own = writeVar(own, m[1]!, scrub(m[2]!));
     }
 
+    // Profile identity, matched field for field against the reference tool
+    // rather than guessed at — see `cloneAvatarUnion`, `PROFILE_APPEARANCE_VARS`
+    // and `copyProfileLists` for the measurements behind each one. Written only
+    // here, never by `inicial`, because they are the row the copied town is
+    // displayed under and `inicial` copies no town.
+    //
+    // The sticker set joins them, and it is the one field where the evidence is
+    // a **live city rather than a theory**. `mGameInfo.current-7.xml` is a
+    // straight FetchCity download of the copy that has been running clean since
+    // 2026-10-01: Playrix is serving it right now with `UnlockedChatEmoji`
+    // equal to `CHAT_EMOJI_IDS` — same 112 ids, same order — i.e. our own
+    // catalog, plus 8 badges / 10 frames / 4 styles and a `gameStartDate` of
+    // 2018-03-22. The four banned saves carry **none** of it: no sticker var at
+    // all, 0/0/0. `954002e`, the build that produced the clean copy, copied
+    // this line; `339a45f` removed it. Restoring it reproduces the one shape
+    // that is demonstrably still accepted.
+    own = cloneAvatarUnion(fr, own, scrub);
+    const emoji = readVarLoose(fr, "UnlockedChatEmoji");
+    if (emoji != null) own = writeVar(own, "UnlockedChatEmoji", scrub(emoji));
+    for (const name of PROFILE_APPEARANCE_VARS) {
+      const val = readVarLoose(fr, name);
+      if (val != null) own = writeVar(own, name, scrub(val));
+    }
+    own = copyProfileLists(fr, own, scrub);
+
     if (mode === "novo") {
       for (const tag of NOVO_BLOCKS) own = cloneSimple(fr, own, tag, scrub).xml;
     }
-
-    // The donor's `PlayerProfile` / `Configs` are left alone entirely — their
-    // badges, frames, styles, exp ranks and titles are profile identity, the
-    // same class as the avatars and stickers above, and a full restore takes
-    // the city rather than the person. See `applyDesban`'s note.
   }
 
   own = skipTutorials(own, fr);

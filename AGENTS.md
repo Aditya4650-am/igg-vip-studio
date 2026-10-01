@@ -1706,8 +1706,11 @@ inside Configs` (nothing donor-side arrives, ours survives list for list, a list
 we never had is not created), and `co-op: a save that disagrees with itself about
 its own clan is refused` (caught, arrived-that-way passes, no-co-op passes,
 **an in-game join with a friend still fetched stays pushable**). The first was
-mutation-tested: restoring the `UnlockedChatEmoji` write makes it fail on
-`completo: our stickers are ours — the donor's list must not be installed`.
+mutation-tested at the time: restoring the `UnlockedChatEmoji` write made it
+fail on `completo: our stickers are ours — the donor's list must not be
+installed`. **That assertion was deliberately inverted on 2026-10-02** — see
+*The city that is still running clean* below, which supersedes this section's
+conclusion about the profile half while leaving its co-op half intact.
 
 **Honest limit, unchanged.** This removes a measured difference between a save
 that was known to be safe and one that was reported banned; it does not identify
@@ -1715,6 +1718,87 @@ Playrix's rule, and no tool can. Read a green gate as "nothing provably wrong",
 never as "cannot be banned". The reported save **was** subsequently captured
 (`mGameInfo.current-3.xml`) — see the population section below, which is what it
 turned out to show.
+
+### The city that is still running clean, and what it actually carries (2026-10-02)
+
+The 2026-10-01 section above reached the **wrong conclusion about the profile
+half**, and is kept for the record. This is the correction, and it was forced
+by an artifact rather than by argument: `mGameInfo.current-7.xml` is a plain
+FetchCity download of the copy that has been running since the evening of
+2026-10-01 — the user's own city, served by Playrix **today**.
+
+| field | clean city (`current-7`) | every banned save on file |
+| --- | --- | --- |
+| `UnlockedChatEmoji` | **112 ids** | *absent* — no var at all |
+| `UnlockedBadges` / `Frames` / `Styles` | **8 / 10 / 4** | 0 / 0 / 0 |
+| `Unlocked_ava*` | 27 | 16 – 27 |
+| `gameStartDate` | 1521676800 = **2018-03-22** | 2012-12-31 / 2025-04-14 |
+| `DaysEnteredGame` | 1 → **2** (still being played) | 0 |
+
+Two rows are not merely "different":
+
+- **The 112 stickers are exactly `CHAT_EMOJI_IDS`, same ids in the same
+  order** — a set only `unlockEmoji()` writes, i.e. our own catalog rather than
+  a donor's partial list (`fc_big` holds a *different* 107). A save with no
+  list of its own plus a stickerless donor produces it byte for byte, and that
+  is precisely the branch `339a45f` deleted.
+- `current-7` is **field-for-field equal to `mGameInfo.current-2.xml`** apart
+  from `DaysEnteredGame` 1 → 2: same `cityId`, `deviceId`, level, `money`, town
+  name and founding date. So the clean city is unchanged and still being served
+  with everything above.
+
+**What changed as a result** — both directions of `339a45f`'s removal are
+reinstated, with one deliberate exception:
+
+- `applyDesban`'s `completo` / `novo` writes `UnlockedChatEmoji` again when the
+  donor has a list — the line `954002e` had;
+- `cloneDecorOnly` regains **both** branches: the donor's list when they carry
+  one, `unlockEmoji(own)` (the full catalog) when they do not. **The second
+  branch is the one that produced the city above.**
+- avatars (`cloneAvatarUnion` — a union, never a replacement) and the four
+  `Configs` lists (`copyProfileLists`) came back with them;
+- `PROFILE_APPEARANCE_VARS` (`MyBadge` / `MyPicture` / `MyTheme` / `MyFrame` /
+  `MyStyle` / `townName`) is the one addition **beyond** `954002e`: it comes
+  from TWN's step 3 `_clone_global_block`, at the user's request, and is the
+  town's own card rather than the account's;
+- **`DataStoreCollection` still never comes back**, TWN clones it or not. It is
+  the one proven instant-ban vector (38 `cityId`, 58 `mainPlayer`, 161
+  `saveId`), and it is why "TWN does it" can never be used as evidence of
+  safety.
+
+The co-op half of the section above stands untouched: no mode writes
+`<MyClan>` / `MyClanId` / `RegataCenter clanId`.
+
+**The profile field was never the discriminator, and it was not the cause.**
+Neither the clean saves nor the banned ones carried a *donor's* cosmetics —
+`current-7`'s 8/10/4 and its 112 catalog stickers are its own, not fetched from
+a friend. The other discriminator on file still stands untouched: game install
+6–8 minutes old on 4/4 banned vs 25.8 h / 73.2 h on 2/2 clean. What is new is
+only that **the shape with the profile row present is the one that has now been
+accepted for a day**, while four saves without it were not — so the 2026-10-01
+removal bought nothing and is reversed.
+
+Guard rails, both in `studio-pipeline.test.ts`:
+`copy: the restore takes the town and the profile row it is shown under, never
+the co-op` pins the mode split for stickers, the avatar union, the co-op's
+invariance in every mode, and **the reference shape** —
+`cloneDecorOnly(bare, donorWithoutStickers)` must equal
+`"," + CHAT_EMOJI_IDS.join(",,") + ","`, so trimming `CHAT_EMOJI_IDS` or
+deleting this write again fails the suite rather than an account.
+`copy: a full restore takes the town and exactly the reference tool's four
+profile lists` pins the `Configs` line in both directions (the four arrive and
+are inserted *inside* `Configs`; `UnlockedThemes`, the `New*` markers and the
+incident flag do not).
+
+Measured end to end over the corpus — 8 own saves × 2 donors × 3 modes = **48
+runs**, restore and decor clone together exactly as *Save & push* queues them:
+**zero identity / shape / progression / balance refusals**, a non-empty
+well-delimited known-id sticker list on all 48, and **15 reproducing
+`current-7`'s list byte for byte**.
+
+**Honest limit, unchanged.** Nothing here proves a copy cannot be banned:
+`current-7` shows one save Playrix serves, not the rule Playrix enforces. Read
+a green gate as "nothing provably wrong", never as "cannot be banned".
 
 ### Population over its own cap (2026-10-01)
 

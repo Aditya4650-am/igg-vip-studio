@@ -1926,13 +1926,22 @@ test("copy: the city follows the friend on every mode; its account history follo
   }
 });
 
-test("copy: no restore mode takes the friend's chat stickers or their co-op", () => {
-  // The discriminator behind the 2026-10-01 report — *"basic stats is clean, a
-  // full copy then I type in co-op chat and get banned"* — is which modes
-  // write `UnlockedChatEmoji`: `inicial` never did, `completo` / `novo` did.
-  // Co-op identity is checked in the same pass because the two are the only
-  // chat-facing fields a restore could reach, and a copy that took the
-  // donor's clan would claim a team this account never joined.
+test("copy: the restore takes the town and the profile row it is shown under, never the co-op", () => {
+  // Two halves, and they are decided by different evidence.
+  //
+  // **Stickers, badges, frames, styles and pictures are copied.** The proof is
+  // not a theory: `mGameInfo.current-7.xml` is a FetchCity download of the copy
+  // that has been running clean since 2026-10-01, and Playrix serves it today
+  // with `UnlockedChatEmoji` equal to `CHAT_EMOJI_IDS` exactly — same 112 ids
+  // in the same order, which only `unlockEmoji()` writes — plus 8 badges, 10
+  // frames, 4 styles and a `gameStartDate` of 2018-03-22. Every banned save on
+  // file has no sticker var at all and 0/0/0. `954002e` copied these and
+  // `339a45f` removed them; this puts back the shape that is demonstrably
+  // still accepted.
+  //
+  // **The co-op is never copied, in any mode.** Which team this file claims to
+  // be in is part of whose file it is, so a copy that took the donor's clan
+  // would hand the server a file claiming a team this account never joined.
   const read = (doc: string, name: string) =>
     new RegExp(`<Var\\s+name="${name}"[^>]*\\bv="([^"]*)"`, "i").exec(doc)?.[1] ?? null;
   const clanTag = (doc: string) => /<MyClan\b[^>]*\bid="([^"]*)"/i.exec(doc)?.[1] ?? null;
@@ -1943,53 +1952,110 @@ test("copy: no restore mode takes the friend's chat stickers or their co-op", ()
     assert.equal(read(xml, "MyClanId"), want, `${mode}: MyClanId must not follow the town`);
     assert.equal(clanTag(xml), want, `${mode}: <MyClan id> must not follow the town`);
     assert.equal(rcClan(xml), want, `${mode}: <RegataCenter clanId> must not follow the town`);
-    assert.deepEqual(avaIds(xml), [7], `${mode}: our avatars are ours — the donor's set must not be installed`);
   };
+  // Avatars are copied as the **union**: `_clone_avatares` in the reference
+  // tool keeps every picture we already hold and appends the donor's — its
+  // `_fix` is `src.get(nome, ours)`, so an id only we have is never dropped.
+  // `inicial` copies no profile at all and stays exactly ours; the two town
+  // modes gain the donor's 200 and 398 without losing our 7.
+  const OWN_AVAS = [7];
+  const UNION_AVAS = [7, 200, 398];
+  const assertAvas = (xml: string, label: string, want: number[]) =>
+    assert.deepEqual(avaIds(xml), want, `${label}: avatar union — own kept, donor's added, never replaced`);
 
   for (const mode of ["inicial", "completo", "novo"] as const) {
     const snap = townSession(CHAT_OWN);
     studio.attachFriendXml(token, snap.sessionId, CHAT_DONOR);
     const xml = studio.applySave({ token, sessionId: snap.sessionId, unbanMode: mode }).xml!;
 
+    // `inicial` writes no profile at all, so it keeps the stickers it had;
+    // the two town modes take the donor's list — exactly what `954002e` did.
     assert.equal(
       read(xml, "UnlockedChatEmoji"),
-      ",st1,,st2,",
-      `${mode}: our stickers are ours — the donor's list must not be installed`,
+      mode === "inicial" ? ",st1,,st2," : ",st79,,st34,,st35,",
+      `${mode}: the town modes take the donor's stickers, inicial takes none`,
     );
     assertClan(xml, mode, "CLANOWN");
+    assertAvas(xml, mode, mode === "inicial" ? OWN_AVAS : UNION_AVAS);
     // The copy itself still ran: this is a guard, not a no-op.
     assert.equal(read(xml, "levelup"), "1089", `${mode}: sanity — the restore still copied the level`);
     balanced(xml);
     assert.deepEqual(saveShapeProblems(xml), [], `${mode}: the output must satisfy every shape rule`);
   }
 
-  // The other known-good shape: a save that never tracked a sticker list must
-  // not gain one, in any mode.
+  // A save that never tracked a sticker list keeps none in `inicial`; the town
+  // modes gain the donor's, because that is what a restore that takes the
+  // profile row does.
   const bare = CHAT_OWN.replace(/<Var name="UnlockedChatEmoji"[^>]*\/>/, "");
   assert.equal(read(bare, "UnlockedChatEmoji"), null, "the fixture must have no sticker list");
   for (const mode of ["inicial", "completo", "novo"] as const) {
     const snap = townSession(bare);
     studio.attachFriendXml(token, snap.sessionId, CHAT_DONOR);
     const xml = studio.applySave({ token, sessionId: snap.sessionId, unbanMode: mode }).xml!;
-    assert.equal(read(xml, "UnlockedChatEmoji"), null, `${mode}: a save with no stickers must not gain any`);
+    assert.equal(
+      read(xml, "UnlockedChatEmoji"),
+      mode === "inicial" ? null : ",st79,,st34,,st35,",
+      `${mode}: a save with no stickers gains them only where a profile is copied`,
+    );
     assertClan(xml, mode, "CLANOWN");
+    assertAvas(xml, `${mode} (bare)`, mode === "inicial" ? OWN_AVAS : UNION_AVAS);
   }
 
   // The decor/town clone runs inside the very same "Save & push 3" batch as a
-  // full restore, so it has to hold the same line. A donor that carries no
-  // list used to trigger a bulk unlock of the *whole* catalog instead.
+  // full restore, so it carries the sticker set too: the donor's list when they
+  // have one, our own catalog when they do not.
+  //
+  // The second branch is the one that produced the city still running clean. A
+  // save with no list of its own plus a donor with none yields
+  // `CHAT_EMOJI_IDS` **byte for byte** — same ids, same order — and that is
+  // precisely what `mGameInfo.current-7.xml`, the FetchCity download of your
+  // unbanned copy, holds. `339a45f` removed this branch and every save it made
+  // afterwards has no sticker var at all.
   const donorNoEmoji = CHAT_DONOR.replace(/<Var name="UnlockedChatEmoji"[^>]*\/>/, "");
-  for (const [label, donor] of [
-    ["donor has a list", CHAT_DONOR],
-    ["donor has none", donorNoEmoji],
-  ] as const) {
-    const out = cloneDecorOnly(CHAT_OWN, donor);
-    assert.equal(read(out.xml, "UnlockedChatEmoji"), ",st1,,st2,", `decor clone (${label}): stickers untouched`);
-    assertClan(out.xml, `decor clone (${label})`, "CLANOWN");
+  const DONOR_LIST = ",st79,,st34,,st35,";
+  const ownIds = (read(CHAT_OWN, "UnlockedChatEmoji") ?? "").split(",").filter(Boolean);
 
-    const outBare = cloneDecorOnly(bare, donor);
-    assert.equal(read(outBare.xml, "UnlockedChatEmoji"), null, `decor clone (${label}): no list is created`);
-  }
+  const withDonor = cloneDecorOnly(CHAT_OWN, CHAT_DONOR);
+  assert.equal(
+    read(withDonor.xml, "UnlockedChatEmoji"),
+    DONOR_LIST,
+    "decor clone: takes the donor's list when they have one",
+  );
+  assertClan(withDonor.xml, "decor clone (donor has a list)", "CLANOWN");
+  assertAvas(withDonor.xml, "decor clone (donor has a list)", OWN_AVAS);
+  balanced(withDonor.xml);
+
+  const withBareDonor = cloneDecorOnly(CHAT_OWN, donorNoEmoji);
+  const fullIds = (read(withBareDonor.xml, "UnlockedChatEmoji") ?? "").split(",").filter(Boolean);
+  assert.deepEqual(
+    fullIds.slice().sort(),
+    [...CHAT_EMOJI_IDS].sort(),
+    "decor clone (donor has none): the whole catalog lands",
+  );
+  for (const id of ownIds) assert.ok(fullIds.includes(id), `our own sticker ${id} survives the unlock`);
+  assertClan(withBareDonor.xml, "decor clone (donor has none)", "CLANOWN");
+  assertAvas(withBareDonor.xml, "decor clone (donor has none)", OWN_AVAS);
+  balanced(withBareDonor.xml);
+
+  // THE reference shape. No list of our own, donor with none: this has to come
+  // out identical to `mGameInfo.current-7.xml`, id for id and in order.
+  const refShape = cloneDecorOnly(bare, donorNoEmoji);
+  assert.equal(
+    read(refShape.xml, "UnlockedChatEmoji"),
+    "," + CHAT_EMOJI_IDS.join(",,") + ",",
+    "the clean city's sticker list is reproduced byte for byte",
+  );
+  assertClan(refShape.xml, "decor clone (bare + donor none)", "CLANOWN");
+  assertAvas(refShape.xml, "decor clone (bare + donor none)", OWN_AVAS);
+  balanced(refShape.xml);
+  assert.deepEqual(saveShapeProblems(refShape.xml), [], "the reference shape passes every shape rule");
+
+  // A donor that carries a list still writes it over a save that had none.
+  assert.equal(
+    read(cloneDecorOnly(bare, CHAT_DONOR).xml, "UnlockedChatEmoji"),
+    DONOR_LIST,
+    "decor clone (bare + donor has one): the donor's list lands",
+  );
 });
 
 test("co-op: a save that disagrees with itself about its own clan is refused", () => {
@@ -2104,19 +2170,20 @@ test("population: a restore takes the friend's residents and the cap under them,
   );
 });
 
-test("copy: a full restore takes the town — never the donor's profile identity inside Configs", () => {
-  // Badges, frames, styles and exp ranks are profile identity: the same class
-  // as the avatars and chat stickers the restore also stopped taking. They are
-  // rendered next to your name in the co-op roster and chat, they say nothing
-  // about the town that was transplanted, and neither known-good save carries
-  // the donor's — `mGameInfo.current.xml` holds 0/0/0/0 against the donor's
-  // 19/15/9/20, `mGameInfo.current-2.xml` holds its own 8/10/4.
+test("copy: a full restore takes the town and exactly the reference tool's four profile lists", () => {
+  // Which profile fields a restore copies is not a taste question — it is read
+  // straight off `twndesban2.pyc` (v5.0, in `TWN-1.zip`). Its `_apply_desban`
+  // loops exactly four lists through its own `_clone_dataelem`:
   //
-  // This narrows an earlier rule rather than reversing it. That rule was
-  // really about *how much* of `PlayerProfile` / `Configs` a restore may
-  // touch, and it already stopped the wholesale replace which imported the
-  // donor's themes, their `New*` "not reviewed yet" markers and any
-  // `BadgeFrameIncident*` flag. The answer turns out to be: none of it.
+  //   UnlockedBadges, UnlockedExpRanks, UnlockedFrames, UnlockedStyles
+  //
+  // and treats `PlayerProfile` / `Configs` only as *insertion* points for a
+  // list the donor is missing. The wholesale replace that used to run here is
+  // what imported the donor's `UnlockedThemes`, their `New*` "not reviewed
+  // yet" markers and any `BadgeFrameIncident*` flag — **none of which TWN
+  // copies either**, so keeping them out is not a deviation from the
+  // reference, it *is* the reference. This test is that line in both
+  // directions: the four arrive, the rest of their Configs does not.
   const mk = (cityId: string, kids: string[]) =>
     [
       '<?xml version="1.0" encoding="utf-8"?>',
@@ -2152,9 +2219,15 @@ test("copy: a full restore takes the town — never the donor's profile identity
 
   const out = applyDesban(own, donor, "novo");
 
-  // Nothing inside the donor's Configs arrives — not the four lists a restore
-  // used to clone, and not the ones it never did.
-  for (const v of ["b9,b8", "e9", "f9", "s9", "thb", "THEIRNEW", "theirtheme"]) {
+  // The four lists arrive — that *is* the copy.
+  for (const v of ["b9,b8", "e9", "f9", "s9"]) {
+    assert.ok(out.includes(`value="${v}"`), `the donor's ${v} arrives`);
+  }
+
+  // …and nothing else from inside their Configs does. `NewBadges`,
+  // `NewExpRanks`, `UnlockedThemes` and the incident flag are not among TWN's
+  // four, so they are not ours to take either.
+  for (const v of ["thb", "THEIRNEW", "theirtheme"]) {
     assert.ok(!out.includes(v), `the donor's ${v} must not arrive`);
   }
   assert.ok(
@@ -2162,8 +2235,8 @@ test("copy: a full restore takes the town — never the donor's profile identity
     "the donor's incident flag must not arrive",
   );
 
-  // …and ours is untouched, list for list.
-  for (const v of ["b1", "e1", "f1", "OURNEW", "ourtheme"]) {
+  // Where a field is *not* one of the four, ours survives untouched.
+  for (const v of ["OURNEW", "ourtheme"]) {
     assert.ok(out.includes(`value="${v}"`), `our own ${v} must stay`);
   }
   assert.ok(
@@ -2171,21 +2244,30 @@ test("copy: a full restore takes the town — never the donor's profile identity
     "our own incident flag stays",
   );
 
-  // One Configs, one of each list our save already had — a second copy is a
-  // store the game reads whichever it finds first while the other sits dead.
+  // One Configs, exactly one of each of the four — a second copy is a store
+  // the game reads whichever it finds first while the other sits dead.
   assert.equal((out.match(/<DataElem name="Configs"/g) ?? []).length, 1, "no second Configs");
-  for (const f of ["UnlockedBadges", "UnlockedExpRanks", "UnlockedFrames"]) {
+  for (const f of ["UnlockedBadges", "UnlockedExpRanks", "UnlockedFrames", "UnlockedStyles"]) {
     assert.equal((out.match(new RegExp(`<DataElem name="${f}"`, "g")) ?? []).length, 1, `exactly one ${f}`);
   }
 
-  // The donor's `UnlockedStyles` — a list our save does not even carry — is
-  // not created from nothing either. The old rule's "insert a missing list
-  // inside Configs" existed only to serve the copy; with the copy gone a
-  // restore has no reason to grow a profile field.
-  assert.equal(
-    (out.match(/<DataElem name="UnlockedStyles"/g) ?? []).length,
-    0,
-    "a list we never had is not created from the donor's",
+  // Where the four *do* cover a list, ours is replaced rather than joined:
+  // `b1,b9,b8` would claim two generations of a collection at once.
+  for (const v of ["b1", "e1", "f1"]) {
+    assert.ok(!out.includes(`value="${v}"`), `our own ${v} is replaced by the donor's`);
+  }
+
+  // `UnlockedStyles` is a list our save did not carry at all — it is created,
+  // because that is what `_clone_dataelem` does when the donor has one. It has
+  // to land *inside* `<Configs>`: a DataElem the game only reads under
+  // `PlayerProfile > Configs`, placed beside that pair, is well-formed XML the
+  // game ignores — a green tick that changes nothing.
+  const cfgOpen = out.indexOf('<DataElem name="Configs"');
+  const stylesAt = out.indexOf('<DataElem name="UnlockedStyles"');
+  const cfgClose = out.indexOf("</DataElem>", cfgOpen);
+  assert.ok(
+    cfgOpen >= 0 && stylesAt > cfgOpen && stylesAt < cfgClose,
+    "the donor's list we never had is created inside Configs, not beside it",
   );
 
   balanced(out);
