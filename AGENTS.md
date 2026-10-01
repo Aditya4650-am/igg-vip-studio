@@ -1712,9 +1712,69 @@ mutation-tested: restoring the `UnlockedChatEmoji` write makes it fail on
 **Honest limit, unchanged.** This removes a measured difference between a save
 that was known to be safe and one that was reported banned; it does not identify
 Playrix's rule, and no tool can. Read a green gate as "nothing provably wrong",
-never as "cannot be banned". The reported save itself was never captured, so if
-this does not settle it the next step is to get that file — the same
-side-by-side method that found `experience` and the date.
+never as "cannot be banned". The reported save **was** subsequently captured
+(`mGameInfo.current-3.xml`) — see the population section below, which is what it
+turned out to show.
+
+### Population over its own cap (2026-10-01)
+
+The banned save arrived (`mGameInfo.current-3.xml`, 783,809 B) and every probe of
+it came back clean — no foreign identity (the donor's `cityId` appears 3 times,
+**the same count the ban-free `mGameInfo.current.xml` carries**, and its
+`deviceId` 0 times, so both stay the friend-reference kind the scrubber allows),
+no profile identity taken, shape and progression both green —
+**except one**, and it is arithmetic:
+
+| file | residents | maxResidents | |
+| --- | ---: | ---: | --- |
+| `mGameInfo.current.xml` (good) | 60 | 75 | under |
+| `mGameInfo.current-2.xml` (good) | 68085 | 76315 | under |
+| **`mGameInfo.current-3.xml` (banned)** | **85380** | **75** | **1138x over** |
+| `fc_big` (the donor) | 85380 | 85445 | under |
+| `fc_ok` / `decoded` / `save9` | 295 / 84545 / 11055 | 1955 / 84545 / 11265 | under |
+
+It is our doing. `INICIAL_VARS` copied `residents` and nothing copied
+`maxResidents` — the name appeared **nowhere in this codebase** before this
+commit. A cap scan over every cap-shaped pair in the corpus
+(`max*`, `*Max`, `*Limit`, `*Cap`, `*Capacity`, `*MaxCount`, …) reports exactly
+one violation across all seven files, and it is this one.
+
+**The 11pm baseline has the same hole, which is why it never showed before.**
+The user's window is 2026-09-30 23:00 → 2026-10-01 00:00 and holds exactly two
+commits, `a74082f` (22:55) and `ab46f0b` (23:10); they differ only by a
+FetchCity error message plus this file, so `ab46f0b` pins the whole window.
+Running *that* build over the three corpus own-saves against `fc_big` produces
+`85380 > 84545`, `85380 > 11265`, `85380 > 1955` — broken 3/3. It never fired
+visibly because yesterday's donors happened to fit under the caps already on
+those saves; today's (`fc_big`, 85380 residents) did not fit under a cap of 75.
+
+**Two changes, both the "rewrite the pair together" rule already used by
+`WareHouseCashUpgrade`/`WHUdup` and `level`/`slx`:**
+
+- `maxResidents` joins `INICIAL_VARS` directly beside `residents`. The loop only
+  writes names the donor declares, so a donor with no cap still writes no cap.
+  Every restore now yields the donor's own consistent pair (85380/85445) on all
+  three modes × all three own-saves.
+- `population-over-capacity` joins `shapeProblems`, **per-document on purpose**,
+  exactly like `coop-id-mismatch`: a file that arrives over its cap carries the
+  key on both sides and stays pushable, so it refuses only the edit that put it
+  there, and a donor that is itself over its cap is refused rather than adopted.
+
+Measured against the baseline the delta is now **one new value in every mode**,
+`maxResidents` — direction `[B]` (what the no-ban build wrote that today does not)
+is still empty for `completo` / `novo` apart from the avatars and stickers the
+profile-identity rule deliberately stopped taking.
+
+Guard rail: `population: a restore takes the friend's residents and the cap
+under them, together` — clean save clean, no-cap save gains no rule, over-cap
+caught and refused, arrived-that-way passes, all three modes land on the donor's
+pair, and a sick donor is refused.
+
+**Honest limit, unchanged.** This is the only measurable defect the banned save
+has that the two ban-free ones do not, and the same defect is provable in the
+build the user calls good. That makes it the strongest candidate by measurement,
+not a proven mechanism: a green gate means "nothing provably wrong", never
+"cannot be banned".
 
 ## Avatar icons
 

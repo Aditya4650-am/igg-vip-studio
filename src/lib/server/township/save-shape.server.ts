@@ -269,6 +269,26 @@ function shapeProblems(xml: string, known: DonorIds | null): string[] {
     if (v !== null && v !== "" && !/^-?\d+$/.test(v)) out.add(`var-int:${m[1]}`);
   }
 
+  // ---- population over its own capacity ------------------------------------
+  // `residents` is a counter and `maxResidents` is the ceiling under it. A save
+  // whose population is over its cap is arithmetically impossible and needs no
+  // history to read: it is one division. Measured on the save reported banned
+  // on 2026-10-01 — 85380 against 75 — where the two saves reported ban-free
+  // (60/75, 68085/76315) and all five corpus saves sit at or under their cap.
+  //
+  // Per-document, like `coop-id-mismatch`: a file that arrives already over its
+  // cap carries the key on both sides of the loaded-vs-pushed diff and stays
+  // pushable, so this refuses only an edit that is what put it there — the
+  // restore that copied the population and left the cap behind. Pair-valued on
+  // purpose, so it cannot fire on a save that simply has no cap declared.
+  const pop = readVar(xml, "residents");
+  const popCap = readVar(xml, "maxResidents");
+  if (
+    pop !== null && popCap !== null &&
+    /^-?\d+$/.test(pop) && /^-?\d+$/.test(popCap) &&
+    Number(pop) > Number(popCap)
+  ) out.add("population-over-capacity");
+
   // ---- the warehouse "duplicate" actually duplicates ---------------------
   // `WHUdup` is `WareHouseCashUpgrade` masked with a fixed key; the name is
   // the whole spec. Measured on the corpus: the relation holds on 5 of 6

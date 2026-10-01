@@ -20,7 +20,19 @@ const DEFAULT_BVER = "39.0.3";
 const DEFAULT_FVER = "3903";
 
 const INICIAL_VARS = [
-  "levelup", "money", "moneyCash", "EarnedCoins", "residents", "wheatCounter",
+  "levelup", "money", "moneyCash", "EarnedCoins",
+  // `residents` and its capacity move as one pair, the same way
+  // `WareHouseCashUpgrade` / `WHUdup` below always do. Copying the population
+  // without the cap under it writes a save claiming more residents than the
+  // city can hold — measured on the save reported banned on 2026-10-01:
+  // `residents=85380` against `maxResidents=75`, **1138x over its own cap**,
+  // while both saves the user reports as ban-free sit under theirs (60/75 and
+  // 68085/76315) and all five corpus saves do too (85380/85445, 295/1955,
+  // 84545/84545, 11055/11265). `maxResidents` appeared nowhere in this codebase
+  // before: the cap was simply left behind, which is exactly the shape the
+  // `level`/`slx` and `WHUdup` rules exist to refuse. Skipped on its own when a
+  // donor has no cap — the loop below only writes names the donor declares.
+  "residents", "maxResidents", "wheatCounter",
   "plowFieldsAchiev", "defaultOrdersCount", "match3Life", "Match3Lives_infTime",
   "spentCash", "earnedCash", "timeInGame",
   // Deliberately absent — lifetime facts Playrix tracks against the *player*

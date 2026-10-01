@@ -2041,6 +2041,69 @@ test("co-op: a save that disagrees with itself about its own clan is refused", (
   );
 });
 
+test("population: a restore takes the friend's residents and the cap under them, together", () => {
+  // The one measurable difference between the save reported banned on
+  // 2026-10-01 (`mGameInfo.current-3.xml`) and the two the user reports as
+  // ban-free. Every other probe of that file came back clean — no foreign
+  // identity, no profile identity taken, shape and progression both green — but
+  // it declares `residents=85380` over `maxResidents=75`: **1138x its own
+  // capacity**, a division a server can do for free with no history at all.
+  //
+  //   good 1   60 / 75        banned   85380 / 75     <-- over
+  //   good 2   68085 / 76315  fc_big   85380 / 85445
+  //              fc_ok   295 / 1955   decoded  84545 / 84545  save9  11055 / 11265
+  //
+  // It is our doing: `INICIAL_VARS` copied `residents` and left `maxResidents`
+  // behind, and `maxResidents` appeared nowhere in this codebase before. The
+  // 11pm baseline has the same hole — it breaks 3/3 corpus pairs — which is why
+  // it never showed against yesterday's saves: yesterday's donors happened to
+  // fit under the caps already there. This one did not.
+  const withCap = (doc: string, cap: string) =>
+    doc.replace("</Global>", `<Var name="maxResidents" v="${cap}" t="i"/></Global>`);
+  const own = withCap(CHAT_OWN, "600");        // 500 residents, room for 600
+  const donor = withCap(CHAT_DONOR, "85445");  // 85380 residents, room for 85445
+
+  // A save under its own cap is clean, and the rule is pair-valued on purpose:
+  // one with no cap declared at all gains no rule of its own.
+  assert.ok(!saveShapeProblems(own).includes("population-over-capacity"), "a city under its cap is clean");
+  assert.ok(!saveShapeProblems(CHAT_OWN).includes("population-over-capacity"), "no cap declared, no rule");
+
+  // The push gate refuses the shape, and only when the edit is what made it.
+  const over = own.replace('name="residents" v="500"', 'name="residents" v="5000"');
+  assert.ok(saveShapeProblems(over).includes("population-over-capacity"), "a city over its cap must be caught");
+  assert.throws(() => assertSaveShapeSafe(own, over), /population-over-capacity/);
+
+  // Arrived that way: the save's own business, never this tool's to refuse.
+  assertSaveShapeSafe(over, over);
+
+  // The fix itself. The cap has to travel with the population the same way
+  // `WareHouseCashUpgrade` / `WHUdup` and `level` / `slx` always do, or the
+  // pair is broken again on the very next restore.
+  for (const mode of ["inicial", "completo", "novo"] as const) {
+    const out = applyDesban(own, donor, mode);
+    const val = (doc: string, name: string) => {
+      const m = new RegExp(`<Var\\b(?=[^>]*\\bname="${name}")[^>]*>`).exec(doc);
+      return m ? (/\bv="([^"]*)"/.exec(m[0])?.[1] ?? null) : null;
+    };
+    assert.equal(val(out, "residents"), "85380", `${mode}: the friend's population`);
+    assert.equal(val(out, "maxResidents"), "85445", `${mode}: and the capacity under it`);
+    assert.ok(
+      !saveShapeProblems(out).includes("population-over-capacity"),
+      `${mode}: the restore must never hand back a city over its own cap`,
+    );
+    assertSaveShapeSafe(own, out);
+  }
+
+  // A donor that is itself over its cap is refused rather than adopted: that is
+  // the shape the ban report was made of, and copying it is how it is created.
+  const sickDonor = withCap(CHAT_DONOR, "75");
+  assert.throws(
+    () => assertSaveShapeSafe(own, applyDesban(own, sickDonor, "novo")),
+    /population-over-capacity/,
+    "a donor already over its cap must not make ours over its cap",
+  );
+});
+
 test("copy: a full restore takes the town — never the donor's profile identity inside Configs", () => {
   // Badges, frames, styles and exp ranks are profile identity: the same class
   // as the avatars and chat stickers the restore also stopped taking. They are
