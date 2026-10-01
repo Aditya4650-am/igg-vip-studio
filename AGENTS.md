@@ -1430,6 +1430,17 @@ Render only, via `render.yaml`. This **must** be a persistent server: FetchCity
 shells out to Python, which a serverless/edge target cannot provide. Do not add
 a serverless preset.
 
+**A commit does not deploy — a push does.** `render.yaml` says
+`branch: main` + `autoDeploy: true`, and Render reads the repo on GitHub, not
+this working tree, so five green local commits left the site serving
+`ab46f0b` for days. When the live site looks stale, check `git status -sb`
+first: an `[ahead N]` there is the whole answer. There is no commit status to
+look for either — Render posts none, so the GitHub checks page proves nothing;
+confirm instead by comparing the asset hashes in the served `/` HTML, or fetch
+the `routes-*.js` and grep for a string the new commit introduced (the i18n
+keys are the convenient ones — a compile-time constant such as
+`CARD_SEND_MAX_PER_RUN` is inlined and will not appear as an identifier).
+
 `nixpacks.toml` is a leftover hedge and Render ignores it — Render's native
 runtimes use Cloud Native Buildpacks (Paketo), not Nixpacks. Python does not
 need declaring: `python3` ships in Render's runtime image (Debian 12 bookworm)
