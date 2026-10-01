@@ -524,7 +524,20 @@ function isTutorialName(name: string) {
   // Mining/digging/cascade tutorial control vars
   if (low.includes("digging") && (low.includes("visited") || low.includes("fullcompleted") || low.includes("ready") || low.includes("regenerated") || low.includes("tutor") || low.includes("showed") || low.includes("room") || low.includes("stone") || low.includes("hardstone") || low.includes("clay") || low.includes("premium"))) return true;
   if (low.includes("cascade") && (low.includes("event") || low.includes("window") || low.includes("reward") || low.includes("launch") || low.includes("stop") || low.includes("merge") || low.includes("expedition") || low.includes("tutorial"))) return true;
-  if (low.includes("exped") && (low.includes("lock") || low.includes("reward") || low.includes("tutorial") || low.includes("energy") || low.includes("playbtn") || low.includes("quest") || low.includes("show"))) return true;
+  // `energy` was in that disjunction and must **not** be: it made
+  // `isTutorialName("expeditionEnergy")` true, so `copyTutorialsFromFriend`
+  // transplanted the donor's spendable expedition energy into our save in
+  // **every mode** — no copy list mentions it, which is exactly why it was
+  // invisible to every diff of the copy sets. Measured: own 11 -> donor 33854
+  // with only `expeditionEnergy` differing as input, and on the real saves the
+  // file reported banned carries the donor's 33854 while both reported
+  // ban-free carry their own 193. `tutorialTargetValue` returns a non-empty
+  // friend value verbatim, so a *resource* was copied as if it were a flag.
+  // The rule is for expedition **tutorial** control vars; the terms that
+  // actually identify those (`tutorial`, `show`, `lock`, `reward`, `quest`,
+  // `playbtn`) are untouched. The four `*CascadeEventExpedition` names this
+  // appeared to remove are still matched by the cascade rule above.
+  if (low.includes("exped") && (low.includes("lock") || low.includes("reward") || low.includes("tutorial") || low.includes("playbtn") || low.includes("quest") || low.includes("show"))) return true;
   if (low.startsWith("tutm3_")) return true;
   if (low.includes("digging") && (low.includes("beauty") || low.includes("generated") || low.includes("tools") || low.includes("chunk"))) return true;
   if (low.includes("m3_cascade")) return true;
