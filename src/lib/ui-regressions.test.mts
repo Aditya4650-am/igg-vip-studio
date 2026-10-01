@@ -250,3 +250,80 @@ test("the copy is never gated, and no age banner is drawn over it", () => {
     "the account's age must not gate the push",
   );
 });
+
+test("the copy is staged like the reference tool: one push per stage, in order", () => {
+  const tab = read("../components/studio-app.tsx");
+  const dict = read("i18n.ts");
+
+  // No one-shot path is left in the copy section. The reference tool
+  // (`twndesban2`, ETAPA 1/2/3) never transplants a town in one push: each
+  // stage force-stops the game and re-pulls mGameInfo.xml first, so every edit
+  // lands on a save the game has already accepted. Every banned save on file
+  // is the opposite shape — a whole city pushed onto an account that had never
+  // finished a tutorial or synced once.
+  assert.ok(
+    /onCopy:\s*\(k:\s*"decor"\s*\|\s*"stage1"\s*\|\s*"stage2"\s*\|\s*"stage3"\)/.test(tab),
+    "the copy section must expose three staged pushes, not a single full-city button",
+  );
+  assert.ok(
+    !tab.includes('onCopy("city")'),
+    "the one-shot complete-city path must be gone",
+  );
+
+  // The stages are the three restore modes, in the reference tool's order:
+  // stats first, the town second, the advanced blocks last.
+  assert.ok(
+    /kind === "stage1"\s*\?\s*"inicial"\s*:\s*kind === "stage2"\s*\?\s*"completo"\s*:\s*"novo"/.test(tab),
+    "stage 1/2/3 must map to inicial/completo/novo",
+  );
+
+  // A stage only counts as done once its own push succeeded, so a refused or
+  // failed Save & push can never unlock the next one.
+  assert.ok(
+    /const unbanStage = pendingUnban === "inicial" \? 1 : pendingUnban === "completo" \? 2 : pendingUnban === "novo" \? 3 : 0;/.test(
+      tab,
+    ),
+    "the stage is derived from the mode that was actually queued",
+  );
+  assert.ok(
+    (tab.match(/if \(unbanStage\) setCopyStage\(/g) ?? []).length >= 2,
+    "both push paths must advance the stage, and only after the push returns",
+  );
+  assert.ok(
+    !/setCopyStage\(1\)|setCopyStage\(2\)|setCopyStage\(3\)/.test(tab),
+    "the stage must never be advanced at queue time — only pushed",
+  );
+
+  // Each stage stays locked until the one before it has been pushed, and a new
+  // donor starts the wizard over.
+  assert.ok(
+    /disabled=\{busy \|\| stage >= 1\}/.test(tab) &&
+      /disabled=\{busy \|\| stage !== 1\}/.test(tab) &&
+      /disabled=\{busy \|\| stage !== 2\}/.test(tab),
+    "the three stage buttons must be gated on the stage that was actually pushed",
+  );
+  assert.ok(
+    /setCopyStage\(0\)/.test(tab),
+    "fetching a new donor must restart the wizard",
+  );
+
+  // The between-stage instructions are the part the reference tool states
+  // outright ("Abra o jogo, complete o tutorial e libere o zoológico antes da
+  // etapa 3"), so both halves of the dictionary carry them.
+  for (const key of [
+    "copyStageLead",
+    "copyStage1",
+    "copyStage2",
+    "copyStage3",
+    "copyStageHint1",
+    "copyStageHint2",
+    "copyStageDone",
+    "copyStageNext",
+    "copyStageQueued",
+  ]) {
+    assert.ok(
+      new RegExp(`^  ${key}:`, "m").test(dict),
+      `${key} must be translated`,
+    );
+  }
+});

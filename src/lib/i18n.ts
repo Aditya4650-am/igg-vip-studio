@@ -336,6 +336,18 @@ const vi = {
   copyDecorQueued: "Đã chọn Sao chép trang trí + bố cục - bấm Lưu & đẩy để áp dụng",
   copyCity: "Toàn bộ thành phố",
   copyCityQueued: "Đã chọn Sao chép toàn bộ thành phố - bấm Lưu & đẩy để áp dụng",
+  copyStageLead:
+    "Copy thành 3 lần đẩy riêng biệt, mở game giữa các lần - đúng thứ tự tool tham khảo vẫn dùng.",
+  copyStage1: "1 · Chỉ số cơ bản",
+  copyStage2: "2 · Thành phố + zoo",
+  copyStage3: "3 · Nâng cao",
+  copyStageHint1:
+    "Bước 1 đã áp dụng. Mở game lên, chơi hết tutorial, đạt tối thiểu cấp 3 và mở khóa sở thú, để game tải xong rồi quay lại bấm bước 2.",
+  copyStageHint2:
+    "Bước 2 đã áp dụng. Mở game lần nữa và để game tải hoàn toàn, rồi quay lại bấm bước 3.",
+  copyStageDone: "Đã copy xong cả 3 bước.",
+  copyStageNext: "Bước {n} là bước kế tiếp.",
+  copyStageQueued: "Đã chọn bước {n} - bấm Lưu & đẩy để áp dụng",
   regattaHint:
     "Thêm task regatta đã hoàn thành vào save. Chỉ chạy khi save đang trong một regatta đang mở và đã có task thật để làm mẫu; nếu chưa có thì tool từ chối thay vì báo thành công mà game bỏ qua.",
   regattaState: "Trạng thái save",
@@ -680,6 +692,18 @@ const en: typeof vi = {
   copyDecorQueued: "Decoration + town copy queued - press Save & push to apply",
   copyCity: "Complete city",
   copyCityQueued: "Complete city copy queued - press Save & push to apply",
+  copyStageLead:
+    "Copied as 3 separate pushes with the game opened in between - the same order the reference tool uses.",
+  copyStage1: "1 · Basic stats",
+  copyStage2: "2 · Town + zoo",
+  copyStage3: "3 · Advanced blocks",
+  copyStageHint1:
+    "Step 1 is applied. Open the game, play the whole tutorial, reach at least level 3 and unlock the zoo, let it finish loading, then come back for step 2.",
+  copyStageHint2:
+    "Step 2 is applied. Open the game once more and let it load fully, then come back for step 3.",
+  copyStageDone: "All 3 steps are copied.",
+  copyStageNext: "Step {n} is next.",
+  copyStageQueued: "Step {n} queued - press Save & push to apply",
   regattaHint:
     "Adds completed regatta tasks to your save. It only runs when the save is in a live regatta and already holds a real task to copy from; otherwise it refuses instead of reporting a success the game would ignore.",
   regattaState: "Save status",

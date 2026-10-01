@@ -1874,6 +1874,89 @@ has just been sent safely. That is not a mechanism for why Playrix acted, and
 no tool can promise 100% protection: read a green gate as "nothing provably
 wrong", never as "cannot be banned".
 
+### The copy is staged now, because none of the reference tools talk to Playrix (2026-10-02)
+
+Five archives were opened looking for co-op logic that explains the ban:
+`TWN-1.zip`, `TS_Vip_v119.apk`, `TOOL_mh_tool_V5.5.rar`,
+`TOOL_DECODE_mh_toolz.v5.5.rar` and `IGG-VIP-Tool-complete.zip`. **The result
+is a negative, and it is worth having on file so the search is not repeated:**
+
+- **Zero Playrix API anywhere.** No `township.playrix.com`, no `FetchCity`
+  (except our own `fetch_city.py`), no `SaveCity`, no upload call in any of
+  them. Every one is a save editor over ADB, exactly like this repo. There is
+  no co-op feature in any of them to copy — TWN's own feature list is desban,
+  clone decor, unlock avatars/profile/skins/stickers/vehicle-skins, regatta,
+  barn, season pass.
+- `TOOL_DECODE_*.rar` is encrypted (15 common passwords tried, none); the
+  mh_tool payload is obfuscated; TS_Vip's real dex is packed under
+  `assets/2E15F5…` with the same `images.dat` fresh-profile TS Lite ships.
+  None of the three is readable, but none of their *headers* mentions Playrix.
+
+**`IGG-VIP-Tool-complete.zip` is this repository at an earlier commit**, not an
+independent tool: same `src/lib/{auth,app-data,multiplayer,og,server}` tree,
+same `township/` file names, same Vietnamese error strings
+(`FetchCity friend trước khi Unban`). Its `src` and `scripts` files all exist
+here, and every township file is smaller than ours. Two places it is an
+**anti-reference** rather than a source — do not copy them back:
+
+- its `NOVO_BLOCKS` still contains **`DataStoreCollection`**, the one proven
+  instant-ban vector (38 `cityId`, 58 `mainPlayer`, 161 `saveId` on a real
+  FetchCity response);
+- its `INICIAL_VARS` still carries the eight lifetime vars
+  (`gameStartDate`, `FirstAttemptM3Levels`, `RegataTasksCompleted`,
+  `LivesSent`, `FullCardCollections`, `Achievement_Teamwork`,
+  `Achievement_BuiltHouses`, `Achievement_CompleteMatch3Levels`) that were
+  later moved into `TOWN_HISTORY_VARS`, and it has no `maxResidents`.
+
+Its tutorial logic is where this repo already agrees and has since gone
+further: `TUTORIAL_DONE` / `TUTORIAL_OFF` / `STATE_SUFFIXES` are **byte-identical
+(82 / 17 / 3)**, and the forced state list went 23 → 60 behind
+`setTutorialFlag`, which keeps each element's own encoding (`v` vs `value`,
+`t="i"`) instead of assuming one. Both write `"18"` for a finished state
+machine — `done18` is the *intent name*, never the value, and real saves hold
+`18`: measured across all nine `mGameInfo.current-*.xml`, `v="done18"` occurs
+**0 times**. Its `Client/` is an Electron shell; ours is `igg_client.py`. Both
+push **plain XML** (the v1.15 plaintext workflow), so the push format is not a
+difference either.
+
+**What TWN does differently, and what it cost us:** its Desban is a three-stage
+wizard whose own docstrings say *ETAPA 2: re-puxa mGameInfo.xml … Deve ser
+usado SOMENTE após completar o tutorial e desbloquear o zoológico*, and whose
+step-2 message reads *"Aplicado! Abra o jogo, complete o tutorial e libere o
+zoológico antes da etapa 3."* — stats first, then the account plays to level 3
+and unlocks the zoo, then the town, then the advanced blocks, **re-pulling the
+device save between each**. Ours pushed the whole city in one go onto an
+account that could be five minutes old with `DaysEnteredGame 0`, and that is
+the shape every banned save on file has (see *Does Playrix actually have your
+city?* above — on all four banned accounts the copy never reached Playrix).
+
+**The mechanics were already there; only the wizard was missing.** `save()` in
+`studio-app.tsx` already force-stops the game, waits, re-pulls `mGameInfo.xml`
+and `refreshOwn`s it before applying `completo` / `novo` — that *is*
+`re-puxa mGameInfo.xml`. What changed is that step 4 of the Unban tab no longer
+offers a one-shot `onCopy("city")`:
+
+- `copyStage` (0..3) gates three buttons, mapping `stage1/2/3 ->
+  inicial/completo/novo`;
+- a stage advances **only inside `save()` after its own push returned**, so a
+  refused or failed Save & push can never unlock the next one;
+- FetchCity resets it to 0 — the stages belong to the donor just fetched;
+- between stages the tab prints the reference tool's own precondition (play the
+  tutorial to level 3, open the zoo; then open the game again and let it load).
+
+Step 3's three restore buttons are untouched and still do a one-shot restore —
+the staging is the *copy* path, not a new gate over an existing feature.
+
+Guard rail: `ui-regressions.test.mts` →
+`the copy is staged like the reference tool: one push per stage, in order`
+pins the one-shot path's removal, the mode mapping, the stage advancing only
+after a push (never at queue time), the three button locks, the reset on
+FetchCity, and both dictionaries carrying every stage string.
+
+**Honest limit, unchanged.** Nothing here proves staging avoids a ban: it
+matches the protocol of a tool that has no co-op feature either, and a green
+gate means "nothing provably wrong", never "cannot be banned".
+
 ### Co-op chat: the ban tracked the *account*, not the file (2026-10-02)
 
 Reported with the sticker half already fixed: *"when i msg in coop chat i got not

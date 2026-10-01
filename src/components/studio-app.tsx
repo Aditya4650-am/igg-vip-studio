@@ -1304,6 +1304,15 @@ export function StudioApp() {
   const [pendingDecorFragments, setPendingDecorFragments] = useState(false);
   const [pendingDecorClone, setPendingDecorClone] = useState(false);
   const [pendingTownClone, setPendingTownClone] = useState(false);
+  // Which of the three copy stages has actually been pushed. The reference
+  // tool does not transplant a city in one go: stage 1 lands the stats, the
+  // account then plays the tutorial to level 3 and unlocks the zoo, and only
+  // stage 2/3 — each of which force-stops the game and re-pulls
+  // mGameInfo.xml first — put the town and the advanced blocks on top.
+  // Every banned save on file is the opposite shape: a whole city pushed onto
+  // an account that had never finished a tutorial or synced once. So the next
+  // stage stays locked until the one before it has been applied.
+  const [copyStage, setCopyStage] = useState(0);
   // Fresh-start ("New Account") phase machine. Fully isolated: nothing from
   // other tabs' state is read or written here.
   const [freshPhase, setFreshPhase] = useState<"idle" | "backedup" | "verified">("idle");
@@ -1711,6 +1720,9 @@ export function StudioApp() {
     if (!token || !session) return;
     setBusy(true);
     try {
+      // The stage only advances once its push has actually succeeded, so a
+      // refused or failed Save & push never unlocks the next one.
+      const unbanStage = pendingUnban === "inicial" ? 1 : pendingUnban === "completo" ? 2 : pendingUnban === "novo" ? 3 : 0;
       const qty = parseQty();
       const itemIds = Object.values(itemSel.asRecord()).flat();
       const changedCards: Record<string, number> = {};
@@ -1809,6 +1821,7 @@ export function StudioApp() {
           },
         });
         applySnap(r, catalogs?.profile);
+        if (unbanStage) setCopyStage((c) => Math.max(c, unbanStage));
         if (r.fileB64) {
           const native = nativeBridge();
           if (native && device) {
@@ -1888,6 +1901,7 @@ export function StudioApp() {
       upgradeIslandSel.clear();
       setPendingRegatta(false);
       setPendingSeason(false);
+      if (unbanStage) setCopyStage((c) => Math.max(c, unbanStage));
       setPendingUnban(null);
       setPendingDecorFragments(false);
       setPendingDecorClone(false);
@@ -3804,6 +3818,7 @@ export function StudioApp() {
                     friendSel={friendSel}
                     setFriendSel={setFriendSel}
                     busy={busy}
+                    copyStage={copyStage}
                     onRefresh={async () => {
                       if (!token || !session || !device) return;
                       setBusy(true);
@@ -3833,6 +3848,9 @@ export function StudioApp() {
                           /* silent — fallback versions will be used */
                         }
                         applySnap(await fetchCity({ data: { token, sessionId: session.sessionId, cityId } }), catalogs?.profile);
+                        // A new donor means a fresh wizard: the stages belong
+                        // to the city that was just fetched, not to the last one.
+                        setCopyStage(0);
                         toast.success(tr("fetchCity"));
                       } catch (e) {
                         toast.error(e instanceof Error ? e.message : tr("actionFailed"));
@@ -3845,10 +3863,17 @@ export function StudioApp() {
                         setPendingTownClone(true);
                         setPendingDecorClone(true);
                         toast.success(tr("copyDecorQueued"));
-                      } else {
-                        setPendingUnban("novo");
-                        toast.success(tr("copyCityQueued"));
+                        return;
                       }
+                      // Staged like the reference tool: stats first, the town
+                      // second, the advanced blocks last — one push each, with
+                      // the game opened and the save re-pulled in between.
+                      const mode: UnbanMode =
+                        kind === "stage1" ? "inicial" : kind === "stage2" ? "completo" : "novo";
+                      setPendingUnban(mode);
+                      toast.success(
+                        tr("copyStageQueued").replace("{n}", String(mode === "inicial" ? 1 : mode === "completo" ? 2 : 3)),
+                      );
                     }}
                     onRestore={(mode) => {
                       setPendingUnban(mode);
@@ -3976,6 +4001,7 @@ function Unban({
   onFetch,
   onRestore,
   onCopy,
+  copyStage,
 }: {
   tr: (k: keyof Dict) => string;
   session: SessionSnap;
@@ -3987,8 +4013,12 @@ function Unban({
   onRefresh: () => void;
   onFetch: () => void;
   onRestore: (m: UnbanMode) => void;
-  onCopy: (k: "decor" | "city") => void;
+  onCopy: (k: "decor" | "stage1" | "stage2" | "stage3") => void;
+  copyStage: number;
 }) {
+  // The reference tool locks each stage behind the one before it; a stage
+  // only counts as done once its own Save & push actually succeeded.
+  const stage = Math.min(3, copyStage);
   return (
     <div className="stagger-in space-y-3">
       <p className="text-sm text-muted">{tr("unbanIntro")}</p>
@@ -4110,24 +4140,55 @@ function Unban({
           {!session.friendCity ? (
             <p className="mt-3 text-xs text-warning">{tr("copyNeedFetch")}</p>
           ) : (
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={busy}
-                onClick={() => onCopy("decor")}
-              >
-                {tr("copyDecor")}
-              </Button>
-              <Button
-                size="sm"
-                variant="warn"
-                disabled={busy}
-                onClick={() => onCopy("city")}
-              >
-                {tr("copyCity")}
-              </Button>
-            </div>
+            <>
+              <p className="mt-3 text-xs text-muted">{tr("copyStageLead")}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="success"
+                  disabled={busy || stage >= 1}
+                  onClick={() => onCopy("stage1")}
+                >
+                  {tr("copyStage1")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="warn"
+                  disabled={busy || stage !== 1}
+                  onClick={() => onCopy("stage2")}
+                >
+                  {tr("copyStage2")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  disabled={busy || stage !== 2}
+                  onClick={() => onCopy("stage3")}
+                >
+                  {tr("copyStage3")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => onCopy("decor")}
+                >
+                  {tr("copyDecor")}
+                </Button>
+              </div>
+              {stage === 1 ? (
+                <p className="mt-2 text-xs text-muted">{tr("copyStageHint1")}</p>
+              ) : stage === 2 ? (
+                <p className="mt-2 text-xs text-muted">{tr("copyStageHint2")}</p>
+              ) : stage >= 3 ? (
+                <p className="mt-2 text-xs text-primary">{tr("copyStageDone")}</p>
+              ) : null}
+              {stage < 3 ? (
+                <p className="mt-1 text-xs text-muted">
+                  {tr("copyStageNext").replace("{n}", String(stage + 1))}
+                </p>
+              ) : null}
+            </>
           )}
           <p className="mt-2 text-xs text-muted">{tr("decorApplyHint")}</p>
         </div>
