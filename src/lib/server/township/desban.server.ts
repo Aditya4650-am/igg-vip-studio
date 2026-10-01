@@ -1220,27 +1220,23 @@ export function cloneDecorOnly(ownXml: string, friendXml: string) {
     own = r.xml;
     if (r.action !== "missing_src") blocks.push(`${tag}:${r.action}`);
   }
-  // The sticker set. Two branches, and both are what the build that made the
-  // still-running clean copy did (`954002e`); `339a45f` deleted them.
+  // The sticker set, and the one place a copy must NOT take the donor's.
   //
-  // Taking the donor's list when they have one is the ordinary copy. When they
-  // have none we install our own catalog instead — and that is not a
-  // hedge, it is **measured**: `mGameInfo.current-7.xml`, a straight FetchCity
-  // download of the copy that has been clean since 2026-10-01 and is served by
-  // Playrix today, holds `UnlockedChatEmoji` equal to `CHAT_EMOJI_IDS` exactly,
-  // same 112 ids in the same order, which only `unlockEmoji()` produces. Every
-  // banned save on file has no sticker var at all.
+  // Reported precisely: typing in co-op chat is fine, **sending a sticker that
+  // came with the copied town bans**. The live device says why — the account
+  // that has been clean and that just sent stickers without a ban holds
+  // `UnlockedChatEmoji` equal to `CHAT_EMOJI_IDS`, all 112 ids in catalog
+  // order, i.e. `unlockEmoji()`'s output on a save that had no list of its
+  // own. That is the state to reproduce.
   //
-  // A save whose donor carries no list used to fall into the `else` too, so the
-  // full-catalog branch is the one that wrote the city that works.
-  const em = readVarLoose(fr, "UnlockedChatEmoji");
-  if (em != null) {
-    own = writeVar(own, "UnlockedChatEmoji", scrub(em));
-    vars.push("UnlockedChatEmoji");
-  } else {
-    own = unlockEmoji(own);
-    vars.push("UnlockedChatEmoji:full");
-  }
+  // The two-branch rule that used to live here wrote the donor's list whenever
+  // they had one, and replaying it against the corpus shows it leaving the safe
+  // state every time: `fc_big` (107 ids) cost six real stickers and added
+  // `desc`; `save9` (2 ids) cost 110. So the donor's list is never read — we
+  // union our own ids with the catalog, which can only add and is a
+  // byte-identical no-op on the safe set.
+  own = unlockEmoji(own);
+  vars.push("UnlockedChatEmoji:catalog");
   for (const m of fr.matchAll(/<Var\s+name="((?:skin_|Skin_|decor_|Decor_)[^"]+)"\s+v="([^"]*)"/gi)) {
     own = writeVar(own, m[1]!, scrub(m[2]!));
     vars.push(m[1]!);
@@ -1338,17 +1334,21 @@ export function isTownUnchanged(e: unknown): boolean {
  * - `UnlockedBadges` / `UnlockedExpRanks` / `UnlockedFrames` /
  *   `UnlockedStyles` — the four lists TWN's `_clone_dataelem` loops, inserted
  *   inside `<Configs>`; see `copyProfileLists`.
- * - `UnlockedChatEmoji` — the sticker set. **TWN does not copy this and we
- *   do**, which is the one place the live city outvotes the reference tool:
- *   `mGameInfo.current-7.xml`, a FetchCity download of the copy that has been
- *   running clean since 2026-10-01 and that Playrix serves today, holds this
- *   var equal to `CHAT_EMOJI_IDS` exactly — same 112 ids, same order, which
- *   only `unlockEmoji()` writes — while every banned save on file has no
- *   sticker var at all. Reproducing the city that works beats matching a tool
- *   that ships a proven ban vector (see `DataStoreCollection` below).
+ * - `UnlockedChatEmoji` — the sticker set, and the one field where the right
+ *   move is to **not** take the donor's. The restore never reads their list; it
+ *   runs `unlockEmoji()`, which unions this account's own ids with
+ *   `CHAT_EMOJI_IDS`. The live device settles why: the city that has been
+ *   running clean and that just sent stickers in co-op chat *without* a ban
+ *   holds exactly `CHAT_EMOJI_IDS` — 112 ids, catalog order — while replaying
+ *   the old "take the donor's" rule against the corpus replaces that working
+ *   set with the friend's (`fc_big` cost six real stickers and gained `desc`;
+ *   `save9` cost 110). Sending a **copied town's** sticker is the reported ban;
+ *   sending a catalog sticker is the observed clean case.
  *
  * and deliberately does **not** take:
  *
+ * - the donor's `UnlockedChatEmoji` list — see above. A copy never replaces
+ *   this account's sticker set with somebody else's, whatever mode runs.
  * - `UnlockedThemes`, the `New*` markers and any `BadgeFrameIncident*` flag —
  *   TWN does not copy those either; they arrive only when `PlayerProfile` /
  *   `Configs` are replaced wholesale.
@@ -1417,19 +1417,32 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
     // here, never by `inicial`, because they are the row the copied town is
     // displayed under and `inicial` copies no town.
     //
-    // The sticker set joins them, and it is the one field where the evidence is
-    // a **live city rather than a theory**. `mGameInfo.current-7.xml` is a
-    // straight FetchCity download of the copy that has been running clean since
-    // 2026-10-01: Playrix is serving it right now with `UnlockedChatEmoji`
-    // equal to `CHAT_EMOJI_IDS` — same 112 ids, same order — i.e. our own
-    // catalog, plus 8 badges / 10 frames / 4 styles and a `gameStartDate` of
-    // 2018-03-22. The four banned saves carry **none** of it: no sticker var at
-    // all, 0/0/0. `954002e`, the build that produced the clean copy, copied
-    // this line; `339a45f` removed it. Restoring it reproduces the one shape
-    // that is demonstrably still accepted.
+    // The sticker set, and it is the one field where "take the donor's" is
+    // provably the wrong direction.
+    //
+    // The user reported the split precisely: *typing* in co-op chat is fine,
+    // **sending a sticker that came with the copied town bans**. Measured on
+    // the live device (`adb pull` + `decodeContainer` + `postProcessDecrypt`),
+    // the account that has been running clean and that just sent stickers
+    // without a ban holds `UnlockedChatEmoji` equal to `CHAT_EMOJI_IDS` — all
+    // 112 ids, in catalog order. So the proven-safe state is *our own* set.
+    //
+    // Replaying this exact restore against the corpus shows the old rule
+    // leaving that state every time the friend has a list of their own:
+    //
+    //   donor `fc_big` (107 ids) -> we wrote 107, gained `desc` (an id our
+    //   catalog has never seen) and LOST six real stickers
+    //   (`st20 st21 st33 sp3 sp28 sp29`);
+    //   donor `save9` (2 ids)   -> we wrote 2, dropping 110;
+    //   donor with no list      -> unchanged, the safe 112.
+    //
+    // That is a *replacement* of a working set with somebody else's, and the
+    // ids being sent afterwards are the friend's — exactly the reported case.
+    // So the restore never reads the donor's list: it unions our own ids with
+    // the catalog. That can only add, never remove, and for an account already
+    // holding the safe set it is a byte-identical no-op.
     own = cloneAvatarUnion(fr, own, scrub);
-    const emoji = readVarLoose(fr, "UnlockedChatEmoji");
-    if (emoji != null) own = writeVar(own, "UnlockedChatEmoji", scrub(emoji));
+    own = unlockEmoji(own);
     for (const name of PROFILE_APPEARANCE_VARS) {
       const val = readVarLoose(fr, name);
       if (val != null) own = writeVar(own, name, scrub(val));

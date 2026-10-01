@@ -1929,15 +1929,19 @@ test("copy: the city follows the friend on every mode; its account history follo
 test("copy: the restore takes the town and the profile row it is shown under, never the co-op", () => {
   // Two halves, and they are decided by different evidence.
   //
-  // **Stickers, badges, frames, styles and pictures are copied.** The proof is
-  // not a theory: `mGameInfo.current-7.xml` is a FetchCity download of the copy
-  // that has been running clean since 2026-10-01, and Playrix serves it today
-  // with `UnlockedChatEmoji` equal to `CHAT_EMOJI_IDS` exactly — same 112 ids
-  // in the same order, which only `unlockEmoji()` writes — plus 8 badges, 10
-  // frames, 4 styles and a `gameStartDate` of 2018-03-22. Every banned save on
-  // file has no sticker var at all and 0/0/0. `954002e` copied these and
-  // `339a45f` removed them; this puts back the shape that is demonstrably
-  // still accepted.
+  // **Badges, frames, styles, pictures and avatars are copied** — the row the
+  // copied town is displayed under. `mGameInfo.current-7.xml`, the FetchCity
+  // download of the copy that has been running clean, carries 8 badges, 10
+  // frames, 4 styles and a `gameStartDate` of 2018-03-22.
+  //
+  // **Stickers are the exception and run the other way.** The reported split is
+  // exact — typing in co-op chat is fine, *sending a sticker that came with the
+  // copied town* bans — and the live device says why: the account that has been
+  // clean and that just sent stickers without a ban holds `UnlockedChatEmoji`
+  // equal to `CHAT_EMOJI_IDS`, 112 ids in catalog order. So a copy guarantees
+  // the catalog on top of ours and never reads the friend's list; taking theirs
+  // used to cost six real stickers against `fc_big` (and add `desc`) and 110
+  // against `save9`.
   //
   // **The co-op is never copied, in any mode.** Which team this file claims to
   // be in is part of whose file it is, so a copy that took the donor's clan
@@ -1963,17 +1967,31 @@ test("copy: the restore takes the town and the profile row it is shown under, ne
   const assertAvas = (xml: string, label: string, want: number[]) =>
     assert.deepEqual(avaIds(xml), want, `${label}: avatar union — own kept, donor's added, never replaced`);
 
+  // The sticker rule under test: a copy **never** takes the donor's list. It
+  // unions this save's own ids with `CHAT_EMOJI_IDS`, first occurrence winning
+  // — which is exactly what `unlockEmoji()` writes.
+  const DONOR_STICKERS = ["st79", "st34", "st35"];
+  const DONOR_LIST = "," + DONOR_STICKERS.join(",,") + ",";
+  const OWN_STICKERS = ["st1", "st2"];
+  const union = (existing: string[]) => {
+    const set = new Set(existing);
+    return "," + [...existing, ...CHAT_EMOJI_IDS.filter((x) => !set.has(x))].join(",,") + ",";
+  };
+  const idsOf = (v: string | null) => (v ?? "").split(",").filter(Boolean);
+
   for (const mode of ["inicial", "completo", "novo"] as const) {
     const snap = townSession(CHAT_OWN);
     studio.attachFriendXml(token, snap.sessionId, CHAT_DONOR);
     const xml = studio.applySave({ token, sessionId: snap.sessionId, unbanMode: mode }).xml!;
 
-    // `inicial` writes no profile at all, so it keeps the stickers it had;
-    // the two town modes take the donor's list — exactly what `954002e` did.
+    // `inicial` writes no profile at all, so it keeps the two stickers it had.
+    // The two town modes guarantee the catalog on top of ours — and must not
+    // take the friend's: their list starts `st79`, ours starts `st1`, and the
+    // donor's order appearing first is exactly the reported defect.
     assert.equal(
       read(xml, "UnlockedChatEmoji"),
-      mode === "inicial" ? ",st1,,st2," : ",st79,,st34,,st35,",
-      `${mode}: the town modes take the donor's stickers, inicial takes none`,
+      mode === "inicial" ? ",st1,,st2," : union(OWN_STICKERS),
+      `${mode}: a copy never replaces our sticker set with the friend's`,
     );
     assertClan(xml, mode, "CLANOWN");
     assertAvas(xml, mode, mode === "inicial" ? OWN_AVAS : UNION_AVAS);
@@ -1984,8 +2002,8 @@ test("copy: the restore takes the town and the profile row it is shown under, ne
   }
 
   // A save that never tracked a sticker list keeps none in `inicial`; the town
-  // modes gain the donor's, because that is what a restore that takes the
-  // profile row does.
+  // modes gain the full catalog — which is the set the clean city actually
+  // carries — rather than the friend's.
   const bare = CHAT_OWN.replace(/<Var name="UnlockedChatEmoji"[^>]*\/>/, "");
   assert.equal(read(bare, "UnlockedChatEmoji"), null, "the fixture must have no sticker list");
   for (const mode of ["inicial", "completo", "novo"] as const) {
@@ -1994,32 +2012,34 @@ test("copy: the restore takes the town and the profile row it is shown under, ne
     const xml = studio.applySave({ token, sessionId: snap.sessionId, unbanMode: mode }).xml!;
     assert.equal(
       read(xml, "UnlockedChatEmoji"),
-      mode === "inicial" ? null : ",st79,,st34,,st35,",
-      `${mode}: a save with no stickers gains them only where a profile is copied`,
+      mode === "inicial" ? null : union([]),
+      `${mode}: a save with no stickers gains the catalog only where a profile is copied`,
     );
     assertClan(xml, mode, "CLANOWN");
     assertAvas(xml, `${mode} (bare)`, mode === "inicial" ? OWN_AVAS : UNION_AVAS);
   }
 
   // The decor/town clone runs inside the very same "Save & push 3" batch as a
-  // full restore, so it carries the sticker set too: the donor's list when they
-  // have one, our own catalog when they do not.
+  // full restore, so it follows the same rule: the catalog unioned onto ours,
+  // **never the donor's list** — whichever of the two carries a list.
   //
-  // The second branch is the one that produced the city still running clean. A
-  // save with no list of its own plus a donor with none yields
-  // `CHAT_EMOJI_IDS` **byte for byte** — same ids, same order — and that is
-  // precisely what `mGameInfo.current-7.xml`, the FetchCity download of your
-  // unbanned copy, holds. `339a45f` removed this branch and every save it made
-  // afterwards has no sticker var at all.
+  // A save with no list of its own plus any donor yields `CHAT_EMOJI_IDS`
+  // byte for byte, same ids and same order, and that is precisely what your
+  // live device holds (`mGameInfo.current-7.xml` too) — the state that has
+  // been sending stickers in co-op chat without a ban.
   const donorNoEmoji = CHAT_DONOR.replace(/<Var name="UnlockedChatEmoji"[^>]*\/>/, "");
-  const DONOR_LIST = ",st79,,st34,,st35,";
-  const ownIds = (read(CHAT_OWN, "UnlockedChatEmoji") ?? "").split(",").filter(Boolean);
+  const ownIds = idsOf(read(CHAT_OWN, "UnlockedChatEmoji"));
 
   const withDonor = cloneDecorOnly(CHAT_OWN, CHAT_DONOR);
   assert.equal(
     read(withDonor.xml, "UnlockedChatEmoji"),
+    union(OWN_STICKERS),
+    "decor clone: a friend who HAS stickers still does not overwrite ours",
+  );
+  assert.notEqual(
+    read(withDonor.xml, "UnlockedChatEmoji"),
     DONOR_LIST,
-    "decor clone: takes the donor's list when they have one",
+    "decor clone: the donor's list must never come out as the result",
   );
   assertClan(withDonor.xml, "decor clone (donor has a list)", "CLANOWN");
   assertAvas(withDonor.xml, "decor clone (donor has a list)", OWN_AVAS);
@@ -2037,12 +2057,12 @@ test("copy: the restore takes the town and the profile row it is shown under, ne
   assertAvas(withBareDonor.xml, "decor clone (donor has none)", OWN_AVAS);
   balanced(withBareDonor.xml);
 
-  // THE reference shape. No list of our own, donor with none: this has to come
-  // out identical to `mGameInfo.current-7.xml`, id for id and in order.
+  // THE reference shape. No list of our own, and it must come out identical to
+  // `mGameInfo.current-7.xml` / the live device — id for id and in order.
   const refShape = cloneDecorOnly(bare, donorNoEmoji);
   assert.equal(
     read(refShape.xml, "UnlockedChatEmoji"),
-    "," + CHAT_EMOJI_IDS.join(",,") + ",",
+    union([]),
     "the clean city's sticker list is reproduced byte for byte",
   );
   assertClan(refShape.xml, "decor clone (bare + donor none)", "CLANOWN");
@@ -2050,11 +2070,16 @@ test("copy: the restore takes the town and the profile row it is shown under, ne
   balanced(refShape.xml);
   assert.deepEqual(saveShapeProblems(refShape.xml), [], "the reference shape passes every shape rule");
 
-  // A donor that carries a list still writes it over a save that had none.
+  // ...and a friend who *does* carry a list still does not change that answer.
   assert.equal(
     read(cloneDecorOnly(bare, CHAT_DONOR).xml, "UnlockedChatEmoji"),
+    union([]),
+    "decor clone (bare + donor has one): the catalog lands, not the donor's list",
+  );
+  assert.notEqual(
+    read(cloneDecorOnly(bare, CHAT_DONOR).xml, "UnlockedChatEmoji"),
     DONOR_LIST,
-    "decor clone (bare + donor has one): the donor's list lands",
+    "decor clone: a donor's list is never installed, even over an empty save",
   );
 });
 

@@ -1750,11 +1750,14 @@ Two rows are not merely "different":
 **What changed as a result** — both directions of `339a45f`'s removal are
 reinstated, with one deliberate exception:
 
-- `applyDesban`'s `completo` / `novo` writes `UnlockedChatEmoji` again when the
-  donor has a list — the line `954002e` had;
-- `cloneDecorOnly` regains **both** branches: the donor's list when they carry
-  one, `unlockEmoji(own)` (the full catalog) when they do not. **The second
-  branch is the one that produced the city above.**
+- `applyDesban`'s `completo` / `novo` writes `UnlockedChatEmoji` again — but
+  **superseded same day**: it no longer reads the donor's list. Both paths now
+  run `unlockEmoji(own)` only, because taking the friend's list turned out to
+  be what a *copied-town* sticker send exercised. See *Stickers: a copy never
+  takes the friend's list* below;
+- `cloneDecorOnly` likewise collapsed to that one rule — `unlockEmoji(own)`
+  whatever the donor carries. Its `else` branch is the one that produced the
+  city above, and it is now the only branch.
 - avatars (`cloneAvatarUnion` — a union, never a replacement) and the four
   `Configs` lists (`copyProfileLists`) came back with them;
 - `PROFILE_APPEARANCE_VARS` (`MyBadge` / `MyPicture` / `MyTheme` / `MyFrame` /
@@ -1780,9 +1783,10 @@ removal bought nothing and is reversed.
 
 Guard rails, both in `studio-pipeline.test.ts`:
 `copy: the restore takes the town and the profile row it is shown under, never
-the co-op` pins the mode split for stickers, the avatar union, the co-op's
-invariance in every mode, and **the reference shape** —
-`cloneDecorOnly(bare, donorWithoutStickers)` must equal
+the co-op` pins the mode split for stickers — `inicial` keeps ours, the two
+town modes guarantee the catalog **on top of** ours and never the donor's —
+plus the avatar union, the co-op's invariance in every mode, and **the
+reference shape**: a save with no list of its own must come out equal to
 `"," + CHAT_EMOJI_IDS.join(",,") + ","`, so trimming `CHAT_EMOJI_IDS` or
 deleting this write again fails the suite rather than an account.
 `copy: a full restore takes the town and exactly the reference tool's four
@@ -1799,6 +1803,76 @@ well-delimited known-id sticker list on all 48, and **15 reproducing
 **Honest limit, unchanged.** Nothing here proves a copy cannot be banned:
 `current-7` shows one save Playrix serves, not the rule Playrix enforces. Read
 a green gate as "nothing provably wrong", never as "cannot be banned".
+
+### Stickers: a copy never takes the friend's list (2026-10-02)
+
+Reported with the split stated exactly: *"when i msg in coop chat i got not
+ban, only when i send a already collected copy town stickers in coop chat then
+i got ban only"* — and, separately, that yesterday's account **did** send
+stickers in co-op with no ban. So sending a sticker is not inherently the
+trigger; *whose* sticker is.
+
+**The answer came off the device, not from a theory.** A device was connected,
+so the save was pulled (`/data/data/com.playrix.township/saves/mGameInfo.xml`,
+300,008 B, first byte `0x79`) and read with the real pipeline. One point is
+worth having on file because it produced a false negative first:
+`decodeContainer()` alone yields 146,291 bytes that *look* like XML — readable
+`<root><Zoo><TownGround` fragments interleaved with raw bytes — and answer
+"no `cityId`, no `UnlockedChatEmoji`" to every grep. It is the **LZ4** branch:
+`decodeContainer()` then `postProcessDecrypt()` (`0x04 0x22` header), which
+gives the real 826,452 bytes. Reading only one step short would have "proved"
+the device held no sticker var.
+
+The decoded save is the known-good city: `cityId tRTNVz89bq`,
+`gameStartDate 1521676800` (2018-03-22), `DaysEnteredGame 2`, 8/10/4
+badges/frames/styles — and `UnlockedChatEmoji` = **112 ids, exactly
+`CHAT_EMOJI_IDS`, in catalog order**. That is the account used to send
+stickers in co-op just now without a ban, so *sending a catalog sticker is
+proven safe in practice*, not merely consistent with a gate.
+
+**What the old rule wrote instead.** `applyDesban` copied the donor's list
+when they had one and `cloneDecorOnly` did the same; replayed against the
+corpus:
+
+| donor | list we installed | compared with the safe 112 |
+| --- | ---: | --- |
+| `fc_big` (107 ids) | 107 | gained `desc`, **lost `st20 st21 st33 sp3 sp28 sp29`** |
+| `save9` (2 ids) | 2 | **lost 110** |
+| no sticker var | 112 | unchanged — the safe set |
+
+That is a *replacement* of a working set with somebody else's, and the ids
+being sent afterwards were the friend's — exactly the reported case. TWN's own
+`CHAT_EMOJI_VALUE` (recovered from `twn1/strings.txt:1570`) is 107 ids and is
+**set-equal to `fc_big`**, i.e. the same `desc`-carrying set — so a
+Playrix-served city and the reference tool agree on that set, and *neither* is
+the one your account has been sending from.
+
+**The fix is one rule in both paths: neither reads the donor's
+`UnlockedChatEmoji`.** They run `unlockEmoji(own)` — the account's own ids
+unioned with `CHAT_EMOJI_IDS`, first occurrence winning. It can only add, it
+never deletes an id the account holds, and on the safe set it is a
+byte-identical no-op.
+
+Measured after the change — 3 own saves × 2 donors × 3 modes = **30 runs**,
+restore and decor clone queued together as *Save & push* does:
+**0 identity refusals, 0 shape refusals, 0 sticker failures**; every town mode
+ends with the full 112-set. The only difference that ever appears is
+*ordering*, when the save already had ids of its own (they stay first — same
+set), which is `unlockEmoji`'s documented behaviour. On the live city the
+output is byte-identical to what is running now.
+
+**What this deliberately does not do.** An account that already received a
+friend's list under an older build keeps it: `unlockEmoji` adds, it does not
+sanitize, so a stale `desc` from an earlier push survives. Removing ids the
+account holds was rejected for the same reason as the avatar union — no save on
+file shows that list causing anything, and deleting state we did not measure is
+how a "fix" takes away something that worked.
+
+**Honest limit, unchanged.** A copy with this change is a save where every
+sticker id is one the game's own catalog contains, and the set is the one that
+has just been sent safely. That is not a mechanism for why Playrix acted, and
+no tool can promise 100% protection: read a green gate as "nothing provably
+wrong", never as "cannot be banned".
 
 ### Population over its own cap (2026-10-01)
 
