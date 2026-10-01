@@ -13,7 +13,7 @@ import { LANGS, isLang, t, type Lang, type Dict } from "@/lib/i18n";
 import { isDeviceId, mintDeviceId, normalizeDeviceId } from "@/lib/device-id";
 import { AVATAR_MAX, avatarEmoji, avatarGroupId, avatarIconPath, avatarsInRange, type Group, type Item } from "@/lib/catalogs";
 import { MUSEUM_IDS, artifactEmoji, artifactIconPath, museumLabel } from "@/lib/museum";
-import { CARD_GROUPS, cardIconPath, cardNumber } from "@/lib/cards";
+import { CARD_GROUPS, CARD_SEND_MAX_PER_RUN, cardIconPath, cardNumber } from "@/lib/cards";
 import { iconForBarn, iconForDecorLabel, iconForGem, iconForGroup, iconForItemLabel, iconForProfileLabel, iconForSkin, iconForStat, iconForSticker, iconForUpgradeLabel, iconForZoo } from "@/lib/game-icon-map";
 import { REGATTA_MAX_TASKS, REGATTA_DEFAULT_TASKS, regattaReason, type RegattaReason } from "@/lib/regatta";
 import {
@@ -1282,7 +1282,10 @@ export function StudioApp() {
   // against the save's own FriendsList + OwnedCards, then written into
   // lastSentCards exactly the way a real save records them.
   const [cardSends, setCardSends] = useState<{ cardId: string; toUserId: string }[]>([]);
-  const [sendCard, setSendCard] = useState("card_01");
+  // Cards ticked in the send picker. The queue itself stays one entry per
+  // (card, friend) — a card may be sent to a friend once, which is all any
+  // real save has ever shown — so this is only "which rows are lit".
+  const [sendSel, setSendSel] = useState<Set<string>>(new Set());
   const [sendFriend, setSendFriend] = useState("");
   const [openPack, setOpenPack] = useState<string | null>("pack-1");
   const [decorSel, setDecorSel] = useState<Set<string>>(new Set());
@@ -1650,6 +1653,7 @@ export function StudioApp() {
       itemSel.clear();
       setCardsQty({});
       setCardSends([]);
+      setSendSel(new Set());
       zooSel.clear();
       setDecorSel(new Set());
       setStickerSel(new Set());
@@ -1873,6 +1877,7 @@ export function StudioApp() {
       itemSel.clear();
       setCardsQty({});
       setCardSends([]);
+      setSendSel(new Set());
       zooSel.clear();
       profileSel.clear();
       setDecorSel(new Set());
@@ -1984,6 +1989,29 @@ export function StudioApp() {
   const sendFriendValue = cardFriends.some((f) => f.id === sendFriend)
     ? sendFriend
     : (cardFriends[0]?.id ?? "");
+
+  // What the ticked picker would actually add for this recipient: cards this
+  // push could send (owned now, or granted by the same Save) that are not
+  // already queued to them — one entry per (card, friend) is all any real save
+  // has ever shown, and the server enforces the same rule.
+  //
+  // `sendRoom` is how many pairs the push may still take. The server refuses a
+  // batch above CARD_SEND_MAX_PER_RUN and rolls the whole push back, so the
+  // button has to know the number before it is pressed rather than after.
+  const sendPicked = useMemo(
+    () => sendableIds.filter((id) => sendSel.has(id)),
+    [sendableIds, sendSel],
+  );
+  const queuedHere = useMemo(
+    () => new Set(cardSends.filter((s) => s.toUserId === sendFriendValue).map((s) => s.cardId)),
+    [cardSends, sendFriendValue],
+  );
+  const sendFresh = (ids: string[]) => ids.filter((id) => !queuedHere.has(id));
+  const sendRoom = CARD_SEND_MAX_PER_RUN - cardSends.length;
+  const sendPickedCount = sendFresh(sendPicked).length;
+  const sendPickedOver = sendPickedCount > sendRoom;
+  const sendAllIds = sendFresh(sendableIds).slice(0, Math.max(0, sendRoom));
+
   const queueSend = (ids: string[]) => {
     if (!sendFriendValue) return;
     setCardSends((prev) => {
@@ -3042,6 +3070,7 @@ export function StudioApp() {
                       ) : !sendableIds.length ? (
                         <p className="text-xs text-amber">{tr("sendNothing")}</p>
                       ) : (
+                        <div className="space-y-3">
                         <div className="flex flex-wrap items-end gap-2">
                           <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-muted">
                             {tr("sendFriend")}
@@ -3058,37 +3087,73 @@ export function StudioApp() {
                               ))}
                             </select>
                           </label>
-                          <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-muted">
-                            {tr("sendCard")}
-                            <select
-                              className="field"
-                              aria-label={tr("sendCard")}
-                              value={sendableIds.includes(sendCard) ? sendCard : sendableIds[0]}
-                              onChange={(e) => setSendCard(e.target.value)}
-                            >
-                              {sendableIds.map((id) => (
-                                <option key={id} value={id}>
-                                  {cardLabelOf.get(id) ?? id}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
+                        </div>
+
+                        <Bar
+                          hint={tr("sendPickHint")}
+                          onAll={() => setSendSel(new Set(sendableIds))}
+                          onClear={() => setSendSel(new Set())}
+                          allLabel={tr("selectAll")}
+                          clearLabel={tr("clear")}
+                          extra={
+                            <span className="text-xs text-muted tabular-nums">
+                              {tr("sendCard")}: {sendPicked.length}/{sendableIds.length}
+                            </span>
+                          }
+                        />
+
+                        {/* The whole sendable collection, ticked rather than
+                            chosen one dropdown at a time — 30 cards is one
+                            press, not 30. Only cards this push could actually
+                            send are offered; everything else is refused
+                            server-side anyway. */}
+                        <div className="max-h-72 overflow-y-auto pr-1">
+                          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-5">
+                            {sendableIds.map((id) => (
+                              <Chip
+                                key={id}
+                                label={cardLabelOf.get(id) ?? id}
+                                iconSrc={cardIconPath(id)}
+                                emoji="🃏"
+                                checked={sendSel.has(id)}
+                                onChange={() =>
+                                  setSendSel((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(id)) next.delete(id);
+                                    else next.add(id);
+                                    return next;
+                                  })
+                                }
+                              />
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
                           <button
                             type="button"
                             className="btn btn-primary"
-                            disabled={busy || cardsInfo?.reason !== "ok"}
-                            onClick={() => queueSend([sendableIds.includes(sendCard) ? sendCard : (sendableIds[0] ?? sendCard)])}
+                            disabled={
+                              busy || cardsInfo?.reason !== "ok" || sendPickedCount === 0 || sendPickedOver
+                            }
+                            onClick={() => queueSend(sendFresh(sendPicked))}
                           >
-                            {tr("sendAdd")}
+                            {tr("sendAdd")} ({sendPickedCount})
                           </button>
                           <button
                             type="button"
                             className="btn"
-                            disabled={busy || cardsInfo?.reason !== "ok"}
-                            onClick={() => queueSend(sendableIds)}
+                            disabled={busy || cardsInfo?.reason !== "ok" || sendAllIds.length === 0}
+                            onClick={() => queueSend(sendAllIds)}
                           >
-                            {tr("sendAddAll")} ({sendableIds.length})
+                            {tr("sendAddAll")} ({sendAllIds.length})
                           </button>
+                        </div>
+                        {sendPickedOver ? (
+                          <p className="text-xs text-amber">
+                            {tr("sendCapNote").replace("{count}", String(CARD_SEND_MAX_PER_RUN))}
+                          </p>
+                        ) : null}
                         </div>
                       )}
 

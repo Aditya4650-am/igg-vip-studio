@@ -1,3 +1,9 @@
+import { CARD_SEND_MAX_PER_RUN } from "@/lib/cards";
+
+// One ceiling, both sides: the send button counts with it and the refusal
+// below quotes it, so they cannot drift. See `cards.ts` for the rationale.
+export { CARD_SEND_MAX_PER_RUN };
+
 /**
  * Card-collections grants (`DataStoreCollection > CardCollections`).
  *
@@ -59,10 +65,11 @@ const KNOWN: ReadonlySet<string> = new Set(CARD_IDS);
  *   The counters carry the real total, exactly as real saves do.
  * - `CARD_SEND_MAX_PER_RUN`: a round batch ceiling just under the catalog, so
  *   one push is effectively a whole collection without ever inventing a number.
+ *   Defined in `@/lib/cards` and re-exported above, because the button that
+ *   has to respect it runs in the browser.
  */
 export const CARD_STOCK_MAX = 4;
 export const CARD_SEND_HISTORY_MAX = 3;
-export const CARD_SEND_MAX_PER_RUN = 150;
 
 /** Normalize `card_6`/`card_06` (any padding) to the canonical id, or null. */
 function canonical(id: string): string | null {

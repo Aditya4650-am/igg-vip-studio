@@ -37,6 +37,17 @@ const CARD_PACKS = Object.freeze([
  */
 export const CARD_COUNT = 151;
 
+/**
+ * How many card sends one push may carry — a round ceiling one under the
+ * 151-card catalog, so "send every card I have" can never queue a batch the
+ * server then refuses. It lives here rather than in `cards.server.ts` because
+ * the button that has to respect it runs in the browser; the server re-exports
+ * this same number, so the count on the button and the refusal message are one
+ * decision instead of two that drift (the same lesson `CARD_COUNT` above
+ * taught the picker).
+ */
+export const CARD_SEND_MAX_PER_RUN = 150;
+
 export function cardNumber(id: string): number | null {
   const m = /^card_0*(\d+)$/.exec(id.trim());
   if (!m) return null;

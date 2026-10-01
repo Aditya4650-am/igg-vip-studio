@@ -903,6 +903,57 @@ broken block but not one the save arrived with. `verify.mts`-style checks were
 run against 4 real saves (clean, event-closed, and the tool-edited
 `mGameInfo.current.xml`) with zero failures.
 
+### Batch send: the ticked picker, and why there is still no API (2026-10-01)
+
+Asked as *"send like 20, 30, 50 cards to friend in one click, not like this 1
+card send"*. Both halves were partly true: `sendCards` has always batched (it
+takes the whole array and caps it), but the panel made you choose a card from
+a dropdown and press **Add to queue** once per card.
+
+**A sweep of every resource on this machine found no card-sending API in any
+tool** — this is a save edit and nothing more. The negative result is worth
+having on file so it is not re-searched:
+
+| Resource | Card-sending code |
+| --- | --- |
+| Playrix API | **One endpoint exists anywhere**: `POST https://township.playrix.com/api/1/FetchCity?cityId=` (`API_URL`, `ts_township_core.py:42`) — read-only. Zero `SendCard` / `GiveCard` / `SendGift` / `AcceptGift` strings in any file. |
+| TWN (`twndesban2.pyc`) | 0 hits for `OwnedCards` / `inStockCount` / `lastSentCards` / `toUserId`. It has **no** send feature, only the `crd` display alias we already map. |
+| TS Lite (decompiled) | No card code; its only network call is its own Telegram alert. |
+| TS Vip APK | The only visible `classes.dex` is a 58 KB stub — the payload is DexProtector-packed under `com/dexsecurity/rizalprotector/…`. 0 card hits; **unverified, not clean**. |
+| This repo | The only implementation, and it is a save edit. |
+
+Nothing there changes what a send writes; it only confirms there is no
+round-trip to add. The forensic detail lives in the corpus notes
+(`lastSentCards` = `{cardId, sendTime(int64), toUserId}`, never more than 3
+entries in any save while `totalSendCards` reached 13, `CardsSent` seen at
+101 and 80 so large volumes are normal, 63-day `RememberTime` window).
+
+**The pick, on record**: **N distinct cards -> one friend**, the **user ticks
+them** rather the tool choosing an N, and the queue stays **one entry per
+(card, friend)** — a card already queued to that recipient is not written
+twice, which is all any real save has shown.
+
+- `sendSel` holds the ticks; `sendPicked` is what of them this push could
+  actually send (owned now, or granted by the same Save), `sendFresh(...)`
+  narrows that to what is *new* for the chosen recipient, and the primary
+  button prints `sendPickedCount`.
+- **`CARD_SEND_MAX_PER_RUN` moved into `src/lib/cards.ts`** (browser-safe) and
+  is **re-exported** by `cards.server.ts`. It used to be defined server-only,
+  so *Send every card I have* could queue all **151** cards and the server
+  would then refuse every one of them — the count on the button and the
+  refusal had no way to see each other. `sendAllIds` now slices to the room
+  left in the push, and an over-cap selection greys the button out with
+  `sendCapNote` in place instead of failing at Save.
+
+Guard rails: `ui-regressions.test.mts`
+`the send panel takes a ticked batch, not one card per press` pins the
+single-card dropdown's removal, the tick grid, the ceiling being defined once
+and re-exported rather than redefined, and the in-place cap note.
+`studio-pipeline.test.ts`
+`cards: the send ceiling is a boundary the button can actually stand on`
+proves 150 goes through and 151 does not, with the refusal leaving the save
+byte-identical.
+
 ## Save shape gate: the push refuses only what *this edit* broke
 
 `save-shape.server.ts` is the shape half of the push gate, wired into

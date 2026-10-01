@@ -17,7 +17,7 @@ const { ZOO_REQUIREMENTS } = await import("./server/township/zoo.server.ts");
 const { readdirSync, existsSync, readFileSync } = await import("node:fs");
 const { injectRegata, injectAvatars, injectProfile, getExistingAvatars, unlockAllAvatars } =
   await import("./server/township/inject.server.ts");
-const { assertCardCollectionsSafe, cardProblems, CARD_IDS, CARD_STOCK_MAX } =
+const { assertCardCollectionsSafe, cardProblems, CARD_IDS, CARD_SEND_MAX_PER_RUN, CARD_STOCK_MAX } =
   await import("./server/township/cards.server.ts");
 const { CARD_GROUPS, cardNumber, CARD_COUNT } = await import("./cards.ts");
 const { CHAT_EMOJI_IDS } = await import("./server/township/chat-emoji.server.ts");
@@ -1113,6 +1113,39 @@ test("cards: a send keeps only the history length real saves ever hold", () => {
   assert.equal(out.cardsInfo.sent, 27, "the counters still carry every send recorded");
   assert.equal(out.cardsInfo.history, 3, "the history reports only what it kept");
   assert.deepEqual(cardProblems(cardCollections(out.xml!)), [], "the push gate must accept the result");
+  balanced(out.xml!);
+});
+
+test("cards: the send ceiling is a boundary the button can actually stand on", () => {
+  // "Send every card I have" lights the whole 151-card catalog, so the number
+  // the button prints has to be the same one the server refuses on. One under
+  // must go through and one over must not — otherwise the count in front of
+  // the user is decoration, and a full collection is a push that always fails.
+  const snap = loadLiveCards();
+  const before = readXml(snap);
+  const base = snap.cardsInfo.sent;
+
+  const at = CARD_IDS.slice(0, CARD_SEND_MAX_PER_RUN).map((id) => ({ cardId: id, toUserId: "AbCdEfGh12" }));
+  const over = [...at, { cardId: CARD_IDS[150]!, toUserId: "AbCdEfGh12" }];
+  assert.equal(at.length, 150, "the ceiling sits one under the 151-card catalog");
+  assert.ok(over.length > CARD_SEND_MAX_PER_RUN, "one more than the ceiling must be out of bounds");
+
+  assert.throws(
+    () => studio.applySave({ token, sessionId: snap.sessionId, cardSends: over }),
+    /tối đa 150/,
+    "one more than the ceiling must be refused",
+  );
+  assert.equal(readXml(snap), before, "the refusal must leave the save untouched");
+
+  const out = studio.applySave({
+    token,
+    sessionId: snap.sessionId,
+    cards: Object.fromEntries(CARD_IDS.map((id) => [id, 1])),
+    cardSends: at,
+  });
+  assert.equal(out.cardsInfo.sent, base + CARD_SEND_MAX_PER_RUN, "every send in the batch is counted");
+  assert.equal(out.cardsInfo.history, 3, "the history still holds only what real saves hold");
+  assert.deepEqual(cardProblems(cardCollections(out.xml!)), [], "the push gate must accept the batch");
   balanced(out.xml!);
 });
 
