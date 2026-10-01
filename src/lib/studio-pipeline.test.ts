@@ -1602,11 +1602,11 @@ const LEVEL_DONOR = [
 
 test("copy: the friend's city is taken, their lifetime counters are not", () => {
   // What a restore copies is decided by the reference tool, not by taste: its
-  // basic-stats step moves level, experience and money, and never moves a
-  // lifetime fact Playrix holds against the *player*. So the friend's level
-  // and town land here; what must *not* move is pinned on the HISTORY_*
-  // fixtures below. Measured the other way round (freeze everything) this
-  // button copied nothing at all, which is not what "Basic stats" promises.
+  // basic-stats step moves level and money and never moves a lifetime fact
+  // Playrix holds against the *player*. So the friend's level lands here; what
+  // must *not* move is pinned on the HISTORY_* fixtures below. Measured the
+  // other way round (freeze everything) this button copied nothing at all,
+  // which is not what "Basic stats" promises.
   const snap = townSession(LEVEL_OWN);
   studio.attachFriendXml(token, snap.sessionId, LEVEL_DONOR);
   const out = studio.applySave({ token, sessionId: snap.sessionId, unbanMode: "novo" });
@@ -1615,26 +1615,43 @@ test("copy: the friend's city is taken, their lifetime counters are not", () => 
   assert.match(xml, /FRIENDTOWN/, "the friend's layout is what a city copy is for");
   assert.match(xml, /id="friend1"/, "and so are their buildings");
   assert.match(xml, /name="levelup" v="1089"/, "the level follows the donor");
-  assert.match(xml, /name="experience" v="3370037992"/, "and the XP that earned it follows the level");
+  // The one value a copy must NOT take, and the measured reason: `experience`
+  // is the only variable a restore writes today that the no-ban baseline
+  // `ab46f0b` left untouched. It is a per-account cumulative counter.
+  assert.match(xml, /name="experience" v="172109"/, "the XP stays ours — it is never copied");
   assert.doesNotThrow(() => assertNoForeignIdentity(LEVEL_OWN, xml, LEVEL_DONOR));
   balanced(xml);
   assert.deepEqual(
     progressionProblems(LEVEL_OWN, xml, LEVEL_DONOR),
     [],
-    "level and XP came from one account, so there is nothing to refuse",
+    "the level arrived from the donor, so the pair is excused",
   );
 
-  // The exact shape an ungated copy used to produce: the level from one
-  // account, the XP still ours. Refused with a donor in hand and refused
-  // without one — having fetched a friend excuses nothing, because the pair is
-  // wrong on its face.
+  // The exact shape a restore produces: the level from one account, the XP
+  // still ours. Refused on its own — but excused once the pushed level is
+  // provably the donor's own, which is the same rule the regatta counter uses.
   const mixed = LEVEL_OWN.replace('name="levelup" v="30"', 'name="levelup" v="1089"');
   assert.deepEqual(progressionProblems(LEVEL_OWN, mixed), ["level-up-without-experience:30->1089"]);
   assert.throws(() => assertProgressionsSafe(LEVEL_OWN, mixed), /level-up-without-experience/);
+  assert.deepEqual(
+    progressionProblems(LEVEL_OWN, mixed, LEVEL_DONOR),
+    [],
+    "a level the donor actually holds is what a copy writes, so it is excused",
+  );
+
+  // Fetching a friend excuses nothing on its own: a level the donor never had
+  // is a hand-typed number, and the pair is still refused with the friend in
+  // hand. This is what keeps the rule useful for the Stats tab.
+  const typed = LEVEL_OWN.replace('name="levelup" v="30"', 'name="levelup" v="500"');
+  assert.deepEqual(
+    progressionProblems(LEVEL_OWN, typed, LEVEL_DONOR),
+    ["level-up-without-experience:30->500"],
+    "a level the donor does not hold must not borrow the copy's excuse",
+  );
   assert.throws(
-    () => assertProgressionsSafe(LEVEL_OWN, mixed, LEVEL_DONOR),
+    () => assertProgressionsSafe(LEVEL_OWN, typed, LEVEL_DONOR),
     /level-up-without-experience/,
-    "a donor cannot excuse a pair that no real save holds",
+    "and it must be refused, not merely logged",
   );
 
   // The other directions are all fine: XP alone can rise, and a save that
@@ -1700,17 +1717,19 @@ const HISTORY_DONOR = [
 ].join("");
 
 test("copy: the city follows the friend on every mode, its lifetime counters do not", () => {
-  // The reference tool's basic-stats step moves level, experience and money
-  // and never moves a lifetime fact Playrix holds against the *player*. Both
-  // halves matter: freezing everything made "Basic stats" copy nothing at all,
-  // while the earlier copy took `gameStartDate` and 263 achievements along
-  // with it — the account's history, not the town's.
+  // The reference tool's basic-stats step moves level and money and never
+  // moves a lifetime fact Playrix holds against the *player*. Both halves
+  // matter: freezing everything made "Basic stats" copy nothing at all, while
+  // the earlier copy took `gameStartDate` and 263 achievements along with it —
+  // the account's history, not the town's. `experience` sits with the frozen
+  // group: it is the one value a restore writes that the no-ban baseline
+  // never touched, so it is never copied either.
   const frozen = [
     "RegataTasksCompleted", "FirstAttemptM3Levels", "FullCardCollections",
-    "Achievement_BuiltHouses", "gameStartDate",
+    "Achievement_BuiltHouses", "gameStartDate", "experience",
   ];
   const takes = [
-    "levelup", "experience", "money", "moneyCash", "timeInGame",
+    "levelup", "money", "moneyCash", "timeInGame",
   ];
 
   const readVal = (doc: string, name: string) =>

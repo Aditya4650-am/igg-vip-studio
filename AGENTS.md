@@ -1227,19 +1227,19 @@ cumulative `experience`. The corpus bears it out:
 So the copy was manufacturing, on every run, the one shape no real save on file
 has — and a server can read it with a single comparison and no history at all.
 
-Two changes:
+Two changes, both of them later **partly reversed on measurement** — the
+reversal is recorded in the next section and is the more important of the two:
 
 - **`experience` joined `INICIAL_VARS`**, so level and XP arrive from the same
   account. It carries no stat alias (`STAT_ALIASES` has none), so one write is
   the whole story. Re-verified on the real pair: level 30 → 1089 and experience
-  172109 → 3370037992 together.
+  172109 → 3370037992 together. **Now removed again** — see *The one value that
+  changed after the working window* below.
 - **`level-up-without-experience:<a>-><b>`** in `progressionProblems`: refuse a
   push where `levelup` rises while `experience` does not. Compared only when
   the save carries *both*, so a save that never tracked `experience` gains no
-  rule of its own — and it deliberately takes **no donor excuse**: having
-  fetched a friend cannot make an impossible pair possible. The old shape is
-  refused with a donor in hand and without one; a real `novo` copy now passes;
-  all six saves pass against themselves.
+  rule of its own. It originally took **no donor excuse**; it now excuses the
+  one case a restore produces (below).
 
 **What this does not fix.** Playrix keeps its own record of the account, so a
 large level or money jump stays visible against that history whatever the file
@@ -1249,7 +1249,88 @@ measurably wrong", never as "cannot be banned". The next section closes that
 remaining gap for the restore path.
 
 Guard rail: `copy: the friend's city is taken, their lifetime counters are not`
-(its second half still pins `level-up-without-experience`).
+(its second half pins `level-up-without-experience` and the `experience` rule).
+
+### The one value that changed after the working window (2026-10-01)
+
+The user pinned the last build that ran clean to an exact clock time: *"exact
+timing is 11 to 11:40pm yesterday its working properly all without ban"* and
+named `ab46f0b`. Exactly one commit falls in that window — **`ab46f0b`,
+2026-09-30 23:10:59** — so it is a usable baseline rather than a vague memory,
+and it turns out to be decisive.
+
+**Method, which is what makes the conclusion worth anything.** Only
+`desban.server.ts` itself changed in the restore path between `ab46f0b` and
+HEAD; its four helper imports (`chat-emoji`, `save-decode`, `vars`,
+`xml-edit`) are byte-identical across that range. So the old implementation can
+be extracted with `git show ab46f0b:… > …baseline.server.ts` and run **side by
+side with the current one** over the same real saves. (Take it through `cmd /c
+"git show … > file"` — a PowerShell pipeline silently truncated the first 4 KB
+and collapsed the newlines, which produced a module that loaded and then
+reported `applyDesban is not a function`.)
+
+Each output was diffed against the file it *started* from, asking the only
+question that matters: **what does today's push change that the proven-good
+version left alone?**
+
+| save pair | changed by `ab46f0b` | changed by HEAD | **newly changed by HEAD** |
+| --- | ---: | ---: | ---: |
+| `mGameInfo_decoded` ← `fc_big` | 454 | 399 | **1** |
+| `fc_ok` ← `fc_big` | 443 | 387 | **1** |
+| `mGameInfo.current` ← `fc_big` | 420 | 365 | **1** |
+| `save9_after` ← `fc_ok` | 92 | 55 | **1** |
+
+That one entry is the same in all four:
+
+```
+experience  2436381253 -> 3370037992     (fc_ok      172109 -> 3370037992)
+            mGameInfo.current 3138 -> 3370037992     save9_after 984 -> 172109
+```
+
+Everything else HEAD writes was **already** written by `ab46f0b` and drew no
+ban, and HEAD touches strictly *fewer* variables than that baseline did — so the
+restore's delta from the loaded file was a strict subset of the proven-good one
+**plus exactly one addition**. `experience` joined `INICIAL_VARS` in `4f5a37a`
+at 05:05 on 2026-10-01, five hours *after* the working window, and the gate went
+in with it.
+
+It is a cumulative counter Playrix keeps per account and it moved by up to
+**933,656,739 in a single sync**.
+
+**So `experience` is out of `INICIAL_VARS` again**, and after the change the
+"newly changed" count reads **0** on all four pairs. This *narrows* the copy
+relative to `ab46f0b` rather than reverting to it: HEAD still keeps our own
+`gameStartDate`, `RegataTasksCompleted` and the ~260 achievements, so the delta
+is a strict subset of the baseline's, which cannot be a new anomaly by
+construction — those exact values were pushed in the working window.
+
+**The `level-up-without-experience` gate needed a matching change or it would
+have refused every restore.** With `experience` no longer copied, a restore
+raises `levelup` and leaves the XP alone — precisely the shape the gate refuses.
+It now excuses that case **the same way `regata-tasks-completed-lower`
+already did**: only when the pushed level is *exactly the donor's own level*,
+i.e. the number demonstrably came from the copy. Hand-typing a level the donor
+never had is still refused with a friend in hand, so fetching a friend excuses
+nothing on its own and the rule still protects the Stats tab.
+
+**An honest correction to the earlier reasoning.** The corpus analysis above —
+`levelup` derived from `experience`, the pair "arithmetically impossible" — is
+still a real inconsistency a server *can* read. But `ab46f0b` produced exactly
+that pair on every push and ran without a ban, so it is **not** what a ban was
+traced to, and it must not be used to argue for copying `experience` back. The
+measured suspect is the copy itself. Keep the rule as a consistency check with
+its narrow donor excuse; do not re-derive a ban story from it.
+
+Guard rails: `copy: the friend's city is taken, their lifetime counters are not`
+asserts `experience` **stays ours** and that the copy's own level is excused
+while a hand-typed one is refused; `copy: the city follows the friend on every
+mode, its lifetime counters do not` puts `experience` in the `frozen` list for
+all three modes.
+
+**Still not root-caused.** One candidate narrowed from a diff is not a ban
+mechanism: this says *what changed*, not *why Playrix acted*. The pre-ban save
+is gone and there is no way to test server acceptance locally, so the limit
+stands — a green gate means "nothing provably wrong", never "cannot be banned".
 
 ### What a restore copies is the reference tool's own 18 vars (2026-10-01)
 
@@ -1314,19 +1395,19 @@ and `INICIAL_VARS` now ships exactly those 18 and nothing else:
   tool copies five. `Achievement_BuiltHouses` and
   `Achievement_CompleteMatch3Levels` were dropped from `INICIAL_VARS` for the
   same reason — they are not among those five.
-- Ours still adds three names the reference has no need of: `experience`
-  (paired with `levelup` — `level-up-without-experience` refuses a level that
-  rises while the XP does not) plus `WareHouseCashUpgrade`, `WHUdup` and
-  `ExpandLevel`, which describe the town and follow it.
+- Ours adds three names the reference has no need of: `WareHouseCashUpgrade`,
+  `WHUdup` and `ExpandLevel`, which describe the town and follow it. `experience`
+  was briefly a fourth and is **gone again** — see *The one value that changed
+  after the working window* above; the reference never copied it either.
 - Still copied as before, because city state follows the town:
   `TownGround` / `Buildings` / the block lists and `skipTutorials`.
 
 **Effect, measured on real saves:** all three modes across four save pairs —
 `mGameInfo_decoded (999) <- fc_big (1089)`, `fc_ok <- fc_big`,
 `mGameInfo.current <- fc_big`, `save9_after <- fc_ok`. On the level-999 pair
-`inicial` moves 136 vars and adds 263, and writes `levelup=1089`,
-`experience=3370037992`, `money=1460975` — the friend's — while
-`gameStartDate`, `RegataTasksCompleted`, `FirstAttemptM3Levels`,
+`inicial` moves 135 vars and adds 263, and writes `levelup=1089`,
+`money=1460975` — the friend's — while `experience`, `gameStartDate`,
+`RegataTasksCompleted`, `FirstAttemptM3Levels`,
 `FullCardCollections`, `LivesSent`, `Achievement_Teamwork`,
 `Achievement_BuiltHouses` and `Achievement_CompleteMatch3Levels` are untouched
 in **every one of the 12 rows**, and no achievement outside the reference

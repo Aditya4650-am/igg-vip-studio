@@ -39,17 +39,41 @@ const INICIAL_VARS = [
   // City state rather than account history: barn capacity, its WHUdup partner
   // and land expansions describe the town, so they follow the town.
   "WareHouseCashUpgrade", "WHUdup", "ExpandLevel",
-  // Level and experience are one number written twice: `levelup` is derived
-  // from the cumulative `experience`, so a copy that moves the level but not
-  // the XP hands Playrix a city claiming 1089 levels with a level-30 player's
-  // experience behind it. That pair appears in no game-written save — only in
-  // files this tool produced — and it is arithmetically impossible, which is
-  // the cheapest kind of anomaly for a server to read. All four fetched or
-  // decoded saves agree: 30 -> 172109, 30 -> 170849, 999 -> 2436381253,
-  // 1089 -> 3370037992, rising together. `experience` has no stat alias, so
-  // one write is the whole story.
-  "experience",
 ];
+
+/**
+ * `experience` is deliberately **not** in `INICIAL_VARS`, and unlike the eight
+ * names above it is measured rather than reasoned: it is the *single* variable
+ * a basic-stats push writes today that the version known to run without a ban
+ * (`ab46f0b`, 2026-09-30 23:10 — the 11:00-11:40pm window on record) left
+ * untouched.
+ *
+ * Both implementations were run over the same four real save pairs and each
+ * output diffed against the file it started from. Across all four, the set of
+ * values HEAD changes that `ab46f0b` never changed is exactly one entry:
+ *
+ *   mGameInfo_decoded <- fc_big   experience 2436381253 -> 3370037992
+ *   fc_ok             <- fc_big   experience   172109   -> 3370037992
+ *   mGameInfo.current <- fc_big   experience     3138   -> 3370037992
+ *   save9_after       <- fc_ok    experience      984   ->    172109
+ *
+ * Every *other* value this writes was already written by `ab46f0b` and drew no
+ * ban, and HEAD touches strictly fewer variables than that baseline did (399 vs
+ * 454, 387 vs 443, 365 vs 420, 55 vs 92) — so the restore's delta from the
+ * loaded file is a strict subset of the proven-good one, plus this single
+ * addition. `experience` is a cumulative counter Playrix keeps per account; on
+ * the real pairs it moved by up to 933,656,739 in one sync.
+ *
+ * It joined `INICIAL_VARS` in `4f5a37a` at 05:05 on 2026-10-01 — five hours
+ * *after* the working window — and the `level-up-without-experience` gate went
+ * in with it, which is why both had to come back out together: leaving the gate
+ * while dropping the write would refuse every restore that raises the level.
+ *
+ * The honest limit: `ab46f0b`'s output carried a level that moved while the XP
+ * behind it did not, and it did not ban. So the "arithmetically impossible pair"
+ * reasoning below was not what made that build safe, and it must not be used to
+ * justify putting `experience` back.
+ */
 
 const COMPLETO_BLOCKS = [
   "Zoo", "ZooInfo", "ZooQuests", "ArtInfo", "Ernie", "Trains", "IslandsInfo",
@@ -113,10 +137,11 @@ const NOVO_BLOCKS = ["Minigames", "DSCollapseQuests", "QuestsBook", "DSCollectio
  * `Achievement_CompleteMatch3Levels` are absent from it entirely.
  *
  * Everything else still moves: level, money, residents, orders, barn,
- * expansions, tutorial state — plus `experience`, which the reference tool
- * does not copy but our own `level-up-without-experience` gate requires to
- * arrive with the level. "Basic stats" still reads as the friend's city; this
- * is the whole of what it stopped touching.
+ * expansions, tutorial state. "Basic stats" still reads as the friend's city;
+ * this is the whole of what it stopped touching — and `experience`, which this
+ * used to copy, is now absent for a separate and measured reason recorded in
+ * the note above `INICIAL_VARS`. Dropping it also brings us back in line with
+ * the reference tool, which never copied it either.
  */
 const TUTORIAL_DONE = [
   "StartTutorialFinished",

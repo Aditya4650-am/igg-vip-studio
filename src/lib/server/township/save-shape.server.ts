@@ -393,12 +393,19 @@ function upgradeLevels(xml: string): Map<string, number> {
  *   Factories tab can move it and there is no legitimate drop to excuse.
  * - `level-up-without-experience:<a>-><b>` — `levelup` is derived from the
  *   cumulative `experience`, so the pair only makes sense when both come from
- *   the same account. Every game-written save in the corpus agrees (30 ->
- *   172109, 30 -> 170849, 999 -> 2436381253, 1089 -> 3370037992, rising
- *   together), and the only two files under the level-30 floor of ~171k are
- *   both ones this tool produced (66 -> 3138, 250 -> 984). A level that climbs
- *   while the XP behind it does not is arithmetically impossible — the copy
- *   made exactly that shape until `experience` joined `INICIAL_VARS`.
+ *   the same account: every game-written save in the corpus rises together
+ *   (30 -> 172109, 999 -> 2436381253, 1089 -> 3370037992), and the only two
+ *   files under the level-30 floor of ~171k are both ones this tool produced
+ *   (66 -> 3138, 250 -> 984). The one legitimate way to reach it is a restore,
+ *   which moves the level and deliberately leaves the XP alone — excused **only**
+ *   when the pushed level is exactly the donor's, never merely because a donor
+ *   was fetched.
+ *
+ * Recorded so nobody re-litigates it: a build that produced this pair on every
+ * push (`ab46f0b`) ran without a ban. So the pair is a real inconsistency a
+ * server *can* read, but it is not what a ban has been traced to — the measured
+ * suspect was `experience` being copied at all (see `INICIAL_VARS`). Keep the
+ * rule as a consistency check; do not use it to justify copying the XP again.
  */
 export function progressionProblems(
   loaded: string,
@@ -427,6 +434,14 @@ export function progressionProblems(
 
   // The level/XP pair: only compared when the save actually carries both, so a
   // save that never tracked `experience` gains no rule of its own.
+  //
+  // A restore legitimately produces this shape and always did: `experience` is
+  // deliberately not copied (see the note above `INICIAL_VARS`), so the level
+  // follows the friend while the XP stays ours. That is excused the same way
+  // `regata-tasks-completed-lower` is — only when the pushed level is exactly
+  // the donor's own level, i.e. the number demonstrably came from the copy.
+  // Hand-typing a level the donor never had is still refused with a friend
+  // fetched, so fetching a friend excuses nothing on its own.
   const lvlBefore = readLevel(loaded);
   const lvlAfter = readLevel(pushed);
   const xpBefore = readCounter(loaded, "experience");
@@ -439,7 +454,9 @@ export function progressionProblems(
     lvlAfter > lvlBefore &&
     xpAfter <= xpBefore
   ) {
-    out.push(`level-up-without-experience:${lvlBefore}->${lvlAfter}`);
+    const donorLevel = donor ? readLevel(donor) : null;
+    const fromCopy = donorLevel !== null && lvlAfter === donorLevel;
+    if (!fromCopy) out.push(`level-up-without-experience:${lvlBefore}->${lvlAfter}`);
   }
 
   return out;
