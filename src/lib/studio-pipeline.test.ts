@@ -24,6 +24,7 @@ const { CARD_GROUPS, cardNumber, CARD_COUNT } = await import("./cards.ts");
 const { CHAT_EMOJI_IDS } = await import("./server/township/chat-emoji.server.ts");
 const { saveShapeProblems, assertSaveShapeSafe, stripUnknownAvatars, isRealAvatarId, assertProgressionsSafe, progressionProblems } =
   await import("./server/township/save-shape.server.ts");
+const { accountAgeSeconds, timeInGameExceedsAge, readVar } = await import("./server/township/vars.server.ts");
 
 const { token } = verifyLicenseKey("IGG-OWNER-TESTKEY", "TEST-DEVICE-0001");
 
@@ -1051,6 +1052,68 @@ test("progression: a lifetime counter and a factory level only ever go up", () =
     () => assertProgressionsSafe(doc("100", "6"), doc("100", "6")),
     "arrived at level 6: not our doing",
   );
+});
+
+test("copy: a playtime older than the account itself must never leave this tool", () => {
+  // A save declares two things about time: how long the account has existed
+  // (`saveGlobalTime - TermsAcceptTime`) and how long it has been played
+  // (`timeInGame`). The second may never exceed the first.
+  const young =
+    `<root><Global><Var name="TermsAcceptTime" v="1790866828"/>` +
+    `<Var name="saveGlobalTime" v="1790867042"/>` +
+    `<Var name="timeInGame" v="92.197"/></Global></root>`;
+  assert.equal(accountAgeSeconds(young), 214, "the account is 214 seconds old");
+  assert.equal(timeInGameExceedsAge(young), false, "its own 92 seconds of play fit inside that");
+
+  // The friend's 3.3049 h of play does not.
+  const copied = young.replace('v="92.197"', 'v="11897.5146484375"');
+  assert.equal(timeInGameExceedsAge(copied), true, "and 3.3 h on a 3.6-minute account is impossible");
+
+  // --- the push gate is a diff, so only what this edit broke is refused ---
+  assert.deepEqual(progressionProblems(young, young), [], "an untouched save has nothing to refuse");
+  assert.deepEqual(progressionProblems(young, copied), ["time-in-game-over-age"]);
+  assert.throws(() => assertProgressionsSafe(young, copied), /time-in-game-over-age/);
+
+  // Arrived that way — a 2022 account with a re-stamped ToS — is not ours.
+  assert.deepEqual(
+    progressionProblems(copied, copied.replace('v="92.197"', 'v="93"')),
+    [],
+    "a defect the save already had keeps its key on both sides",
+  );
+
+  // An account already older than the friend's playtime is unaffected: this is
+  // the shape the proven-good baseline wrote on every account it drew no ban.
+  const old =
+    `<root><Global><Var name="TermsAcceptTime" v="1790600000"/>` +
+    `<Var name="saveGlobalTime" v="1790900000"/>` +
+    `<Var name="timeInGame" v="92.197"/></Global></root>`;
+  assert.equal(timeInGameExceedsAge(old), false, "a 3.4-day-old account holds 3.3 h easily");
+  assert.deepEqual(
+    progressionProblems(old, old.replace('v="92.197"', 'v="11897.5"')),
+    [],
+    "so the copy lands there without a word",
+  );
+
+  // A save that never tracked the pair gains no rule at all.
+  assert.equal(accountAgeSeconds("<root><Global/></root>"), null);
+  assert.equal(
+    timeInGameExceedsAge('<root><Global><Var name="timeInGame" v="11897"/></Global></root>'),
+    false,
+    "no age declared, no relation to contradict",
+  );
+
+  // --- and the copy itself declines to write the impossible value ---
+  const friend =
+    `<root><Global><Var name="timeInGame" v="11897.5146484375"/>` +
+    `<Var name="money" v="1460975"/></Global></root>`;
+  const out = applyDesban(young, friend, "inicial");
+  assert.equal(readVar(out, "timeInGame"), "92.197", "the account keeps its own playtime");
+  assert.equal(readVar(out, "money"), "1460975", "every other value still copies");
+  assert.equal(timeInGameExceedsAge(out), false, "so the result is internally consistent");
+
+  // On an account old enough, the friend's playtime is copied verbatim.
+  const outOld = applyDesban(old, friend, "inicial");
+  assert.equal(readVar(outOld, "timeInGame"), "11897.5146484375", "no clamp, no skip, byte-identical copy");
 });
 
 test("cards: the push gate refuses an invariant no real city breaks, but not one it arrived with", () => {

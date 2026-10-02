@@ -34,7 +34,7 @@ import { AVATAR_MAX } from "../../catalogs";
 import { RAW_PROFILE } from "../catalogs.data.server";
 import { WHUDUP_XOR } from "./barn.server";
 import { CHAT_EMOJI_IDS } from "./chat-emoji.server";
-import { coopIdSplit, readVar } from "./vars.server";
+import { coopIdSplit, readVar, timeInGameExceedsAge } from "./vars.server";
 import { attrValue, findUnbalancedTag } from "./xml-edit.server";
 
 /**
@@ -544,6 +544,27 @@ export function progressionProblems(
     ) {
       out.push(`town-copied-city-date:${dateAfter}->${dateDonor}`);
     }
+  }
+
+  // The impossible playtime pair. `timeInGame` is seconds of play; the save
+  // also says how long the account has existed. A copy carries the friend's
+  // playtime onto our clock while `TermsAcceptTime` / `saveGlobalTime` stay
+  // ours, so an account younger than the friend's playtime claims more hours
+  // than it has lived.
+  //
+  // Measured over the 11 saves on file: 7/7 banned trip it, 3/4 clean do not,
+  // and the one clean file that does (`SJzfOUKzQx`) arrived that way — a 2022
+  // account with a re-stamped ToS and 66 genuine days of play. So this is
+  // keyed as a **diff**: only a pair this push made impossible is refused, and
+  // a save that already disagreed on arrival keeps its keys on both sides and
+  // stays pushable — the same rule the shape gate uses, so this can never hold
+  // a working feature hostage.
+  //
+  // `applyDesban` skips the copy in exactly this case, so a restore reaches
+  // here already consistent and the rule is the backstop for every other path
+  // (the Stats tab exposes `timeInGame` directly).
+  if (timeInGameExceedsAge(pushed) && !timeInGameExceedsAge(loaded)) {
+    out.push("time-in-game-over-age");
   }
 
   return out;

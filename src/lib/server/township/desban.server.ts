@@ -9,7 +9,7 @@ import { decodeContainer, extractXml, shellErrorMessage } from "./save-decode.se
 // gate have to agree on which avatar ids the game can hold, or the restore
 // writes ids the gate then refuses. One definition, two callers.
 import { isRealAvatarId } from "./save-shape.server";
-import { readCoopId, writeVar } from "./vars.server";
+import { accountAgeSeconds, readCoopId, writeVar } from "./vars.server";
 import { attrValue, insertInsideRoot } from "./xml-edit.server";
 
 // Current Township API metadata, matching the reference client's defaults in
@@ -1372,9 +1372,29 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
   const before = own;
   const fr = friendXml.replace(/^\uFEFF/, "");
   const scrub = scrubber(fr, own);
+  // `timeInGame` is the one value in this list whose safe copy depends on the
+  // *recipient* rather than on the donor: it is seconds of play, and the save
+  // also carries how long the account has existed
+  // (`saveGlobalTime - TermsAcceptTime`). A copy writes the friend's playtime
+  // onto our clock and leaves our clock alone, so an account younger than the
+  // friend's own playtime ends up claiming more hours than it has lived —
+  // measured at 13x to 12,478x over the 7 banned saves on file, every one of
+  // which reached Playrix. The donor's value alone sets the trip point at
+  // 3.3049 hours, so this fires on any younger account.
+  //
+  // Skipping only in that case keeps the copy byte-identical to today on any
+  // account already older than the friend's playtime, which is every account
+  // the proven-good baseline drew no ban with. The save keeps its own
+  // `timeInGame`, which is consistent with its own age by construction.
+  const ownAge = accountAgeSeconds(own);
   for (const name of INICIAL_VARS) {
     const val = readVarLoose(fr, name);
-    if (val != null) own = writeVar(own, name, scrub(val));
+    if (val == null) continue;
+    if (name === "timeInGame" && ownAge != null) {
+      const donorPlay = Number(val);
+      if (Number.isFinite(donorPlay) && donorPlay > ownAge) continue;
+    }
+    own = writeVar(own, name, scrub(val));
   }
   // The old rule here was "deliberately not `every Achievement_*` the donor
   // holds" — the reference tool copies five. That reading came from its

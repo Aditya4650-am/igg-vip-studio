@@ -76,6 +76,56 @@ export function readAnyVar(xml: string, names: readonly string[]): string | null
 }
 
 /**
+ * Account age in seconds **as the save declares it**: `saveGlobalTime -
+ * TermsAcceptTime`. `null` when either is missing or the pair is not a sane
+ * positive interval, so a save that never tracked them gains no rule below.
+ *
+ * `TermsAcceptTime` is re-stamped when an account is created — the injected
+ * fresh profile's 2025-05-11 value becomes the real creation time on first
+ * launch — so this reads the account's own age rather than the age of the
+ * profile file it started from.
+ */
+export function accountAgeSeconds(xml: string): number | null {
+  const raw = (name: string): number | null => {
+    const v = readVar(xml, name);
+    if (v == null || v.trim() === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const start = raw("TermsAcceptTime");
+  const end = raw("saveGlobalTime");
+  if (start == null || end == null) return null;
+  const age = end - start;
+  return age > 0 ? age : null;
+}
+
+/**
+ * `true` when the save claims more seconds of play than the account has
+ * existed — `timeInGame > saveGlobalTime - TermsAcceptTime`.
+ *
+ * Measured over the 11 saves on file: **7/7 banned, 3/4 clean**, and the one
+ * clean file that trips it (`SJzfOUKzQx`) is a 2022 account whose
+ * `TermsAcceptTime` was re-stamped on a 2026 reinstall while `timeInGame`
+ * kept its genuine 66 days — so the relation can fire on a real old account
+ * and is not a ban verdict on its own. On the banned files the magnitude is
+ * 13x to 12,478x: a 6-minute-old account claiming 1,202 hours of play.
+ *
+ * This is the shape a copy creates, because `timeInGame` follows the friend
+ * while `TermsAcceptTime` / `saveGlobalTime` stay ours. The trip point is set
+ * by the donor's own number — 3.3049 hours on `3ZVJSA080P` — so any account
+ * younger than the friend's playtime becomes arithmetically impossible the
+ * moment the value lands on it.
+ */
+export function timeInGameExceedsAge(xml: string): boolean {
+  const raw = readVar(xml, "timeInGame");
+  if (raw == null || raw.trim() === "") return false;
+  const tig = Number(raw);
+  if (!Number.isFinite(tig) || tig <= 0) return false;
+  const age = accountAgeSeconds(xml);
+  return age != null && tig > age;
+}
+
+/**
  * The two places a save declares the co-op (clan) it belongs to, kept apart on
  * purpose: `<MyClan id="...">` on the element and `<Var name="MyClanId">`.
  * `null` means "this document does not carry that field at all", which is
