@@ -9,7 +9,7 @@ import {
   regattaWant,
   type RegattaReason,
 } from "../../regatta";
-import { writeVar } from "./vars.server";
+import { hasRegattaBacking, writeVar } from "./vars.server";
 import { AVATAR_MAX } from "../../catalogs";
 import { SKINS_CATALOG } from "./skins-catalog.server";
 import { attrValue, insertInsideRoot } from "./xml-edit.server";
@@ -1584,17 +1584,20 @@ export function assertRegattaSafe(loaded: string, pushed: string) {
   const own = resolveRegataUser(loaded);
   const before = new Set(regattaProblems(loaded, own));
   const broken = regattaProblems(pushed, own).filter((k) => !before.has(k));
-  // A lifetime counter with no records behind it is the file the 10-point
+  // A lifetime counter with no history behind it is the file the 10-point
   // tutorial-task ban arrived in (`mGameInfo.current-14.xml`):
   // `RegataTasksCompleted=77` over zero `<MyOldTask>`, zero board, zero
   // quota, so the game ran first-timer onboarding under a veteran counter
-  // while the server watched the session. `applyDesban` no longer writes
-  // that combination (it keeps our own counter when we hold no records), and
-  // this refuses anything else that would — a Stats-tab raise included, which
-  // is told to complete a task first instead. Same loaded-vs-pushed rule: a
-  // split the save arrived with keeps its shape on both sides and stays
-  // pushable, and a batch with records behind it never trips this.
-  if (!/<MyOldTask[\s>/]/i.test(loaded) && !/<MyOldTask[\s>/]/i.test(pushed)) {
+  // while the server watched the session. A live board with no records yet
+  // runs no tutorial and stays clean (`mGameInfo.current-18.xml`: 12 offers,
+  // 21 takes), so backing means records *or* board rows — the same definition
+  // the restore writes by (`hasRegattaBacking`). `applyDesban` no longer
+  // writes that combination (it keeps our own counter when neither exists),
+  // and this refuses anything else that would — a Stats-tab raise included,
+  // which is told to complete a task first instead. Same loaded-vs-pushed
+  // rule: a split the save arrived with keeps its shape on both sides and
+  // stays pushable, and history behind the raise never trips this.
+  if (!hasRegattaBacking(loaded) && !hasRegattaBacking(pushed)) {
     if (flatVarInt(pushed, "RegataTasksCompleted") > flatVarInt(loaded, "RegataTasksCompleted")) {
       broken.push("regatta-counter-without-records");
     }

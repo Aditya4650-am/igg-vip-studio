@@ -2105,6 +2105,52 @@ test("copy: our town name is never the donor's", () => {
   }
 });
 
+test("copy: a newborn keeps its own pictures and face", () => {
+  // Gaining the donor's 386 avatars and look on day zero is review
+  // ammunition — the first-message ban wore the full union on an hours-old,
+  // tutorial-open account. So a proven age under a day keeps its own row;
+  // an older account, or one with no clock fields at all, unions exactly as
+  // today (the ageless CHAT fixtures pin that half and must not move).
+  const NOW = Math.floor(Date.now() / 1000);
+  const mk = (cityId: string, ageH: number | null, pic: string, town: string) => {
+    const clock =
+      ageH == null
+        ? ""
+        : `<Var name="TermsAcceptTime" v="${NOW - ageH * 3600}" t="i"/><Var name="saveGlobalTime" v="${NOW}" t="i"/>`;
+    return [
+      '<?xml version="1.0" encoding="utf-8"?>',
+      "<Global>",
+      `<Var name="cityId" v="${cityId}" t="s"/>`,
+      `<Var name="townName" v="${town}"/>`,
+      `<Var name="MyPicture" v="${pic}"/>`,
+      '<Var name="Unlocked_ava7" v="1" t="b"/>',
+      '<Var name="levelup" v="30" t="i"/>',
+      '<Var name="money" v="1000" t="i"/>',
+      '<Var name="residents" v="500" t="i"/>',
+      clock,
+      "</Global>",
+      '<TownGround ver="2"><row j="0" v="MYTOWN"/></TownGround><Buildings><Object id="mine1"/></Buildings>',
+    ].join("");
+  };
+  const donor = mk("FRD123456", null, "ava387", "theirs")
+    .replace("MYTOWN", "FRIENDTOWN")
+    .replace('<Var name="Unlocked_ava7" v="1" t="b"/>', '<Var name="Unlocked_ava200" v="1" t="b"/><Var name="Unlocked_ava398" v="1" t="b"/>');
+
+  const young = applyDesban(mk("ME12345678", 1, "ava1", "myne"), donor, "completo");
+  assert.ok(!young.includes("Unlocked_ava200"), "an hours-old account gains no donor pictures");
+  assert.ok(!young.includes("Unlocked_ava398"), "neither the high ids");
+  assert.ok(young.includes('<Var name="Unlocked_ava7"'), "its own picture survives");
+  assert.equal(readVar(young, "MyPicture"), "ava1", "a rookie wears its own face");
+  assert.equal(readVar(young, "townName"), "myne", "its own name stays regardless of age");
+  balanced(young);
+
+  const old = applyDesban(mk("ME12345678", 30, "ava1", "myne"), donor, "completo");
+  assert.ok(old.includes("Unlocked_ava200"), "a day-old account still unions");
+  assert.ok(old.includes("Unlocked_ava398"), "high ids too");
+  assert.equal(readVar(old, "MyPicture"), "ava387", "and its picture still follows the town");
+  balanced(old);
+});
+
 test("copy: the restore takes the town and the profile row it is shown under, never the co-op", () => {
   // Two halves, and they are decided by different evidence.
   //

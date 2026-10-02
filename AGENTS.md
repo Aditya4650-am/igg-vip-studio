@@ -1893,12 +1893,18 @@ donor-personal value, and it is gone.
 
 **Rule 2 — `RegataTasksCompleted` / `FullCardCollections` need backing.** In
 town modes the donor's number lands only where our own history already has
-the shape to hold it — any `<MyOldTask>` at all for regatta, any `cardId`
-row at all for cards — otherwise ours stays. No threshold is invented. 14
-carried 77 over zero records (the game then ran first-timer onboarding under
-a veteran counter while the server watched); with this rule that file keeps
-its own small number and stays a genuine rookie on paper as well as in play —
-the shape clean 12 completed its own first task under.
+the shape to hold it — completed records *or a live board* for regatta (a
+board with no records yet runs no tutorial: `mGameInfo.current-18.xml`
+joined regatta straight onto 12 offers / 21 takes, saw no onboarding, chats
+clean), owned rows for cards — otherwise ours stays. No threshold is
+invented. 14 carried 77 over zero records, zero board, zero quota (the game
+then ran first-timer onboarding under a veteran counter while the server
+watched); with this rule that file keeps its own small number and stays a
+genuine rookie on paper as well as in play. Writer and gate share one
+definition (`hasRegattaBacking` in `vars.server.ts`) so they can never
+disagree. 18 also weakens the cards alarm honestly: 216 over ~1 row with a
+board and standing behind it lives — the zero-row refusal stays, anything
+finer would be an invented threshold.
 
 **Rule 3 — the gates refuse the pair.** `assertRegattaSafe` gains
 `regatta-counter-without-records`, `assertCardCollectionsSafe` refuses a
@@ -1925,6 +1931,48 @@ arrived-that-way passes, backing passes). Suite: 218/218, typecheck clean.
 banned saves share. It does not remove the duplicate town bytes, the
 level/XP gap against the server's own record, or a flagged device — those
 answer to behavior, never to edits.
+
+### Chat-ready: newborns keep their row, and the tab says when to join (2026-10-03)
+
+The first-message ban (`mGameInfo.current-16.xml`) forced two builds, because
+the file was already clean by every rule above: own name kept, donor lists
+refused, own 112 stickers, rookie-consistent 1/1 counters, quiet member join.
+What it wore was a veteran's row on a newborn — the donor's 386 avatars and
+look on an hours-old, tutorial-open account — and it died at first visibility
+to 31 strangers on a 5-times-flagged device, while clean 12 (133 union
+avatars) and 17 (386) chat daily.
+
+**Newborn cosmetics rule.** Town-mode restores skip `cloneAvatarUnion` and
+the five appearance vars when the recipient's own age (`accountAgeSeconds` on
+the save as it arrived) is proven under a day (`ACCOUNT_MIN_HOURS`, shared
+with the readout below so the two can never disagree). Unknown age proceeds
+exactly as today — every existing fixture and older save is byte-identical.
+`unlockEmoji` stays unconditional (stickers must be owned *before* first
+chat) and `townName` was already never copied. This is hardening, not a
+traced cause: 12/17 wear the union with no ban, and the honest comment above
+the gate says so.
+
+**Co-op readiness readout.** `src/lib/coop-readiness.ts` (browser-safe, pure)
+scores five file-provable checks — own name present, stickers owned in a
+valid envelope, tutorial finished (`WaitForFirstSow` / `WaitForArrowOnFreeField`
+absent-or-cleared; all of 13/14/16 trip at least one, 12/17 trip none),
+proven-fresh age, counters backed by history — wired into the snapshot as
+`session.coopReady` and drawn as checklist panel 5 of the Unban tab (strings
+in `en` + `vi`, overlays fall back). Device standing is stated beside it as
+static text, never scored: no file can carry its own ban record. Checklist,
+never a gate — nothing here blocks a push.
+
+Guard rails: `coop-readiness.test.ts` (16-shape fails on tutorial+age only,
+12-shape on age only, aged+backed ready, unknown age no rule, each missing
+piece fails its own check, only `v="1"` counts as open) and
+`copy: a newborn keeps its own pictures and face` (1h keeps, 30h unions, name
+stays either way). Suite 225/225, typecheck clean.
+
+**Honest limit, unchanged.** The readout cannot see device standing, message
+content, or who reports the clone — first visibility to strangers on a
+flagged device with a newborn account remains the shape that dies, however
+the file reads. A green checklist means "nothing provably wrong", never
+"cannot be banned".
 
 ### The copy is staged now, because none of the reference tools talk to Playrix (2026-10-02)
 

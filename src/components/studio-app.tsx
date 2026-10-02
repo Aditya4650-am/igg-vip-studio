@@ -3989,6 +3989,22 @@ function PanelChecks({
   );
 }
 
+function coopCheckLabel(tr: (k: keyof Dict) => string, key: string): string {
+  if (key === "name") return tr("coopCheckName");
+  if (key === "stickers") return tr("coopCheckStickers");
+  if (key === "tutorial") return tr("coopCheckTutorial");
+  if (key === "age") return tr("coopCheckAge");
+  return tr("coopCheckCounters");
+}
+
+function coopCheckWhy(tr: (k: keyof Dict) => string, key: string): string {
+  if (key === "name") return tr("coopWhyName");
+  if (key === "stickers") return tr("coopWhyStickers");
+  if (key === "tutorial") return tr("coopWhyTutorial");
+  if (key === "age") return tr("coopWhyAge");
+  return tr("coopWhyCounters");
+}
+
 function Unban({
   tr,
   session,
@@ -4193,6 +4209,33 @@ function Unban({
           <p className="mt-2 text-xs text-muted">{tr("decorApplyHint")}</p>
         </div>
       </article>
+
+      {session.hasXml ? (
+        <article className="panel flex gap-3">
+          <span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary/15 text-sm font-semibold text-primary">
+            5
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3 className="font-semibold">{tr("coopReady")}</h3>
+            <p className="text-sm text-muted">{tr("coopReadyHint")}</p>
+            <p className={`mt-2 text-xs ${session.coopReady.ready ? "text-primary" : "text-warning"}`}>
+              {session.coopReady.ready ? tr("coopReadyOk") : tr("coopReadyWait")}
+            </p>
+            <ul className="mt-2 space-y-1">
+              {session.coopReady.checks.map((c) => (
+                <li key={c.key} className="text-xs text-muted">
+                  <span className={c.ok ? "text-primary" : "text-warning"}>
+                    {c.ok ? "✓" : "!"}
+                  </span>{" "}
+                  {coopCheckLabel(tr, c.key)}
+                  {c.ok ? null : <span> — {coopCheckWhy(tr, c.key)}</span>}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-xs text-muted">{tr("coopDevice")}</p>
+          </div>
+        </article>
+      ) : null}
     </div>
   );
 }

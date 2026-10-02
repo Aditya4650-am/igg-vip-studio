@@ -100,6 +100,18 @@ export function accountAgeSeconds(xml: string): number | null {
 }
 
 /**
+ * Whatever keeps the game on its normal regatta flow instead of first-timer
+ * onboarding: a completed record, or a live board row (an offer, or a
+ * clanmate's take). Shared by the restore (which keeps our own lifetime
+ * counter when neither exists) and the push gate (which refuses a newly
+ * raised counter in the same state), so writer and gate can never disagree
+ * on the definition.
+ */
+export function hasRegattaBacking(xml: string): boolean {
+  return /<MyOldTask[\s>/]/i.test(xml) || /<(FreeTask|TakenTask)[\s>/]/i.test(xml);
+}
+
+/**
  * `true` when the save claims more seconds of play than the account has
  * existed — `timeInGame > saveGlobalTime - TermsAcceptTime`.
  *

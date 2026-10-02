@@ -1,5 +1,6 @@
 import { requireToken } from "./license.server";
 import { accountAgeInfo } from "../account-age";
+import { coopReadiness } from "../coop-readiness";
 import {
   decryptStream,
   postProcessDecrypt,
@@ -1001,6 +1002,7 @@ export function snapshot(s: Session) {
     islandMax: islandMax || undefined,
     upgradeCaps: { factory: UPGRADE_REF_CAP.Factory, train: UPGRADE_REF_CAP.Train, island: UPGRADE_REF_CAP.Island },
     accountAge: accountAgeInfo(s.rawXml ?? ""),
+    coopReady: coopReadiness(s.rawXml ?? ""),
     log: s.log.slice(-12).map(safeLogLine),
   };
 }

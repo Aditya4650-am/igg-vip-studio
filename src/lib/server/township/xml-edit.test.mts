@@ -682,6 +682,15 @@ test("the regatta push gate refuses a lifetime counter with no records behind it
     () => assertRegattaSafe(rec, recRaised),
     "a counter with records behind it stays pushable",
   );
+  // A live board with no records yet is backed too — it runs no tutorial:
+  // the instant-copy account that joined regatta straight onto a 12-offer
+  // board completed normally and stays clean, so the gate must not fence it.
+  const board = bare.replace("</Global>", '<FreeTask id="t1" num="1" ver="1"/></Global>');
+  const boardRaised = board.replace('v="5"', 'v="77"');
+  assert.doesNotThrow(
+    () => assertRegattaSafe(board, boardRaised),
+    "a counter with board rows behind it stays pushable",
+  );
 });
 
 test("regata never issues a slot generation the block already holds", () => {

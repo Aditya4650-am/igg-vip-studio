@@ -9,8 +9,11 @@ import { decodeContainer, extractXml, shellErrorMessage } from "./save-decode.se
 // gate have to agree on which avatar ids the game can hold, or the restore
 // writes ids the gate then refuses. One definition, two callers.
 import { isRealAvatarId } from "./save-shape.server";
-import { accountAgeSeconds, readCoopId, writeVar } from "./vars.server";
+import { accountAgeSeconds, hasRegattaBacking, readCoopId, writeVar } from "./vars.server";
 import { attrValue, insertInsideRoot } from "./xml-edit.server";
+// Single definition of "younger than a day", shared with the co-op readiness
+// readout, so the restore and the checklist can never disagree on it.
+import { ACCOUNT_MIN_HOURS } from "../../account-age";
 
 // Current Township API metadata, matching the reference client's defaults in
 // scripts/township/ts_township_core.py. Used only when mLocalInfo cannot supply
@@ -1312,6 +1315,7 @@ export function isTownUnchanged(e: unknown): boolean {
  * Playrix's rule, and no tool can. A green gate means "nothing provably
  * wrong", never "cannot be banned".
  */
+
 export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" | "completo" | "novo") {
   let own = ownXml.replace(/^\uFEFF/, "");
   const before = own;
@@ -1372,9 +1376,13 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
       // the shape to hold it — completed records for regatta, owned rows for
       // cards — otherwise ours stays and the account stays a genuine rookie
       // on paper as well as in play (the shape the clean account completed
-      // its own first task under). No threshold is invented: any record/row
-      // at all counts as backing.
-      if (name === "RegataTasksCompleted" && !/<MyOldTask[\s>/]/i.test(before)) continue;
+      // its own first task under). No threshold is invented: any record, row
+      // — or, for regatta, any live board row, which is what keeps the game
+      // on its normal flow instead of the onboarding that banned 14
+      // (`mGameInfo.current-18.xml`: counter with no records but a live
+      // 12-offer/21-taken board runs no tutorial and stays clean) — counts
+      // as backing.
+      if (name === "RegataTasksCompleted" && !hasRegattaBacking(before)) continue;
       if (name === "FullCardCollections" && !/<DataElem\b[^>]*\bname="cardId"/i.test(before)) continue;
       own = writeVar(own, name, scrub(val));
     }
@@ -1421,7 +1429,22 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
     // So the restore never reads the donor's list: it unions our own ids with
     // the catalog. That can only add, never remove, and for an account already
     // holding the safe set it is a byte-identical no-op.
-    own = cloneAvatarUnion(fr, own, scrub);
+    // A provably newborn account keeps its own pictures and face: gaining the
+    // donor's 386 avatars and look on day zero is review ammunition — the
+    // first-message ban (`mGameInfo.current-16.xml`) wore the full union on
+    // an hours-old, tutorial-open account. This is hardening, not a traced
+    // cause (clean 12 and 17 wear the union with no ban), so it fires only on
+    // a proven age: `before` is the save as it arrived, and an unknown age
+    // (no clock fields — every existing fixture, every older save) proceeds
+    // exactly as today. `unlockEmoji` stays unconditional: stickers must be
+    // owned *before* first chat, so they are installed early by design.
+    const newborn = (() => {
+      const age = accountAgeSeconds(before);
+      return age != null && age < ACCOUNT_MIN_HOURS * 3600;
+    })();
+    if (!newborn) {
+      own = cloneAvatarUnion(fr, own, scrub);
+    }
     own = unlockEmoji(own);
     // `townName` is the one appearance var that never leaves our account: it
     // is the name the copied town is displayed under in the co-op roster and
@@ -1437,6 +1460,8 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
     // `frame_10`), so they keep following the town.
     for (const name of PROFILE_APPEARANCE_VARS) {
       if (name === "townName") continue;
+      // Newborn exception above: a rookie wears its own face, not the donor's.
+      if (newborn) continue;
       const val = readVarLoose(fr, name);
       if (val != null) own = writeVar(own, name, scrub(val));
     }
