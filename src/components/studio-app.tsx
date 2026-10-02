@@ -1319,6 +1319,8 @@ export function StudioApp() {
   const [freshBackup, setFreshBackup] = useState<{ oldCityId: string; oldLevel: number; extraCount: number; skippedCount: number; androidId: string } | null>(null);
   const [freshCheck, setFreshCheck] = useState<{ newCityId: string; androidReset: boolean; gsfReset: boolean } | null>(null);
   const [freshInjectNote, setFreshInjectNote] = useState("");
+  const [freshIdentityNote, setFreshIdentityNote] = useState("");
+  const [freshIdentity, setFreshIdentity] = useState<{ androidId: string; gsfWiped: boolean } | null>(null);
   const [clientVer, setClientVer] = useState("");
 
   useEffect(() => {
@@ -2120,6 +2122,57 @@ export function StudioApp() {
       if (await onFreshBackupCore()) toast.success(tr("freshBackedUp"));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tr("nothing"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // New device identity between Backup and Inject. Backup reads the current
+  // Android ID + GSF id; Inject writes the same L1 file pair onto whatever
+  // identity the device holds — so without this step a "new account" keeps
+  // the old device's ids and the server re-links the fresh city to the old
+  // ban (resetting Android ID alone leaves GSF behind for the same reason).
+  // Optional by design: existing flows that never needed it work exactly as
+  // before. Every write is verified by re-read inside the bridge; anything
+  // unverified throws and Inject must not run after it.
+  const onFreshIdentity = async () => {
+    if (!device) {
+      toast.error(tr("actionFailed"));
+      return;
+    }
+    const native = nativeBridge();
+    if (!native?.resetAndroidId || !native?.resetGsfId || !native?.readAndroidId) {
+      toast.error(tr("freshNoBridge"));
+      return;
+    }
+    setBusy(true);
+    try {
+      setFreshIdentityNote(`⏳ ${tr("freshIdentityDoing")}`);
+      setFreshIdentity(null);
+      const r = await native.resetAndroidId(device);
+      if (!r.ok) throw new Error(tr("nothing"));
+      let gsfWiped = false;
+      try {
+        const g = await native.resetGsfId(device);
+        if (g.ok) {
+          gsfWiped = true;
+        } else if (!/not found/i.test(g.error ?? "")) {
+          throw new Error(g.error || tr("nothing"));
+        }
+      } catch (e) {
+        // No GMS on the emulator means nothing to re-link — not a failure.
+        if (!/not found/i.test(e instanceof Error ? e.message : "")) throw e;
+      }
+      const nowId = (await native.readAndroidId(device)).androidId ?? "";
+      if (!nowId || (r.oldAndroidId && nowId === r.oldAndroidId)) throw new Error(tr("nothing"));
+      setFreshIdentity({ androidId: nowId, gsfWiped });
+      const done = tr("freshIdentityDone").replace("{old}", (r.oldAndroidId ?? "").slice(0, 8)).replace("{new}", nowId.slice(0, 8));
+      setFreshIdentityNote(`✅ ${done}`);
+      toast.success(done);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : tr("nothing");
+      setFreshIdentityNote(`❌ ${msg}`);
+      toast.error(msg);
     } finally {
       setBusy(false);
     }
@@ -3400,6 +3453,9 @@ export function StudioApp() {
                         <Button size="sm" variant="primary" disabled={!freshBackup || busy} onClick={onFreshInject}>
                           {tr("freshInjectBtn")}
                         </Button>
+                        <Button size="sm" variant="secondary" disabled={!freshBackup || busy} onClick={onFreshIdentity}>
+                          {tr("freshIdentityBtn")}
+                        </Button>
                         <Button size="sm" variant="ghost" disabled={busy} onClick={onFreshLaunch}>
                           🎮 {tr("freshOpenGame")}
                         </Button>
@@ -3411,6 +3467,10 @@ export function StudioApp() {
                       </div>
                       {!freshBackup && (
                         <p className="mt-2 text-xs text-muted">{tr("freshInjectNeedBackup")}</p>
+                      )}
+                      <p className="mt-2 text-xs text-muted">🆔 {tr("freshIdentityHint")}</p>
+                      {freshIdentityNote && (
+                        <p className="mt-2 break-all text-xs text-muted">{freshIdentityNote}</p>
                       )}
                       {freshInjectNote && (
                         <p className="mt-2 break-all text-xs text-muted">{freshInjectNote}</p>

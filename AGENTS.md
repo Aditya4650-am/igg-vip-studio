@@ -1974,6 +1974,23 @@ flagged device with a newborn account remains the shape that dies, however
 the file reads. A green checklist means "nothing provably wrong", never
 "cannot be banned".
 
+### New Account resets device identity between Backup and Inject (2026-10-03)
+
+The tab read the Android ID at Backup and again at Verify but never changed
+it — zero calls to `resetAndroidId` / `resetGsfId` / `forceAndroidId`
+anywhere in the UI — so every "new account" kept the old device's ids while
+`injectFreshProfile` wrote the same L1 pair over them, and the server
+re-linked the fresh city to the old ban (resetting Android ID alone leaves
+the GSF id behind for the same re-link; the bridge comment says so
+outright). The new step calls the existing verified bridge in order —
+`resetAndroidId` (re-read must differ) then `resetGsfId` (missing GMS passes:
+nothing to re-link), then a final read-back — and anything unverified throws
+before Inject may run. Optional by design: flows that never needed it work
+exactly as before; Verify already reported `androidReset` / `gsfReset`, so no
+server change was needed. Guard rail: `the new-account tab resets device
+identity before injecting` pins handler, both resets, the re-read, the
+button and the four strings. Root required, as for every privileged call.
+
 ### The copy is staged now, because none of the reference tools talk to Playrix (2026-10-02)
 
 Five archives were opened looking for co-op logic that explains the ban:

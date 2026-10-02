@@ -327,3 +327,23 @@ test("the copy is staged like the reference tool: one push per stage, in order",
     );
   }
 });
+
+test("the new-account tab resets device identity before injecting", () => {
+  // Reported as fresh accounts re-banned on first sync: the tab read the
+  // Android ID at Backup and again at Verify but never changed it, so every
+  // "new account" kept the old device's ids and the server re-linked the
+  // fresh city to the old ban. The identity step must stay wired between the
+  // two, verified, or a future cleanup deletes the only thing that breaks
+  // the link.
+  const tsx = read("../components/studio-app.tsx");
+  assert.ok(tsx.includes("onFreshIdentity"), "the handler must exist");
+  const handler = tsx.slice(tsx.indexOf("const onFreshIdentity"), tsx.indexOf("const onFreshIdentity") + 2500);
+  assert.ok(handler.includes("resetAndroidId"), "Android ID must be reset");
+  assert.ok(handler.includes("resetGsfId"), "GSF must go too (Android ID alone re-links)");
+  assert.ok(handler.includes("readAndroidId"), "the new id must be verified by re-read");
+  assert.ok(tsx.includes("freshIdentityBtn"), "the tab must offer the step");
+  const i18n = read("i18n.ts");
+  for (const key of ["freshIdentityBtn", "freshIdentityHint", "freshIdentityDoing", "freshIdentityDone"]) {
+    assert.ok(new RegExp(`\\b${key}:`).test(i18n), `${key} must exist in the dictionary`);
+  }
+});

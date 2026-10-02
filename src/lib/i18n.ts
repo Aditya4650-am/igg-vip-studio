@@ -108,6 +108,11 @@ const vi = {
   freshInjectNeedBackup: "Nạp sẽ ghi đè save hiện tại — bấm Sao lưu trước (bắt buộc).",
   freshInjecting: "Đang dừng game và nạp profile…",
   freshInjected: "Đã nạp city mới — mở game để chơi",
+  freshIdentityBtn: "🆔 ID thiết bị mới",
+  freshIdentityHint:
+    "Đổi Android ID + xóa GSF TRƯỚC khi Nạp — nếu không server sẽ nối city mới về án ban cũ. Bắt buộc khi tài khoản cũ bị ban trên chính thiết bị này; các luồng cũ không cần thì bỏ qua, mọi thứ khác giữ nguyên.",
+  freshIdentityDoing: "Đang đổi ID thiết bị và xóa GSF…",
+  freshIdentityDone: "ID mới — Android {old}… → {new}… · GSF đã xóa",
   freshOpenGame: "Mở game",
   freshGameOpened: "Đang mở game…",
   freshVerified: "City mới hợp lệ",
@@ -512,6 +517,11 @@ const en: typeof vi = {
  freshInjectNeedBackup: "Injecting overwrites your current save — back it up first (required).",
  freshInjecting: "Stopping the game and injecting the profile…",
  freshInjected: "Fresh city injected — open the game to play",
+ freshIdentityBtn: "🆔 New device ID",
+ freshIdentityHint:
+    "Change the Android ID + wipe GSF BEFORE Injecting — otherwise the server re-links the fresh city to the old ban. Required when the previous account was banned on this same device; older flows that never needed it are untouched.",
+ freshIdentityDoing: "Resetting device IDs and wiping GSF…",
+ freshIdentityDone: "New IDs — Android {old}… → {new}… · GSF wiped",
   freshOpenGame: "Open game",
   freshGameOpened: "Launching the game…",
  freshVerified: "Fresh city valid",
