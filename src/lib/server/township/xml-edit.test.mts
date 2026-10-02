@@ -653,6 +653,37 @@ test("the regatta push gate refuses a fabricated batch but not a measured one", 
   );
 });
 
+test("the regatta push gate refuses a lifetime counter with no records behind it", () => {
+  // The file the 10-point tutorial-task ban arrived in
+  // (`mGameInfo.current-14.xml`): `RegataTasksCompleted=77` over zero
+  // `<MyOldTask>`, zero board, zero quota — the game then ran first-timer
+  // onboarding under a veteran counter while the server watched. The counter
+  // lives outside the `<Regata>` block, so the record-key diff never sees a
+  // Var-only change; this refuses exactly that combination.
+  const bare =
+    '<root><Global><Var name="cityId" v="C1" t="s"/>' +
+    '<Var name="RegataTasksCompleted" v="5" t="i"/></Global></root>';
+  const raised = bare.replace('v="5"', 'v="77"');
+  assert.notEqual(raised, bare, "the raise must actually land");
+  assert.throws(
+    () => assertRegattaSafe(bare, raised),
+    /regatta-counter-without-records/,
+    "a counter with no records behind it must be refused on push",
+  );
+  // Same loaded-vs-pushed rule: arrived-that-way passes, and records behind
+  // the raise pass (a batch with history behind it is every other test).
+  assert.doesNotThrow(
+    () => assertRegattaSafe(raised, raised),
+    "a split the save arrived with is never blocked",
+  );
+  const rec = bare.replace("</Global>", '<MyOldTask id="t1" user="C1"/></Global>');
+  const recRaised = rec.replace('v="5"', 'v="77"');
+  assert.doesNotThrow(
+    () => assertRegattaSafe(rec, recRaised),
+    "a counter with records behind it stays pushable",
+  );
+});
+
 test("regata never issues a slot generation the block already holds", () => {
   // Cause 4 from the ban notes: the clone path copied its source's `num` and
   // `ver` verbatim, so every record it added restated a generation that was

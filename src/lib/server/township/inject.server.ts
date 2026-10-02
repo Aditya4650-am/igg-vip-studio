@@ -1564,6 +1564,17 @@ function regattaScoreMirror(block: { attrs: string; inner: string }, inner: stri
   return out;
 }
 
+/**
+ * Flat `<Var name="…" v="…">` integer anywhere in the document (missing or
+ * non-numeric reads 0). The block-scoped readers above only see inside
+ * `<Regata>`; the lifetime counter lives outside it, next to every other
+ * stat, so the gate reads it at document scope.
+ */
+function flatVarInt(xml: string, name: string): number {
+  const m = new RegExp(`<Var\\b[^>]*\\bname="${name}"[^>]*\\bv="(\\d+)"`, "i").exec(xml);
+  return m ? Number(m[1]) : 0;
+}
+
 export function assertRegattaSafe(loaded: string, pushed: string) {
   if (loaded === pushed) return;
 
@@ -1573,6 +1584,21 @@ export function assertRegattaSafe(loaded: string, pushed: string) {
   const own = resolveRegataUser(loaded);
   const before = new Set(regattaProblems(loaded, own));
   const broken = regattaProblems(pushed, own).filter((k) => !before.has(k));
+  // A lifetime counter with no records behind it is the file the 10-point
+  // tutorial-task ban arrived in (`mGameInfo.current-14.xml`):
+  // `RegataTasksCompleted=77` over zero `<MyOldTask>`, zero board, zero
+  // quota, so the game ran first-timer onboarding under a veteran counter
+  // while the server watched the session. `applyDesban` no longer writes
+  // that combination (it keeps our own counter when we hold no records), and
+  // this refuses anything else that would — a Stats-tab raise included, which
+  // is told to complete a task first instead. Same loaded-vs-pushed rule: a
+  // split the save arrived with keeps its shape on both sides and stays
+  // pushable, and a batch with records behind it never trips this.
+  if (!/<MyOldTask[\s>/]/i.test(loaded) && !/<MyOldTask[\s>/]/i.test(pushed)) {
+    if (flatVarInt(pushed, "RegataTasksCompleted") > flatVarInt(loaded, "RegataTasksCompleted")) {
+      broken.push("regatta-counter-without-records");
+    }
+  }
   if (!broken.length) return;
 
   throw new Error(

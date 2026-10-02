@@ -176,13 +176,15 @@ test("unban: restore applies the friend's city state and re-encodes a valid save
   assert.match(xml, /<Var name="levelup"\s+v="42"/, "the friend's level is the point of the button");
   assert.match(xml, /<Var name="residents"\s+v="9000"/, "and so is their population");
   // `completo` transplants the town, so the history describing the account
-  // behind it arrives in the same step (`TOWN_HISTORY_VARS`): a file holding
-  // the friend's museum, zoo and expansions while dating the city to *our*
-  // creation is the mismatch reported on 2026-10-01.
+  // behind it arrives in the same step (`TOWN_HISTORY_VARS`) — but a headline
+  // counter lands only where our own history has the shape to hold it. This
+  // fixture holds no owned rows, so the donor's 7 stays out and our 2 stays;
+  // the backed landing is pinned by
+  // `copy: headline counters land only on history already held`.
   assert.match(
     xml,
-    /<Var name="FullCardCollections"\s+v="7"/,
-    "a town transplant brings the lifetime counters that describe it",
+    /<Var name="FullCardCollections"\s+v="2"/,
+    "a counter with no rows behind it is not imported, even with the town",
   );
   balanced(xml);
 
@@ -1149,6 +1151,34 @@ test("cards: the push gate refuses an invariant no real city breaks, but not one
   );
 });
 
+test("cards: the push gate refuses a lifetime counter with no rows behind it", () => {
+  // The cards half of the file the 10-point tutorial-task ban arrived in:
+  // `FullCardCollections` raised while the save holds zero
+  // `<DataElem name="cardId">` rows anywhere. The counter lives outside the
+  // block, so the span compare never sees a Var-only change — this check runs
+  // first for exactly that case.
+  const noRows = '<root><Global><Var name="FullCardCollections" v="2" t="i"/></Global></root>';
+  const raised = noRows.replace('v="2"', 'v="7"');
+  assert.notEqual(raised, noRows, "the raise must actually land");
+  assert.throws(
+    () => assertCardCollectionsSafe(noRows, raised),
+    /card/i,
+    "a counter with no rows behind it must be refused on push",
+  );
+  // Same loaded-vs-pushed rule as every other gate: arrived-that-way passes,
+  // and rows behind the raise pass (the clean account's shape).
+  assert.doesNotThrow(
+    () => assertCardCollectionsSafe(raised, raised),
+    "a split the save arrived with is never blocked",
+  );
+  const withRow = noRows.replace("</Global>", '<DataElem name="cardId" type="string" value="card_09"/></Global>');
+  const withRowRaised = withRow.replace('v="2"', 'v="7"');
+  assert.doesNotThrow(
+    () => assertCardCollectionsSafe(withRow, withRowRaised),
+    "a counter with rows behind it stays pushable",
+  );
+});
+
 test("cards: a push that never touches cards pays nothing for the card gate", () => {
   const snap = loadLiveCards();
   const before = readXml(snap);
@@ -1875,11 +1905,12 @@ const HISTORY_DONOR = [
  *   `,sp1,,sp4,…` sticker list, its own 8/10/4 badges/frames/styles, 27
  *   avatars.
  *
- * The restore used to install the donor's in all three fields — stickers and
- * avatars in the `completo` / `novo` block, the profile lists through
- * `copyProfileLists` — and none of them is town state. They are also the three
- * things rendered next to your name in the co-op roster and chat, which is
- * where the report happens.
+ * The restore used to install the donor's stickers and name in the
+ * `completo` / `novo` block — and neither of them is town state. They are
+ * also the things rendered next to your name in the co-op roster and chat,
+ * which is where the report happens. (The donor's badge/frame/style lists
+ * went the same way for the same reason: banned 8/13/14 wear them, clean
+ * 2/7/12 do not.)
  */
 const CHAT_OWN = [
   '<?xml version="1.0" encoding="utf-8"?>',
@@ -1930,9 +1961,19 @@ test("copy: the city follows the friend on every mode; its account history follo
   //
   // `experience` sits outside both: it is the one value a restore ever wrote
   // that the no-ban baseline never touched, so it is copied in no mode.
+  // History that always describes the town follows it unconditionally.
   const history = [
-    "RegataTasksCompleted", "FirstAttemptM3Levels", "FullCardCollections",
-    "Achievement_BuiltHouses", "gameStartDate",
+    "FirstAttemptM3Levels", "Achievement_BuiltHouses", "gameStartDate",
+  ];
+  // Lifetime counters follow the town only where our own history has the
+  // shape to hold them — completed records for regatta, owned rows for
+  // cards. These fixtures hold neither (no `<MyOldTask>`, no `cardId` row),
+  // which is exactly the file the 10-point tutorial-task ban arrived in, so
+  // the town modes must leave our small numbers alone here; the backed case
+  // (donor values landing on records/rows already held) is pinned by
+  // `copy: headline counters land only on history already held` below.
+  const backedHistory = [
+    "RegataTasksCompleted", "FullCardCollections",
   ];
   const takes = [
     "levelup", "money", "moneyCash", "timeInGame",
@@ -1956,6 +1997,15 @@ test("copy: the city follows the friend on every mode; its account history follo
         const was = readVal(HISTORY_OWN, name);
         assert.equal(now, was, `${mode}: ${name} moved off our value (${was} -> ${now})`);
       }
+    }
+    // Headline counters with nothing behind them stay ours in every mode.
+    // These fixtures hold no `<MyOldTask>` and no `cardId` row — the exact
+    // file the 10-point tutorial-task ban arrived in — so even the
+    // town-carrying modes must leave our small numbers alone; importing the
+    // donor's would replay that ban's shape byte for byte.
+    for (const name of backedHistory) {
+      const was = readVal(HISTORY_OWN, name);
+      assert.equal(readVal(xml, name), was, `${mode}: ${name} has no backing here and must stay ours (${was})`);
     }
     // Outside both boundaries — never copied, in any mode.
     assert.equal(
@@ -1989,13 +2039,83 @@ test("copy: the city follows the friend on every mode; its account history follo
   }
 });
 
+test("copy: headline counters land only on history already held", () => {
+  // The other half of the split pinned above: the same donor numbers that
+  // must stay out of a record-less save land when the base holds the shape
+  // to back them — one completed record, one owned row. That is the clean
+  // account's shape (a board and rows of its own, the donor's lifetime on
+  // top), and the push gates must stay quiet for it too.
+  const backedOwn = HISTORY_OWN.replace(
+    "</Global>",
+    '<MyOldTask id="t1" user="ME12345678"/>' +
+      '<DataElem name="cardId" type="string" value="card_09"/></Global>',
+  );
+  assert.notEqual(backedOwn, HISTORY_OWN, "the backing must actually be in the fixture");
+  for (const mode of ["completo", "novo"] as const) {
+    const snap = townSession(backedOwn);
+    studio.attachFriendXml(token, snap.sessionId, HISTORY_DONOR);
+    // Throws if any push gate (identity, shape, progression, regatta, cards)
+    // refuses the combination, so a green run pins the gates quiet as well.
+    const xml = studio.applySave({ token, sessionId: snap.sessionId, unbanMode: mode }).xml!;
+    assert.equal(readVar(xml, "RegataTasksCompleted"), "44911", `${mode}: backed regatta counter follows the town`);
+    assert.equal(readVar(xml, "FullCardCollections"), "216", `${mode}: backed collections counter follows the town`);
+    balanced(xml);
+  }
+  // `inicial` copies no town, so backing or none, it keeps ours.
+  const snap = townSession(backedOwn);
+  studio.attachFriendXml(token, snap.sessionId, HISTORY_DONOR);
+  const basic = studio.applySave({ token, sessionId: snap.sessionId, unbanMode: "inicial" }).xml!;
+  assert.equal(readVar(basic, "RegataTasksCompleted"), "136", "inicial keeps our regatta counter");
+  assert.equal(readVar(basic, "FullCardCollections"), "3", "inicial keeps our collections counter");
+  balanced(basic);
+});
+
+test("copy: our town name is never the donor's", () => {
+  // Measured on the join-alone ban (`mGameInfo.current-13.xml`): the copy
+  // had overwritten our name with the donor's personal one (`Sunil Babu`,
+  // their `city_name`) while the account running clean wears the default
+  // word. The 30-9 baseline never copied it either. The other appearance
+  // vars still follow the town (clean 12 wears the donor's picture with no
+  // ban), so only the name is fenced.
+  const mk = (cityId: string, town: string, pic: string) =>
+    [
+      '<?xml version="1.0" encoding="utf-8"?>',
+      "<Global>",
+      `<Var name="cityId" v="${cityId}" t="s"/>`,
+      `<Var name="townName" v="${town}"/>`,
+      `<Var name="MyPicture" v="${pic}"/>`,
+      '<Var name="levelup" v="30" t="i"/>',
+      '<Var name="money" v="1000" t="i"/>',
+      '<Var name="residents" v="500" t="i"/>',
+      "</Global>",
+      '<TownGround ver="2"><row j="0" v="MYTOWN"/></TownGround><Buildings><Object id="mine1"/></Buildings>',
+    ].join("");
+  const donor = mk("FRD123456", "Sunil Babu", "ava387").replace("MYTOWN", "FRIENDTOWN");
+  for (const mode of ["inicial", "completo", "novo"] as const) {
+    const snap = townSession(mk("ME12345678", "myne", "ava1"));
+    studio.attachFriendXml(token, snap.sessionId, donor);
+    const xml = studio.applySave({ token, sessionId: snap.sessionId, unbanMode: mode }).xml!;
+    assert.equal(readVar(xml, "townName"), "myne", `${mode}: our town name always stays`);
+    assert.equal(
+      readVar(xml, "MyPicture"),
+      mode === "inicial" ? "ava1" : "ava387",
+      `${mode}: the picture still follows the town it is shown under`,
+    );
+    balanced(xml);
+  }
+});
+
 test("copy: the restore takes the town and the profile row it is shown under, never the co-op", () => {
   // Two halves, and they are decided by different evidence.
   //
-  // **Badges, frames, styles, pictures and avatars are copied** — the row the
-  // copied town is displayed under. `mGameInfo.current-7.xml`, the FetchCity
-  // download of the copy that has been running clean, carries 8 badges, 10
-  // frames, 4 styles and a `gameStartDate` of 2018-03-22.
+  // **Badges, frames, styles and ExpRanks always stay ours.** Every join-era
+  // banned save wears the donor's lists (8/13/14) while every clean save
+  // carries its own (2/7) or none (12) — so the copy never installs the
+  // donor's. Pictures and avatars follow the town (avatar union, five
+  // appearance vars minus `townName`): clean 12 wears the donor's picture
+  // with no ban. `mGameInfo.current-7.xml`, the FetchCity download of the
+  // copy that has been running clean, carries its own 8 badges, 10 frames,
+  // 4 styles and a `gameStartDate` of 2018-03-22.
   //
   // **Stickers are the exception and run the other way.** The reported split is
   // exact — typing in co-op chat is fine, *sending a sticker that came with the
@@ -2258,20 +2378,18 @@ test("population: a restore takes the friend's residents and the cap under them,
   );
 });
 
-test("copy: a full restore takes the town and exactly the reference tool's four profile lists", () => {
+test("copy: a full restore keeps our own profile lists, never the donor's", () => {
   // Which profile fields a restore copies is not a taste question — it is read
-  // straight off `twndesban2.pyc` (v5.0, in `TWN-1.zip`). Its `_apply_desban`
-  // loops exactly four lists through its own `_clone_dataelem`:
-  //
-  //   UnlockedBadges, UnlockedExpRanks, UnlockedFrames, UnlockedStyles
-  //
-  // and treats `PlayerProfile` / `Configs` only as *insertion* points for a
-  // list the donor is missing. The wholesale replace that used to run here is
-  // what imported the donor's `UnlockedThemes`, their `New*` "not reviewed
-  // yet" markers and any `BadgeFrameIncident*` flag — **none of which TWN
-  // copies either**, so keeping them out is not a deviation from the
-  // reference, it *is* the reference. This test is that line in both
-  // directions: the four arrive, the rest of their Configs does not.
+  // off measured saves. Every join-era banned file wears the *donor's* lists
+  // (8: 19/15/9/20, 13: 2/0/1/6, 14: 7/3/1/5) while every clean file carries
+  // its own (2 and 7: 8/10/4) or none at all (12, whose donor held none).
+  // The reference tool (`twndesban2.pyc` v5.0) does clone its four lists, but
+  // the measured known-good shape outvotes it — same reason the donor's
+  // sticker list and town name stay out. So the four stay ours in both
+  // directions: the donor's never arrive, and a list we never had is not
+  // created. The wholesale `PlayerProfile` / `Configs` replace stays out too:
+  // that is what used to import the donor's `UnlockedThemes`, their `New*`
+  // markers and any `BadgeFrameIncident*` flag.
   const mk = (cityId: string, kids: string[]) =>
     [
       '<?xml version="1.0" encoding="utf-8"?>',
@@ -2307,9 +2425,12 @@ test("copy: a full restore takes the town and exactly the reference tool's four 
 
   const out = applyDesban(own, donor, "novo");
 
-  // The four lists arrive — that *is* the copy.
+  // Our four lists survive untouched — the donor's never arrive.
+  for (const v of ["b1", "e1", "f1"]) {
+    assert.ok(out.includes(`value="${v}"`), `our own ${v} must stay`);
+  }
   for (const v of ["b9,b8", "e9", "f9", "s9"]) {
-    assert.ok(out.includes(`value="${v}"`), `the donor's ${v} arrives`);
+    assert.ok(!out.includes(`value="${v}"`), `the donor's ${v} must not arrive`);
   }
 
   // …and nothing else from inside their Configs does. `NewBadges`,
@@ -2332,31 +2453,21 @@ test("copy: a full restore takes the town and exactly the reference tool's four 
     "our own incident flag stays",
   );
 
-  // One Configs, exactly one of each of the four — a second copy is a store
+  // One Configs, exactly one of each list we hold — a second copy is a store
   // the game reads whichever it finds first while the other sits dead.
   assert.equal((out.match(/<DataElem name="Configs"/g) ?? []).length, 1, "no second Configs");
-  for (const f of ["UnlockedBadges", "UnlockedExpRanks", "UnlockedFrames", "UnlockedStyles"]) {
+  for (const f of ["UnlockedBadges", "UnlockedExpRanks", "UnlockedFrames"]) {
     assert.equal((out.match(new RegExp(`<DataElem name="${f}"`, "g")) ?? []).length, 1, `exactly one ${f}`);
   }
-
-  // Where the four *do* cover a list, ours is replaced rather than joined:
-  // `b1,b9,b8` would claim two generations of a collection at once.
-  for (const v of ["b1", "e1", "f1"]) {
-    assert.ok(!out.includes(`value="${v}"`), `our own ${v} is replaced by the donor's`);
-  }
-
-  // `UnlockedStyles` is a list our save did not carry at all — it is created,
-  // because that is what `_clone_dataelem` does when the donor has one. It has
-  // to land *inside* `<Configs>`: a DataElem the game only reads under
-  // `PlayerProfile > Configs`, placed beside that pair, is well-formed XML the
-  // game ignores — a green tick that changes nothing.
-  const cfgOpen = out.indexOf('<DataElem name="Configs"');
-  const stylesAt = out.indexOf('<DataElem name="UnlockedStyles"');
-  const cfgClose = out.indexOf("</DataElem>", cfgOpen);
-  assert.ok(
-    cfgOpen >= 0 && stylesAt > cfgOpen && stylesAt < cfgClose,
-    "the donor's list we never had is created inside Configs, not beside it",
+  assert.equal(
+    (out.match(/<DataElem name="UnlockedStyles"/g) ?? []).length,
+    0,
+    "a list we never had is not created from the donor",
   );
+
+  // `UnlockedStyles` is a list our save did not carry at all — it must NOT be
+  // created: the banned saves are exactly the ones wearing donor lists they
+  // never earned, while clean 12 carries none.
 
   balanced(out);
   assert.doesNotThrow(() => assertNoForeignIdentity(own, out, donor), "the friend's cityId stays theirs");

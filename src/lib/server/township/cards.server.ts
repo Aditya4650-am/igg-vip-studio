@@ -169,6 +169,17 @@ function docInt(doc: string, name: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
+/**
+ * Flat `<Var name="…" v="…">` integer anywhere in the document (missing or
+ * non-numeric reads 0). The block-scoped `docInt` above only sees
+ * `<DataElem>` values; the lifetime counter is a `<Var>` outside the block,
+ * so the gate reads it at document scope.
+ */
+function flatVarInt(xml: string, name: string): number {
+  const m = new RegExp(`<Var\\b[^>]*\\bname="${name}"[^>]*\\bv="(\\d+)"`, "i").exec(xml);
+  return m ? Number(m[1]) : 0;
+}
+
 /** Distinct owned card ids — a read-only progress number, never edited. */
 export function countOwnedCards(xml: string): number {
   const span = ownedCardsSpan(xml);
@@ -456,6 +467,23 @@ export function cardProblems(block: string): string[] {
  * somewhere it should not have.
  */
 export function assertCardCollectionsSafe(loaded: string, pushed: string) {
+  // A headline counter with no rows behind it is the cards half of the file
+  // the 10-point tutorial-task ban arrived in: `FullCardCollections` raised
+  // while the save holds zero `<DataElem name="cardId">` rows anywhere. The
+  // counter lives outside the `CardCollections` block, so this runs before
+  // the span compare below — a Var-only change on a block-less save would
+  // otherwise never be seen. Same loaded-vs-pushed rule: a split the save
+  // arrived with stays pushable, and any grant against rows already held
+  // never trips this. A Stats-tab raise on a row-less save is refused with
+  // its reason instead of failing silently in game.
+  if (!/<DataElem\b[^>]*\bname="cardId"/i.test(pushed)) {
+    if (flatVarInt(pushed, "FullCardCollections") > flatVarInt(loaded, "FullCardCollections")) {
+      throw new Error(
+        "Không đẩy file lên máy: số bộ sưu tập (card) tăng mà save không có lá bài nào — " +
+          "mở tính năng thẻ trong game và nhận vài lá trước, rồi hãy sửa số này.",
+      );
+    }
+  }
   const a = namedSpan(loaded, "CardCollections", "dataStore");
   const b = namedSpan(pushed, "CardCollections", "dataStore");
   if (!a && !b) return;

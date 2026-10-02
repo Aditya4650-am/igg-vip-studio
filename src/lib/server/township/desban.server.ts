@@ -513,89 +513,29 @@ function cloneSimple(src: string, tgt: string, tag: string, scrub = scrubber(src
   return { xml: tgt + "\n" + block, action: "insert" };
 }
 
-function findDataElemBlock(xml: string, name: string) {
-  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`<DataElem\\b(?=[^>]*\\bname="${esc}")[^>]*>`, "i");
-  const m = re.exec(xml);
-  if (!m || m.index === undefined) return null;
-  const start = m.index;
-  const openTag = m[0];
-  if (/\/\>\s*$/i.test(openTag)) return { start, end: start + openTag.length, block: openTag };
-  let depth = 1;
-  let pos = start + openTag.length;
-  const token = /<\/DataElem\s*>|<DataElem\b[^>]*>/gi;
-  token.lastIndex = pos;
-  let hit: RegExpExecArray | null;
-  while ((hit = token.exec(xml))) {
-    const t = hit[0];
-    if (/^<\/DataElem/i.test(t)) {
-      depth--;
-      if (depth === 0) {
-        const end = hit.index + t.length;
-        return { start, end, block: xml.slice(start, end) };
-      }
-    } else if (!/\/\s*>$/.test(t)) {
-      depth++;
-    }
-  }
-  return null;
-}
-
 /**
- * The four profile lists a full restore takes — and only those four.
- *
- * Measured against `twndesban2.pyc` as shipped in `TWN-1.zip` (v5.0): its
- * `_apply_desban` loops exactly `UnlockedBadges` / `UnlockedExpRanks` /
- * `UnlockedFrames` / `UnlockedStyles` through its own `_clone_dataelem`, and
- * `PlayerProfile` / `Configs` appear there only as *insertion* points for a
- * list the donor is missing. The pair is never replaced wholesale — that is
- * what used to import the donor's `UnlockedThemes`, their `New*` "not reviewed
- * yet" markers and any `BadgeFrameIncident*` flag, none of which TWN copies
- * either and none of which a restore is for.
- *
- * A list our save does not carry is inserted *inside* `<Configs>`, never
- * beside it: a DataElem the game only reads under `PlayerProfile > Configs`
- * placed anywhere else is well-formed XML that changes nothing in game.
+ * Profile lists (`UnlockedBadges` / `UnlockedExpRanks` / `UnlockedFrames` /
+ * `UnlockedStyles`) are never taken from the donor: every join-era banned
+ * save on file wears the donor's lists (8: 19/14/8/20, 13: 2/0/1/6,
+ * 14: 7/3/1/5) while every clean save carries its own (2 and 7: 8/10/4,
+ * 12: empty, because its donor held none). The reference tool clones them,
+ * but the measured known-good shape outvotes it — same reason the donor's
+ * sticker list and town name stay out. Our lists survive untouched, and a
+ * list we never had is not created.
  */
-const PROFILE_CLONE_LISTS = ["UnlockedBadges", "UnlockedExpRanks", "UnlockedFrames", "UnlockedStyles"];
-
-function copyProfileLists(src: string, tgt: string, scrub: (s: string) => string): string {
-  let out = tgt;
-  for (const name of PROFILE_CLONE_LISTS) {
-    const s = findDataElemBlock(src, name);
-    if (!s) continue;
-    const block = scrub(s.block);
-    const t = findDataElemBlock(out, name);
-    if (t) {
-      out = out.slice(0, t.start) + block + out.slice(t.end);
-      continue;
-    }
-    const cfg = findDataElemBlock(out, "Configs");
-    const close = cfg ? cfg.block.lastIndexOf("</DataElem>") : -1;
-    if (cfg && close >= 0) {
-      out = out.slice(0, cfg.start + close) + "\n          " + block + out.slice(cfg.start + close);
-      continue;
-    }
-    for (const c of ["</Global>", "</root>", "</Root>"]) {
-      if (out.includes(c)) {
-        out = out.replace(c, block + "\n" + c);
-        break;
-      }
-    }
-  }
-  return out;
-}
 
 /**
- * The six appearance vars TWN's step 3 takes through its `_clone_global_block`.
+ * The appearance vars a town-mode restore takes through its `_MY_VARS`-style
+ * step (TWN step 3 takes six; we take five — never `townName`).
  *
  * Measured on the v5.0 build: `_MY_VARS = ('MyBadge', 'MyPicture', 'MyTheme',
  * 'MyFrame', 'MyStyle', 'townName')`, read out of the donor's `<Global>` and
  * written over ours — the badge, picture, frame, style and theme shown beside
- * the town's name, i.e. the town's own card. We take them from the donor and
- * nothing else: `MyBadge`/`MyPicture`/… are exactly the row the copied town is
- * displayed under, so leaving ours behind is the same mismatch as leaving our
- * founding date behind (see `TOWN_HISTORY_VARS`).
+ * the town's name, i.e. the town's own card. The clean account 12 wears the
+ * donor's picture (`ava387`) with no ban, so the five cosmetics follow the
+ * town. `townName` is the exception: the join-alone ban (`current-13.xml`)
+ * wore the donor's personal name while clean 12 wears the default word, so
+ * our own name always stays (see the `townName` skip in `applyDesban`).
  *
  * These six are TWN's, and yesterday's build did not have them: they are the
  * one addition over `954002e`, taken because the user asked for reference parity
@@ -1329,11 +1269,16 @@ export function isTownUnchanged(e: unknown): boolean {
  *
  * - `Unlocked_ava*` — the **union** of our profile pictures and the donor's,
  *   never a replacement; see `cloneAvatarUnion`.
- * - `MyBadge` / `MyPicture` / `MyTheme` / `MyFrame` / `MyStyle` / `townName` —
- *   the town's own card, TWN's step-3 `_MY_VARS`; see `PROFILE_APPEARANCE_VARS`.
+ * - `MyBadge` / `MyPicture` / `MyTheme` / `MyFrame` / `MyStyle` — the town's
+ *   own card (TWN's step-3 `_MY_VARS` minus `townName`); see
+ *   `PROFILE_APPEARANCE_VARS`. Clean 12 wears the donor's picture with no
+ *   ban, but our own town name always stays — the join-alone ban wore the
+ *   donor's personal name while 12 wears the default word.
  * - `UnlockedBadges` / `UnlockedExpRanks` / `UnlockedFrames` /
- *   `UnlockedStyles` — the four lists TWN's `_clone_dataelem` loops, inserted
- *   inside `<Configs>`; see `copyProfileLists`.
+ *   `UnlockedStyles` — **never taken**: every join-era banned save wears the
+ *   donor's lists (8/13/14) while every clean save carries its own (2/7) or
+ *   none (12, whose donor held none). The reference tool clones them, but the
+ *   measured known-good shape outvotes it.
  * - `UnlockedChatEmoji` — the sticker set, and the one field where the right
  *   move is to **not** take the donor's. The restore never reads their list; it
  *   runs `unlockEmoji()`, which unions this account's own ids with
@@ -1416,7 +1361,22 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
     // town, so there is nothing in the file for these to contradict.
     for (const name of TOWN_HISTORY_VARS) {
       const val = readVarLoose(fr, name);
-      if (val != null) own = writeVar(own, name, scrub(val));
+      if (val == null) continue;
+      // A headline counter with nothing behind it is the file the 10-point
+      // tutorial-task ban arrived in (`mGameInfo.current-14.xml`):
+      // `RegataTasksCompleted=77` over zero records, zero board, zero quota,
+      // so the game ran first-timer onboarding under a veteran counter while
+      // the server watched the session — the ban landed before anything even
+      // saved. Same class: `FullCardCollections=216` over one owned card. The
+      // donor's number therefore lands only where our own history already has
+      // the shape to hold it — completed records for regatta, owned rows for
+      // cards — otherwise ours stays and the account stays a genuine rookie
+      // on paper as well as in play (the shape the clean account completed
+      // its own first task under). No threshold is invented: any record/row
+      // at all counts as backing.
+      if (name === "RegataTasksCompleted" && !/<MyOldTask[\s>/]/i.test(before)) continue;
+      if (name === "FullCardCollections" && !/<DataElem\b[^>]*\bname="cardId"/i.test(before)) continue;
+      own = writeVar(own, name, scrub(val));
     }
     for (const m of fr.matchAll(/<Var\s+name="(Achievement_[^"]+)"\s+v="([^"]*)"/gi)) {
       own = writeVar(own, m[1]!, scrub(m[2]!));
@@ -1431,11 +1391,11 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
       own = writeVar(own, m[1]!, scrub(m[2]!));
     }
 
-    // Profile identity, matched field for field against the reference tool
-    // rather than guessed at — see `cloneAvatarUnion`, `PROFILE_APPEARANCE_VARS`
-    // and `copyProfileLists` for the measurements behind each one. Written only
-    // here, never by `inicial`, because they are the row the copied town is
-    // displayed under and `inicial` copies no town.
+    // Profile identity, matched field for field against measured clean saves
+    // rather than guessed at — see `cloneAvatarUnion` and
+    // `PROFILE_APPEARANCE_VARS` for the measurements behind each one. Written
+    // only here, never by `inicial`, because they are the row the copied town
+    // is displayed under and `inicial` copies no town.
     //
     // The sticker set, and it is the one field where "take the donor's" is
     // provably the wrong direction.
@@ -1463,11 +1423,26 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
     // holding the safe set it is a byte-identical no-op.
     own = cloneAvatarUnion(fr, own, scrub);
     own = unlockEmoji(own);
+    // `townName` is the one appearance var that never leaves our account: it
+    // is the name the copied town is displayed under in the co-op roster and
+    // chat. Measured on the save banned 2026-10-02 after a join-alone with
+    // nothing sent (`mGameInfo.current-13.xml`): the copy had overwritten our
+    // name with the donor's personal one (`Sunil Babu`, their `city_name`,
+    // level 46, same town) while the account running clean to this minute
+    // (`mGameInfo.current-12.xml`) wears the default word `Township`,
+    // linkable to nothing. The 30-9 no-ban baseline never copied it either —
+    // this overwrite arrived 2026-10-02 with the profile-row return and is the
+    // one post-window addition with a donor-personal value. The other five
+    // are ordinary cosmetics the clean account wears too (`ava387`,
+    // `frame_10`), so they keep following the town.
     for (const name of PROFILE_APPEARANCE_VARS) {
+      if (name === "townName") continue;
       const val = readVarLoose(fr, name);
       if (val != null) own = writeVar(own, name, scrub(val));
     }
-    own = copyProfileLists(fr, own, scrub);
+    // No `copyProfileLists` call: the four `Unlocked*` lists stay ours (see
+    // the note above `PROFILE_APPEARANCE_VARS`). Like `townName`, a donor's
+    // list is a foreign identity the roster renders, not town state.
 
     if (mode === "novo") {
       for (const tag of NOVO_BLOCKS) own = cloneSimple(fr, own, tag, scrub).xml;

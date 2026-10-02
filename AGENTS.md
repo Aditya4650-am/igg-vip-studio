@@ -1789,10 +1789,13 @@ plus the avatar union, the co-op's invariance in every mode, and **the
 reference shape**: a save with no list of its own must come out equal to
 `"," + CHAT_EMOJI_IDS.join(",,") + ","`, so trimming `CHAT_EMOJI_IDS` or
 deleting this write again fails the suite rather than an account.
-`copy: a full restore takes the town and exactly the reference tool's four
-profile lists` pins the `Configs` line in both directions (the four arrive and
-are inserted *inside* `Configs`; `UnlockedThemes`, the `New*` markers and the
-incident flag do not).
+`copy: a full restore keeps our own profile lists, never the donor's` pins the
+`Configs` line in both directions (the donor's four never arrive, ours survive
+list for list, a list we never had is not created; `UnlockedThemes`, the `New*`
+markers and the incident flag do not — as before). This supersedes the
+2026-10-02 rule that cloned the reference tool's four lists: every join-era
+banned save wears the donor's lists (8/13/14) while every clean save carries
+its own (2/7) or none (12), so the measured shape outvotes the reference.
 
 Measured end to end over the corpus — 8 own saves × 2 donors × 3 modes = **48
 runs**, restore and decor clone together exactly as *Save & push* queues them:
@@ -1873,6 +1876,55 @@ sticker id is one the game's own catalog contains, and the set is the one that
 has just been sent safely. That is not a mechanism for why Playrix acted, and
 no tool can promise 100% protection: read a green gate as "nothing provably
 wrong", never as "cannot be banned".
+
+### Headline counters land only on history already held (2026-10-03)
+
+Three rules, one principle — a copied number is never left with nothing
+behind it. All three were built together because the tutorial-task ban
+(`mGameInfo.current-14.xml`) needed all three at once: the restore stopped
+writing the combination, and the gates refuse anything else that would.
+
+**Rule 1 — `townName` never leaves our account.** The `PROFILE_APPEARANCE_VARS`
+loop skips it; the other five cosmetics still follow the town. Measured: the
+join-alone ban (`current-13.xml`) wore the donor's personal name (`Sunil
+Babu`, their `city_name`) while clean 12 wears the default word; the 30-9
+baseline never copied it either. This is the one post-window addition with a
+donor-personal value, and it is gone.
+
+**Rule 2 — `RegataTasksCompleted` / `FullCardCollections` need backing.** In
+town modes the donor's number lands only where our own history already has
+the shape to hold it — any `<MyOldTask>` at all for regatta, any `cardId`
+row at all for cards — otherwise ours stays. No threshold is invented. 14
+carried 77 over zero records (the game then ran first-timer onboarding under
+a veteran counter while the server watched); with this rule that file keeps
+its own small number and stays a genuine rookie on paper as well as in play —
+the shape clean 12 completed its own first task under.
+
+**Rule 3 — the gates refuse the pair.** `assertRegattaSafe` gains
+`regatta-counter-without-records`, `assertCardCollectionsSafe` refuses a
+raised `FullCardCollections` Var on a row-less save (the counter lives
+outside the block, so the check runs before the span compare). Same
+loaded-vs-pushed rule throughout: arrived-that-way passes, records/rows
+behind the raise pass, only a newly created split refuses — a Stats-tab raise
+is told to complete a task / open the feature first instead of failing
+silently in game.
+
+The 1919 history test was re-split by this rule (`RegataTasksCompleted` and
+`FullCardCollections` stay ours on record-less fixtures in every mode; the
+backed landing is pinned separately), and the shared `ownSave` stays
+block-less on purpose — three card tests pin that fixture property, so the
+backed fixtures live in the new tests instead of in it.
+
+Guard rails: `copy: headline counters land only on history already held`
+(donor values land on records/rows held, `inicial` keeps ours either way),
+`copy: our town name is never the donor's` (name stays in all modes, the
+picture still follows the town), the two gate tests (refuse the rise,
+arrived-that-way passes, backing passes). Suite: 218/218, typecheck clean.
+
+**Honest limit, unchanged.** This removes every file-measurable trigger the
+banned saves share. It does not remove the duplicate town bytes, the
+level/XP gap against the server's own record, or a flagged device — those
+answer to behavior, never to edits.
 
 ### The copy is staged now, because none of the reference tools talk to Playrix (2026-10-02)
 
