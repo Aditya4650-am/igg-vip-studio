@@ -975,32 +975,39 @@ test("cards: the push gate refuses an invariant no real city breaks, but not one
   );
 });
 
-test("cards: the push gate refuses a lifetime counter with no rows behind it", () => {
-  // The cards half of the file the 10-point tutorial-task ban arrived in:
-  // `FullCardCollections` raised while the save holds zero
-  // `<DataElem name="cardId">` rows anywhere. The counter lives outside the
-  // block, so the span compare never sees a Var-only change — this check runs
-  // first for exactly that case.
+test("cards: the card stat saves on a save with no cards behind it", () => {
+  // Reported 2026-10-04: the card stat alone refused while every other field
+  // in the Stats tab went through — "in this tool the card stat is working".
+  // The reference tool writes this counter through its own FIELD_MAP with no
+  // check of any kind, and it is a display number the game does not count a
+  // collection from, so the rule that blocked it is gone. Pinned here so it
+  // cannot quietly come back. The block half of the gate — a collection that
+  // vanishes, appears from nowhere, or breaks an invariant real saves keep —
+  // is asserted in the tests on either side of this one and is untouched.
   const noRows = '<root><Global><Var name="FullCardCollections" v="2" t="i"/></Global></root>';
   const raised = noRows.replace('v="2"', 'v="7"');
   assert.notEqual(raised, noRows, "the raise must actually land");
-  assert.throws(
+  assert.doesNotThrow(
     () => assertCardCollectionsSafe(noRows, raised),
-    /card/i,
-    "a counter with no rows behind it must be refused on push",
+    "raising the card stat with no cards behind it must be allowed",
   );
-  // Same loaded-vs-pushed rule as every other gate: arrived-that-way passes,
-  // and rows behind the raise pass (the clean account's shape).
   assert.doesNotThrow(
     () => assertCardCollectionsSafe(raised, raised),
-    "a split the save arrived with is never blocked",
+    "an unchanged counter is never a question",
   );
   const withRow = noRows.replace("</Global>", '<DataElem name="cardId" type="string" value="card_09"/></Global>');
-  const withRowRaised = withRow.replace('v="2"', 'v="7"');
   assert.doesNotThrow(
-    () => assertCardCollectionsSafe(withRow, withRowRaised),
+    () => assertCardCollectionsSafe(withRow, withRow.replace('v="2"', 'v="7"')),
     "a counter with rows behind it stays pushable",
   );
+
+  // And the path the user actually takes: Stats tab -> Save & push, on a
+  // save that holds no card rows at all.
+  const { sessionId } = load();
+  const crdId = studio.catalogs().fields.find((f) => f.key === "crd")!.id;
+  const out = studio.applySave({ token, sessionId, stats: { [crdId]: "150" } });
+  assert.match(out.xml!, /name="FullCardCollections"[^>]*v="150"/, "the card stat must land");
+  balanced(out.xml!);
 });
 
 test("cards: a push that never touches cards pays nothing for the card gate", () => {

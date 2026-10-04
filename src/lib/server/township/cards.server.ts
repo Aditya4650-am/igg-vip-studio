@@ -7,12 +7,11 @@
  * it is not a feature: it runs on every push and refuses a save whose card
  * section a *different* edit broke.
  *
- * It is reachable without any card UI. Two paths still move card data:
- *
- * - the Stats tab writes the flat `FullCardCollections` counter (`crd`), and
- *   a raise with no `<DataElem name="cardId">` rows behind it is the shape of
- *   the 10-point tutorial-task ban on file;
- * - a restore copies the friend's card state through `INICIAL_VARS`.
+ * It is reachable without card UI: a restore copies the friend's card state
+ * through `INICIAL_VARS`, so the block can move without anyone opening a
+ * card screen. The Stats tab's `crd` also writes the flat
+ * `FullCardCollections` counter — that one is **not** gated any more, see
+ * `assertCardCollectionsSafe`.
  *
  * `cardProblems` returns invariant *keys* rather than messages so
  * `assertCardCollectionsSafe` can diff the save as it was loaded against the
@@ -99,17 +98,6 @@ function docInt(doc: string, name: string): number | null {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const m = doc.match(new RegExp(`<DataElem\\b[^>]*\\bname="${esc}"[^>]*\\bvalue="(\\d+)"`, "i"));
   return m ? Number(m[1]) : null;
-}
-
-/**
- * Flat `<Var name="…" v="…">` integer anywhere in the document (missing or
- * non-numeric reads 0). The block-scoped `docInt` above only sees
- * `<DataElem>` values; the lifetime counter is a `<Var>` outside the block,
- * so the gate reads it at document scope.
- */
-function flatVarInt(xml: string, name: string): number {
-  const m = new RegExp(`<Var\\b[^>]*\\bname="${name}"[^>]*\\bv="(\\d+)"`, "i").exec(xml);
-  return m ? Number(m[1]) : 0;
 }
 
 /* ------------------------------------------------------------------ *
@@ -241,28 +229,36 @@ export function cardProblems(block: string): string[] {
  * straight string compare of the `CardCollections` block, so features that
  * never touch cards cost nothing.
  *
+ * It covers **the block only**. The flat `FullCardCollections` Var — the
+ * Stats tab's `crd` — is deliberately not gated any more; see the note
+ * inside.
+ *
  * A block that disappears or appears from nowhere is refused outright: no
  * feature in this tool creates one, so a block that was not there a moment
  * ago means a splice went somewhere it should not have.
  */
 export function assertCardCollectionsSafe(loaded: string, pushed: string) {
-  // A headline counter with no rows behind it is the cards half of the file
-  // the 10-point tutorial-task ban arrived in: `FullCardCollections` raised
-  // while the save holds zero `<DataElem name="cardId">` rows anywhere. The
-  // counter lives outside the `CardCollections` block, so this runs before
-  // the span compare below — a Var-only change on a block-less save would
-  // otherwise never be seen. Same loaded-vs-pushed rule: a split the save
-  // arrived with stays pushable, and a raise against rows already held
-  // never trips this. A Stats-tab raise on a row-less save is refused with
-  // its reason instead of failing silently in game.
-  if (!/<DataElem\b[^>]*\bname="cardId"/i.test(pushed)) {
-    if (flatVarInt(pushed, "FullCardCollections") > flatVarInt(loaded, "FullCardCollections")) {
-      throw new Error(
-        "Không đẩy file lên máy: số bộ sưu tập (card) tăng mà save không có lá bài nào — " +
-          "mở tính năng thẻ trong game và nhận vài lá trước, rồi hãy sửa số này.",
-      );
-    }
-  }
+  // `FullCardCollections` (`crd`) stopped being gated on 2026-10-04, on the
+  // report that the card stat alone refused while every other field in the
+  // Stats tab went through — "in this tool the card stat is working". Two
+  // measured reasons for lifting it:
+  //
+  // - It is a display counter. The game does not count a collection from it,
+  //   so a number sitting on a save with zero `<DataElem name="cardId">`
+  //   rows changes nothing in game and cannot be read as a completed set.
+  // - The reference tool writes it through its own FIELD_MAP with no check
+  //   of any kind. Measured in `IGG-VIP-Tool-complete.zip`: no
+  //   `assertCardCollectionsSafe`, no `cardProblems` anywhere in it — only
+  //   `crd -> FullCardCollections`.
+  //
+  // For the record, the rule it replaces came from a save behind the
+  // 10-point tutorial-task ban that raised this counter on a file with no
+  // card rows at all. That is recorded rather than forgotten; it was one
+  // confounded file, not a demonstrated cause, and holding the single field
+  // the user came to edit reads as a broken feature rather than a guard.
+  //
+  // What follows still refuses a broken *block*, which is the part a server
+  // could reconcile against real collection data.
   const a = namedSpan(loaded, "CardCollections", "dataStore");
   const b = namedSpan(pushed, "CardCollections", "dataStore");
   if (!a && !b) return;

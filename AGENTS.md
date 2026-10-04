@@ -875,11 +875,10 @@ Two mechanisms coexist, deliberately:
 Two things were deliberately kept, because neither is a feature:
 
 - The **push gate** in `cards.server.ts` — `cardProblems` /
-  `assertCardCollectionsSafe`, wired into `encodeSave`. It is reachable
-  without any card UI: the Stats tab's `crd` can raise `FullCardCollections`
-  on a save with no card rows (the 10-point tutorial-task ban), and a restore
-  can copy card state. Removing it would have weakened push protection for
-  Stats and restore, which is the opposite of what a ban report asks for.
+  `assertCardCollectionsSafe`, wired into `encodeSave`. It now covers the
+  `CardCollections` **block** only: the `FullCardCollections` (`crd`) raise
+  rule was lifted on 2026-10-04, see *The ban guard* below. A restore can
+  still copy card state, so the block half still has something to catch.
 - `crd` in the Stats tab, unchanged — it is one field inside Stats, not the
   cards feature.
 
@@ -945,6 +944,45 @@ refused outright: no feature here creates one.
 The message contains "card" on purpose, same grep-able convention as the
 regatta reasons.
 
+#### The `crd` raise rule was lifted (2026-10-04)
+
+Reported as *"in this tool the card stat is working"* — the Stats tab's `crd`
+was the **one** field in that tab that refused, with
+`Không đẩy file lên máy: số bộ sưu tập (card) tăng mà save không có lá bài
+nó — mở tính năng thẻ trong game và nhận vài lá trước, rồi hãy sửa số này`,
+while every other field beside it went through. Holding the single field the
+user came to edit reads as a broken feature rather than a guard.
+
+`assertCardCollectionsSafe` no longer looks at the flat `FullCardCollections`
+Var at all. Two measured reasons:
+
+- **It is a display counter.** The game does not count a collection from it
+  (measured, above), so a number sitting on a save with zero
+  `<DataElem name="cardId">` rows changes nothing in game and cannot be read
+  as a completed set.
+- **The reference tool writes it with no check whatsoever.** Measured in
+  `IGG-VIP-Tool-complete.zip`: zero hits for `assertCardCollectionsSafe` and
+  zero for `cardProblems` anywhere in it — only `crd -> FullCardCollections`
+  in `vars.server.ts` plus the same Stats label. It ships no gate of any kind
+  against this counter.
+
+The rule it replaces came from the save behind the **10-point tutorial-task
+ban**, which raised the counter on a file with no card rows at all. That stays
+on file as a *measurement*, not as a cause: it was one confounded save — that
+file also carried every other defect on the list — and the counter is not read
+in game. Re-adding the refusal is what
+`cards: the card stat saves on a save with no cards behind it` exists to fail.
+
+**The block half is untouched.** `cardProblems` and the span compare still
+refuse a `CardCollections` block that vanishes, appears from nowhere, or breaks
+an invariant real saves keep (duplicate `cardId`, a non-canonical `card_`
+grammar, `inStockCount` above `CARD_STOCK_MAX`, stock above
+`maxInStockCount`, `isNew` on a known card, `trackedUniqueCollectedCards`
+drifting off the distinct count, `lastSentCards` over 3, `totalSendCards`
+falling). Nothing in the tool writes that block any more, so those rules are
+inert unless a splice lands somewhere it should not — which is exactly what
+they exist to catch, and they still cover a restore that copies card state.
+
 ### Sending cards to friends
 
 No proven Playrix write API exists (the competitor tool fakes it with 0 hits
@@ -978,12 +1016,14 @@ The event window is read from **the** `RememberTime` pair whose `configId` /
 first is an empty leftover (`configId=""`, both times 0), so taking the first
 pair read every save as "closed".
 
-Guard rails: `studio-pipeline.test.ts` asserts the clamp, that `isNew` and the
-progress counters survive a full grant, every send refusal plus its rollback,
-the 3-entry history ceiling, and that `assertCardCollectionsSafe` refuses a
-broken block but not one the save arrived with. `verify.mts`-style checks were
-run against 4 real saves (clean, event-closed, and the tool-edited
-`mGameInfo.current.xml`) with zero failures.
+Guard rails: `studio-pipeline.test.ts` still asserts that
+`assertCardCollectionsSafe` refuses a broken block but not one the save arrived
+with, plus the card-stat lift documented under *The ban guard* above. The grant
+/ send assertions that used to live here (the `isNew` and progress counters
+surviving a full grant, every send refusal and its rollback, the 3-entry
+history ceiling) went out with the feature on 2026-10-04 — **210/210**. The
+`verify.mts`-style checks were run against 4 real saves (clean, event-closed,
+and the tool-edited `mGameInfo.current.xml`) with zero failures.
 
 ### Batch send: the ticked picker, and why there is still no API (2026-10-01)
 
@@ -1927,17 +1967,23 @@ watched); with this rule that file keeps its own small number and stays a
 genuine rookie on paper as well as in play. Writer and gate share one
 definition (`hasRegattaBacking` in `vars.server.ts`) so they can never
 disagree. 18 also weakens the cards alarm honestly: 216 over ~1 row with a
-board and standing behind it lives — the zero-row refusal stays, anything
-finer would be an invented threshold.
+board and standing behind it lives — and a save whose rows are simply absent
+is no longer refused for the counter alone, that half was lifted on
+2026-10-04 (*The `crd` raise rule was lifted* above) because the counter is
+display-only. Anything finer would have been an invented threshold either way.
 
 **Rule 3 — the gates refuse the pair.** `assertRegattaSafe` gains
-`regatta-counter-without-records`, `assertCardCollectionsSafe` refuses a
-raised `FullCardCollections` Var on a row-less save (the counter lives
-outside the block, so the check runs before the span compare). Same
-loaded-vs-pushed rule throughout: arrived-that-way passes, records/rows
-behind the raise pass, only a newly created split refuses — a Stats-tab raise
-is told to complete a task / open the feature first instead of failing
-silently in game.
+`regatta-counter-without-records`; `assertCardCollectionsSafe` used to refuse
+a raised `FullCardCollections` Var on a row-less save, and **that half was
+lifted on 2026-10-04** (see *The `crd` raise rule was lifted* above) — the
+counter is display-only and the reference tool writes it ungated, so holding
+the one Stats field the user came to edit read as a broken feature rather
+than a guard. The restore-side half is untouched and is where
+`FullCardCollections` is still held back: a restore that finds no owned rows
+keeps our number rather than importing the donor's. For what remains, same
+loaded-vs-pushed rule throughout: arrived-that-way passes, records behind the
+raise pass, only a newly created split refuses — a Stats-tab regatta raise is
+told to complete a task first instead of failing silently in game.
 
 The 1919 history test was re-split by this rule (`RegataTasksCompleted` and
 `FullCardCollections` stay ours on record-less fixtures in every mode; the
@@ -1948,8 +1994,10 @@ backed fixtures live in the new tests instead of in it.
 Guard rails: `copy: headline counters land only on history already held`
 (donor values land on records/rows held, `inicial` keeps ours either way),
 `copy: our town name is never the donor's` (name stays in all modes, the
-picture still follows the town), the two gate tests (refuse the rise,
-arrived-that-way passes, backing passes). Suite: 218/218, typecheck clean.
+picture still follows the town), the gate tests (the regatta rise is refused,
+arrived-that-way passes, backing passes — while the card-stat rise is pinned as
+**allowed** by `cards: the card stat saves on a save with no cards behind it`,
+so the lifted half cannot come back). Suite: 210/210, typecheck clean.
 
 **Honest limit, unchanged.** This removes every file-measurable trigger the
 banned saves share. It does not remove the duplicate town bytes, the
