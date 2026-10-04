@@ -51,16 +51,18 @@ Saves are edited by **string replacement only** — never parsed and re-serializ
 
 ## Windows client
 
-Built by `.github/workflows/build-client.yml` on `windows-latest` (PyInstaller cannot cross-compile). Push a `v*` tag to build and attach the EXE to a GitHub release, or run the workflow manually from Actions. The client loads its UI from the deployed Render server, so UI/icon changes need only a Render deploy + EXE restart — rebuild the EXE only when `client/` changes.
+Built by `.github/workflows/build-client.yml` on `windows-latest` (Nuitka compiles to machine code and `client/protect/` encrypts the result; neither can run on the Linux builder). Push a `v*` tag to build and attach the EXE to a GitHub release, or run the workflow manually from Actions. The client loads its UI from the deployed Render server, so UI/icon changes need only a Render deploy + EXE restart — rebuild the EXE only when `client/` changes.
+
+The shipped EXE is **protected**: compiled with Nuitka (no extractable Python bytecode — the old PyInstaller build could be unpacked and decompiled back to source in about a minute), then AES-256-GCM encrypted at rest behind a small C loader that authenticates the payload, refuses to run under a debugger, decrypts into `%TEMP%`, runs it and deletes it. `client/README.md` states plainly what that does and does not buy.
 
 Point the client at another server without rebuilding via `%APPDATA%\IGG-VIP-Studio\server.txt` or the `IGG_VIP_URL` environment variable.
 
-### "Failed to extract … decompression resulted in return code -1"
+### "Failed to extract … decompression resulted in return code -1" (and other instant launch failures)
 
-**This is a full disk, not a broken download.** The EXE is a *onefile* build: every launch unpacks ~300 MB into `%TEMP%`, and that message means Windows had nowhere to put it.
+**This is a full disk, not a broken download.** The message came from the old PyInstaller bootloader; the protected build fails the same way for the same reason. Every launch unpacks the client into `%TEMP%` — Nuitka's onefile uses `%TEMP%\onefile_*`, and the protector's loader writes its decrypted copy to `%TEMP%\ingg_*` first — and a machine with nowhere to put it fails before any of the app's own code can explain anything.
 
 1. Check free space on **C:** — near 0 GB triggers it.
-2. Delete stale `%TEMP%\_MEI*` folders. Each failed launch leaves a partial one behind (one machine had 17 of them = 372 MB).
+2. Delete stale `%TEMP%\onefile_*`, `%TEMP%\ingg_*` and old `%TEMP%\_MEI*` folders (one machine had 17 of the last kind = 372 MB).
 3. Relaunch. **No reinstall or re-download** — a brand-new EXE fails identically on a full disk.
 
-The error text comes from PyInstaller's bootloader, which runs before any of the app's own code, so it cannot be made friendlier from our side — free space is the only fix.
+Free space is the only fix: the unpacking happens before the app's own code runs, so it cannot be made friendlier from our side.

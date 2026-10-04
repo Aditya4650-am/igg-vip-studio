@@ -41,14 +41,47 @@ build_exe.bat
 ```
 The EXE is produced at `client\dist\IGG VIP TOOL.exe`.
 
-`build_exe.bat` builds with whatever Python is on PATH. If that interpreter is
-brand new, PyInstaller may not yet ship a bootloader for it, and the build can
-fail or need `console=True`. The CI workflow pins Python 3.12 for this reason;
-prefer it if the local build misbehaves.
+The build is two stages (`client/protect/build.py` runs both):
+
+1. **Nuitka** compiles `igg_client.py` — and every module it uses — to machine
+   code. The old PyInstaller build shipped recoverable Python bytecode:
+   `pyinstxtractor` plus a decompiler recovered the full source from it, which
+   is the opposite of protection.
+2. **`protect/pack_exe.py`** encrypts that EXE with AES-256-GCM and appends it
+   to a small C loader (`protect/loader.c`). On disk the client is unreadable
+   ciphertext; the loader authenticates it with the GCM tag (a tampered byte is
+   refused before anything runs), refuses to run under a debugger, decrypts to
+   a fresh `%TEMP%` folder, runs it with the same command line, and deletes it
+   afterwards. The AES key lives only inside the compiled loader and never as
+   32 contiguous bytes.
+
+`build_exe.bat` builds with whatever Python is on PATH. Nuitka's MinGW
+toolchain needs Python ≤ 3.12 (3.13+ requires MSVC); the CI workflow pins 3.12,
+which is the safest choice locally too. The first build downloads that
+toolchain (~300 MB) into `%LOCALAPPDATA%\Nuitka`.
+
+The build ends by **launching the protected EXE** with `IGG_CLIENT_PROBE` set
+and failing unless it reports its bundled `adb/` and `fresh_profile/` — i.e.
+"does it still work after encryption" is answered by the build itself, not by
+hope. CI repeats the launch as its own gate.
 
 Or trigger a build in CI without a Windows machine: **Actions → Build Windows
 client → Run workflow**. Pushing a `v*` tag builds the EXE and attaches it to a
 GitHub release automatically.
+
+### Notes on what this does and does not buy
+
+- Bytecode extraction (`pyinstxtractor` / `decompyle`) — gone; there is no
+  Python left in the file.
+- On-disk copy — AES-256-GCM, authenticated, per-build key.
+- Casual tampering / re-packing — refused by the GCM tag.
+- Debugging the loader — exits silently under a debugger.
+- A determined reverse engineer can still dump the payload from memory while
+  it runs: nothing that runs on someone else's machine can be made
+  "impossible to crack". The bar is moved from minutes to days.
+- Antivirus heuristics dislike a self-decrypting EXE. An unsigned tool that
+  drops and runs a temp binary is exactly what they look for, so expect to
+  allowlist it; that is a property of every protector, not a defect here.
 
 ## Point it at your server
 The client loads `DEFAULT_SERVER_URL` (in `igg_client.py`). Change it without

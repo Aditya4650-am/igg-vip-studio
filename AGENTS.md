@@ -2426,8 +2426,10 @@ verbatim, and the copy is byte-verified before anything is reported.
   replaces the current save. Verify is always enabled (no wipe to wait for).
 
 The pair was extracted from the same asset TS Lite ships (`assets/images.dat`,
-AES-CBC key `T$L1t3_S3cur3_K3`) and is bundled through `igg_client.spec`
-`datas`; `_freshProfileDir()` finds it under `sys._MEIPASS` when frozen.
+AES-CBC key `T$L1t3_S3cur3_K3`) and is bundled by the Nuitka command in
+`protect/build.py` (`--include-data-dir=fresh_profile`); `_freshProfileDir()`
+resolves it through `_bundle_roots()` rather than `sys._MEIPASS` alone (Nuitka
+has no such attribute — see *Protected build* below).
 
 Guard rails: `test_igg_client.py` pins the bundled files at 4675 / 300008
 bytes, asserts the script's command **order** (setenforce → rm -rf → mkdir →
@@ -2467,16 +2469,108 @@ repo):
    proves the absence. Its only other steps are the SUCCESS check and a
    launch dialog (`monkey -p <pkg> -c android.intent.category.LAUNCHER 1`).
 
+## Protected build: Nuitka + AES-256-GCM loader
+
+`python protect/build.py` (from `client/`) is the whole build. It exists
+because PyInstaller stores recoverable bytecode — `pyinstxtractor` plus a
+decompiler returns the source in about a minute — while the requirement was
+"not worth cracking", with the built EXE still launching normally afterwards.
+Three stages:
+
+1. **Nuitka compile** → `client/build/protect/IGG VIP TOOL.exe`, machine code
+   (the `__compiled__` marker is what the self-test checks).
+2. **`pack_exe.py`** → AES-256-GCM encrypts that payload and appends it to a
+   small C loader → `client/dist/IGG VIP TOOL.exe`.
+3. **`verify()`** launches the packed EXE with `IGG_CLIENT_PROBE` set and
+   fails the build unless the report shows `adb` + `fresh_profile` found and
+   `compiled: true`. A missing report *is* a failure ("failed before the
+   client code ran"), never a pass.
+
+Layout of the output: `loader EXE` + **48-byte trailer at the overlay start**
++ ciphertext. The trailer (`IGGPK001`, `cipher_len` u64 LE, nonce[12], GCM
+tag[16], reserved u32) comes *first* because loader.c reads it there before it
+knows the payload length, and its check
+`overlay + TRAILER_SIZE + cipher_len == file size` pins the order — do not
+"tidy" it into loader + ciphertext + trailer.
+
+Points that cost real time:
+
+- **`PointerToRawData` is at section-header offset 20, not 12** (12 is
+  `VirtualAddress`). Reading 12 made `overlay_offset()` answer `0xc200`
+  (> EOF), so the shipped file failed its own check. `pack_exe.py` and
+  `loader.c` both recompute the overlay from headers alone (`SizeOfHeaders` +
+  the furthest section end) — a stored offset would let a rewritten trailer
+  redirect the read — so the two copies must stay identical, and `fake_pe()`
+  in `test_protect.py` writes the real field layout or the test cannot see
+  the difference.
+- **`BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO.dwInfoVersion` must be
+  `BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO_VERSION` (1).** Left at the `0` that
+  `memset` writes, `BCryptDecrypt` answers `STATUS_INVALID_PARAMETER`
+  (`0xC000000D`) — but only on the call that writes output: the size-query
+  form with a NULL buffer returns success and Python's verification of the
+  same bytes passes. The visible symptom is a `#32770` MessageBox ("This file
+  failed its integrity check…") that hangs forever, which `verify()` reports
+  as "no self-test report". The MinGW field is named `dwInfoVersion` (the
+  gcc hint "`dwInfoFlags`" you may have written in a comment does not exist),
+  and `BCRYPT_INIT_AUTH_MODE_INFO` in `bcrypt.h` is the authoritative
+  recipe. Guard rail: `test_protect.LoaderCryptRoundTripTests` compiles
+  `loader.c` itself (`loader_probe.c` `#include`s it) against a Python-made
+  fixture and round-trips — setting `dwInfoVersion = 0` makes it fail, so it
+  is mutation-tested rather than decorative. It skips when no gcc is found.
+- **The key is never 32 contiguous bytes**: `write_key_header()` emits
+  `keygen.h` as two u64 arrays plus a third constant, `derive_key()` XORs
+  them back at runtime, and the round-trip test asserts Python's bytes equal
+  what C derives.
+- **The three anti-debug checks exit silently** (no message, exit 1), so
+  running under a debugger looks like "nothing happened" — deliberate. Only a
+  genuine integrity/decrypt failure shows the MessageBox.
+- **Temp drop is `%TEMP%\ingg_<pid>_<tick>\<same exe name>`**, decrypted,
+  run with our own command line, waited on, then deleted. That prefix is what
+  the README tells people to delete when a disk fills up, so keep loader.c
+  and the docs in step (one build spelled it `igng_`).
+- **Speed bumps, not a promise.** The loader can be patched (nop the checks,
+  hook the decrypt) and Nuitka code can be patched too: "not worth cracking",
+  never "cannot be cracked".
+
+Build gotchas, each already paid for:
+
+- **Nuitka reaches MinGW only on Python ≤ 3.12** (3.13+ wants MSVC), and the
+  loader is packed with the same MinGW gcc from Nuitka's cache — CI pins 3.12
+  so both halves share one compiler; `--mingw64` is passed only there.
+- **Never `--include-package=webview`**: Nuitka's always-on pywebview plugin
+  decides `webview.platforms.*` itself, and a whole-package decision is a
+  fatal conflict with it (the backends are imported statically in
+  `webview/guilib.py`, so nothing needs help).
+- **`--include-data-dir` skips `.exe`/`.dll`** as "code", so `adb/` goes in
+  with `--include-raw-dir=…=adb` or the build reports "No data files in
+  directory" and ships no adb at all.
+- **`_bundle_roots()`** in `igg_client.py` offers every plausible root
+  (`sys._MEIPASS`, `NUITKA_ONEFILE_DIRECTORY`, `argv[0]`'s directory,
+  `sys.executable`, `__file__`) and the caller keeps the first that holds the
+  file. It must skip `None`: `Path(str(None))` is `<cwd>/None`, which showed
+  up in the probe report as a root that never exists.
+- `client/igg_client.spec` (the PyInstaller path) was **deleted** once a full
+  protected build passed; `build_exe.bat`, the workflow and both READMEs go
+  through `protect/build.py`.
+
+Guard rails: `client/test_protect.py` (12 tests — trailer layout, overlay
+computation, key header, tamper refusal, compiler discovery, the C round
+trip) inside `python -m unittest discover -p "test_*.py"` (67 total);
+`.github/workflows/build-client.yml` installs nuitka/pywebview/cryptography,
+caches MinGW, runs the unittests, does the protected build, and gates on the
+self-test report.
+
 ## Windows client
 
 Built by `.github/workflows/build-client.yml` on a `windows-latest` runner,
-because PyInstaller cannot cross-compile from Linux. Push a `v*` tag to build
-and attach the EXE to a GitHub release; manual dispatch builds an artifact.
+because neither Nuitka nor its MinGW toolchain can cross-compile from Linux.
+Push a `v*` tag to build and attach the protected EXE to a GitHub release;
+manual dispatch builds an artifact.
 
-The EXE must be windowed (`console=False` in `igg_client.spec`). A console
-build is what puts a cmd window behind the app. The workflow asserts the PE
-subsystem is 2 so a console build cannot be released. Correspondingly, in
-windowed mode PyInstaller 6.x leaves `sys.stdout`/`sys.stderr` as `None`, so
+The EXE must be windowed (`--windows-console-mode=disable` in
+`protect/build.py`). A console build is what puts a cmd window behind the app.
+The workflow asserts the PE subsystem is 2 so a console build cannot be
+released. In a windowed build `sys.stdout`/`sys.stderr` are `None`, so
 `igg_client.py` redirects them to `os.devnull` before importing pywebview —
 bottle prints a banner on import and would otherwise crash startup.
 
@@ -2503,23 +2597,35 @@ feature; setting both env vars is what makes it real.
 
 ### "decompression resulted in return code -1" = disk full
 
-Not a corrupt EXE and not a PyInstaller bug. The spec builds **onefile**
-(`runtime_tmpdir=None`, no `COLLECT`), so every launch unpacks ~300 MB into
-`%TEMP%\_MEIxxxx`; with no free bytes the bootloader's `inflate()` fails on the
-first large blob and the process exits `-1` before any of our Python runs.
-Measured 2026-09-29: the machine had **0 bytes free** of 194.6 GB and had
-accumulated 17 leftover `_MEI*` folders (372 MB). Clearing stale temp plus the
-npm/uv caches gave 4.1 GB, and the rebuilt EXE opened its window normally —
-**zero code change**. Do not re-download or rebuild chasing it: a fresh build
-fails the same way while the disk is full. PyInstaller owns that dialog text
-and it is unreachable from Python, so the only remedy is free space; the user's
-Downloads/OneDrive are theirs to review, never touch them.
+Not a corrupt EXE. That exact dialog text came from the old PyInstaller
+bootloader (`runtime_tmpdir=None`, unpacking ~300 MB into `%TEMP%\_MEIxxxx`;
+measured 2026-09-29: **0 bytes free** of 194.6 GB and 17 leftover `_MEI*`
+folders = 372 MB). The protected build fails the same way for the same
+reason, one directory earlier: every launch unpacks the Nuitka onefile into
+`%TEMP%\onefile_*` (16.8 MB compressed → ~58 MB) and the loader then writes
+its decrypted copy to `%TEMP%\ingg_*`, so with nowhere to put them the process
+dies before any of our Python can explain anything. Clearing stale temp plus
+the npm/uv caches gave 4.1 GB and the EXE opened normally — **zero code
+change**. Do not re-download or rebuild chasing it: a fresh build fails the
+same way while the disk is full. The dialog is owned by code that runs before
+ours, so the only remedy is free space; the user's Downloads/OneDrive are
+theirs to review, never touch them.
 
-**Testing gotcha (cost several wrong conclusions):** `Start-Process` returns the
-PyInstaller *parent*, whose only window is the invisible
-`PyInstallerOnefileHiddenWindow` and whose `MainWindowTitle` is always `''`.
-The app runs in the **child** (`Win32_Process.ParentProcessId == $p.Id`), so
-polling `$p.MainWindowTitle` reports "hangs with no window" for an EXE that is
+**Diagnosing a loader that will not start:** it has no console, so read its
+window. A `#32770` (dialog) window on the process is the loader's
+`fatal()` MessageBox — enumerate windows with `GetClassName` /
+`GetWindowThreadProcessId` and read the text with UI Automation
+(`AutomationElement.FromHandle(...).FindAll(Descendants, TrueCondition)`);
+the integrity message is there in plain text. No dialog and a quick exit is
+the anti-debug path (silent by design). No dialog, no exit and no
+`%TEMP%\ingg_*` directory means it hung before `run_payload` — which is
+exactly what `verify()`'s "produced no self-test report" describes.
+
+**Testing gotcha (cost several wrong conclusions):** `Start-Process` returns
+the *parent* process — now the loader, whose only job is waiting, so
+`MainWindowTitle` is always `''`. The app's window belongs to the **child**
+payload it spawned (`Win32_Process.ParentProcessId == $p.Id`), so polling
+`$p.MainWindowTitle` reports "hangs with no window" for an EXE that is
 working perfectly. Enumerate the child's windows instead, and kill the child
 too — stopping only the parent orphans live instances.
 

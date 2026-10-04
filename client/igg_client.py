@@ -269,14 +269,51 @@ def _rewrite_secure_android_id(xml: str, new_id: str) -> tuple[str, int]:
     return _SETTING_EL_RE.sub(repl, xml), hits
 
 
+def _bundle_roots() -> list[Path]:
+    """Candidate roots for data shipped inside the EXE (`adb/`, `fresh_profile/`).
+
+    PyInstaller exposes its extraction directory as `sys._MEIPASS`. Nuitka has
+    no equivalent attribute: onefile mode extracts the archive to a temp folder
+    and runs the inner executable from there, and which path the runtime then
+    reports for `argv[0]` / `sys.executable` / `__file__` depends on whether
+    this process is the bootloader or the extracted one. Rather than betting on
+    any single answer, every plausible location is offered in order and the
+    caller keeps the first root that actually holds the file — the source tree
+    (running from a checkout) stays the final fallback.
+    """
+    roots: list[Path] = []
+    seen: set[Path] = set()
+
+    def add(value: object) -> None:
+        if value is None:
+            # A missing attribute / unset variable must not become a literal
+            # `None` path: Path(str(None)).resolve() is "<cwd>/None", which
+            # showed up in the probe report as a root that never exists.
+            return
+        try:
+            path = Path(str(value)).resolve()
+        except (OSError, ValueError, TypeError):
+            return
+        if path not in seen:
+            seen.add(path)
+            roots.append(path)
+
+    add(getattr(sys, "_MEIPASS", None))            # PyInstaller
+    add(os.environ.get("NUITKA_ONEFILE_DIRECTORY"))  # set by Nuitka's bootloader
+    if sys.argv and sys.argv[0]:
+        add(Path(sys.argv[0]).parent)
+    add(Path(sys.executable).parent)
+    add(Path(__file__).resolve().parent)
+    return roots
+
+
 def _find_adb() -> str | None:
     """Locate an adb executable: bundled first, then PATH, then every common
     emulator install location (MEmu / LDPlayer / Nox / BlueStacks / SDK)."""
-    here = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-    candidates: list[Path] = [
-        here / "adb" / "adb.exe",
-        here / "adb.exe",
-    ]
+    candidates: list[Path] = []
+    for root in _bundle_roots():
+        candidates.append(root / "adb" / "adb.exe")
+        candidates.append(root / "adb.exe")
     on_path = shutil.which("adb")
     if on_path:
         candidates.append(Path(on_path))
@@ -1384,12 +1421,7 @@ class NativeBridge:
 
     def _freshProfileDir(self) -> Path:
         """Locate the bundled fresh-city profile (frozen EXE or source tree)."""
-        roots: list[Path] = []
-        meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            roots.append(Path(meipass))
-        roots.append(Path(__file__).resolve().parent)
-        for root in roots:
+        for root in _bundle_roots():
             d = root / FRESH_PROFILE_DIR
             if (d / FRESH_LOCAL_PROFILE).is_file() and (d / FRESH_SAVE_PROFILE).is_file():
                 return d
@@ -1891,6 +1923,47 @@ def choose_window_url(base: str) -> str:
         return base
 
 
+def _probe() -> None:
+    """Build self-test: report whether the shipped EXE can still find itself.
+
+    `IGG_CLIENT_PROBE=<path>` makes the *protected* build write a JSON report
+    and exit instead of opening a window. The build runs it as its last step,
+    because that is the only way to prove the answer to "does it still work
+    after encryption?" without a human watching: the loader decrypted the
+    payload, Nuitka's onefile extracted it, and the data it ships with
+    (`adb/`, `fresh_profile/`) is reachable from wherever it now runs.
+
+    It writes to a file rather than stdout — the build is windowed, so stdout
+    may be `os.devnull` or gone entirely.
+    """
+    report: dict[str, object] = {"app": APP_NAME}
+    try:
+        report["roots"] = [str(r) for r in _bundle_roots()]
+        report["file"] = str(Path(__file__).resolve())
+        report["argv0"] = sys.argv[0] if sys.argv else None
+        report["executable"] = str(sys.executable)
+        report["meipass"] = getattr(sys, "_MEIPASS", None)
+        report["onefile_dir"] = os.environ.get("NUITKA_ONEFILE_DIRECTORY")
+        report["compiled"] = bool(globals().get("__compiled__"))
+        report["adb"] = _find_adb()
+        report["fresh_profile"] = str(NativeBridge()._freshProfileDir())
+    except Exception as e:  # noqa: BLE001
+        report["error"] = f"{type(e).__name__}: {e}"
+
+    text = json.dumps(report, indent=2, default=str)
+    target = os.environ.get("IGG_CLIENT_PROBE", "")
+    if target:
+        try:
+            Path(target).write_text(text, encoding="utf-8")
+        except OSError:
+            pass
+    if getattr(sys.stdout, "write", None):
+        try:
+            print(text, flush=True)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def main() -> None:
     url = choose_window_url(normalize_base_url(resolve_server_url()))
 
@@ -1915,7 +1988,10 @@ def main() -> None:
 
 if __name__ == "__main__":
     try:
-        main()
+        if os.environ.get("IGG_CLIENT_PROBE"):
+            _probe()
+        else:
+            main()
     except Exception as e:  # noqa: BLE001
         _fatal(
             f"{APP_NAME} could not start.\n\n{e}\n\n"

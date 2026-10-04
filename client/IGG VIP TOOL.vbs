@@ -1,7 +1,7 @@
 ' Launches IGG VIP TOOL with no console window.
-' The EXE is already a windowed build (console=False in igg_client.spec), so
-' this launcher is only a convenience for pinning it to the taskbar. Running
-' IGG VIP TOOL.exe directly is equivalent.
+' The EXE is already a windowed build (--windows-console-mode=disable in
+' protect/build.py), so this launcher is only a convenience for pinning it to
+' the taskbar. Running IGG VIP TOOL.exe directly is equivalent.
 Option Explicit
 Dim fso, shell, here, exePath
 Set fso = CreateObject("Scripting.FileSystemObject")
