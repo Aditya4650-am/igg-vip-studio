@@ -212,6 +212,63 @@ def get_device_id() -> str:
         pass
     return new_id
 # ── ADB helpers ──────────────────────────────────────────────────────────────
+# A refused write does not always say "permission denied". On MEmu's
+# SettingsProvider the answer is a Java stack trace on stdout —
+# "Exception occurred while executing 'put': java.lang.SecurityException" —
+# which matched none of the plain patterns originally used here, so every
+# refusal was classified as "the id did not change" and the real reason
+# never reached the user.
+_ADB_WRITE_REJECTED = re.compile(
+    r"permission denied|not found|no such file|failed|error:|unknown id"
+    r"|not allowed|not permitted|read-only file system"
+    r"|exception occurred|securityexception|java\.lang\.|denied by",
+    re.I,
+)
+
+_SETTING_EL_RE = re.compile(r"<setting\b[^>]*?/?>", re.I)
+_ANDROID_ID_NAME_RE = re.compile(r'\bname\s*=\s*"android_id"', re.I)
+_VALUE_ATTR_RE = re.compile(r'\bvalue\s*=\s*"[^"]*"')
+_DEFAULT_VALUE_ATTR_RE = re.compile(r'\bdefaultValue\s*=\s*"[^"]*"', re.I)
+
+
+def _rewrite_secure_android_id(xml: str, new_id: str) -> tuple[str, int]:
+    """Rewrite android_id inside the <setting> element that declares it.
+
+    Scoped to that one element because both the attribute order and the
+    value attribute's name vary between builds: AOSP writes
+    `name="android_id" value="..."`, while MEmu's provider writes
+    `package="root" defaultSysSet="true"` and keeps the id in
+    `defaultValue="..."`. A regex that pins one ordering finds nothing in
+    the other and answers "entry not found" against a file that plainly
+    holds the id — which is how the reset ended up refusing with no usable
+    reason. Whichever of the two the row actually carries is rewritten in
+    place, and the attribute's own name is preserved so the file keeps its
+    shape.
+
+    Returns the rewritten text and how many rows were touched.
+    """
+    hits = 0
+
+    def repl(m: re.Match[str]) -> str:
+        nonlocal hits
+        el = m.group(0)
+        if not _ANDROID_ID_NAME_RE.search(el):
+            return el
+        # `value` wins when the row carries both: that is the one
+        # `settings get` returns. `\bvalue` cannot match inside
+        # `defaultValue`, so the two never collide.
+        if _VALUE_ATTR_RE.search(el):
+            new_el, n = _VALUE_ATTR_RE.subn(f'value="{new_id}"', el)
+        else:
+            new_el, n = _DEFAULT_VALUE_ATTR_RE.subn(f'defaultValue="{new_id}"', el)
+        if n == 0:
+            return el
+        hits += 1
+        return new_el
+
+    return _SETTING_EL_RE.sub(repl, xml), hits
+
+
 def _find_adb() -> str | None:
     """Locate an adb executable: bundled first, then PATH, then every common
     emulator install location (MEmu / LDPlayer / Nox / BlueStacks / SDK)."""
@@ -873,7 +930,7 @@ class NativeBridge:
             f"su -c 'settings delete secure android_id'",
             f"su -c 'content delete --uri content://settings/secure --where \"name=''android_id''\"'",
             f"su -c 'content insert --uri content://settings/secure --bind name:s:android_id --bind value:s:{new_id}'",
-            f"su -c 'settings put secure android_id {new_id}'",
+            f"su -c 'content update --uri content://settings/secure/android_id --bind value:s:{new_id}'",
         ]
         # A put can report success while the provider silently keeps the old
         # value (hardened emulators), so every apparent success is verified
@@ -882,11 +939,8 @@ class NativeBridge:
         for cmd in put_cmds:
             code, out, err = _run_adb(adb, ["-s", serial, "shell", cmd], timeout=15)
             combined = (out + err).decode("utf-8", "replace").strip()
-            if code != 0 or re.search(
-                r"permission denied|not found|no such file|failed|error:|unknown id|not allowed",
-                combined,
-                re.I,
-            ):
+            if code != 0 or _ADB_WRITE_REJECTED.search(combined):
+                # Keep the device's own words — see _ADB_WRITE_REJECTED.
                 last_err = combined or "su failed"
                 continue
             check = ""
@@ -899,12 +953,23 @@ class NativeBridge:
                 break
             last_err = "id unchanged after write"
         if last_err:
-            raise RuntimeError(
-                "Android ID reset refused"
-                + (": " + last_err if last_err != "su failed" else "")
-                + " — change it in the emulator's device settings instead "
-                "(MEmu multi-instance properties), then Verify"
-            )
+            # The provider is dropping every write. On these builds the id
+            # lives in settings_secure.xml, not settings.db, and
+            # forceAndroidId edits exactly that file — it has existed for
+            # this case all along and simply had no caller, which is why the
+            # tool used to give up and send the user to MEmu's own dialog
+            # instead of doing the work itself. The reboot is part of it:
+            # the provider only reloads that file at boot.
+            try:
+                return self._forceAndroidIdRebooted(serial)
+            except RuntimeError as e:
+                detail = last_err if last_err not in ("su failed", "id unchanged after write") else str(e)
+                raise RuntimeError(
+                    "Android ID reset refused"
+                    + (": " + detail if detail else "")
+                    + " — change it in the emulator's device settings instead "
+                    "(MEmu multi-instance properties), then Verify"
+                ) from e
         self._drop_ssaid_cache(adb, serial)
         try:
             check = self.readAndroidId(serial).get("androidId", "")
@@ -913,6 +978,41 @@ class NativeBridge:
         if check and check != new_id:
             raise RuntimeError("Android ID did not change (old and new match)")
         return {"ok": True, "oldAndroidId": old, "androidId": new_id}
+
+    def _forceAndroidIdRebooted(self, serial: str) -> dict:
+        """Direct file edit + reboot, for providers that silently drop `settings put`.
+
+        The id on such builds lives in
+        /data/system/users/0/settings_secure.xml and the SettingsProvider only
+        reloads that file at boot, so the reboot is part of the operation
+        rather than a follow-up the caller must remember. Always verified by
+        a re-read once the device is back: a write that did not take must
+        never be reported as a success.
+        """
+        adb = _find_adb()
+        r = self.forceAndroidId(serial)
+        self._drop_ssaid_cache(adb, serial)
+        if r.get("needsReboot"):
+            self.rebootDevice(serial)
+            self.waitForDevice(serial, 180)
+            time.sleep(5)  # let SettingsProvider finish coming up
+        check = ""
+        try:
+            check = self.readAndroidId(serial).get("androidId", "")
+        except RuntimeError:
+            check = ""
+        if not check or check != r.get("androidId"):
+            raise RuntimeError(
+                "settings_secure.xml was written but the id still reads "
+                + (check or "<unreadable>")
+                + " after reboot"
+            )
+        return {
+            "ok": True,
+            "oldAndroidId": r.get("oldAndroidId", ""),
+            "androidId": r["androidId"],
+            "rebooted": bool(r.get("needsReboot")),
+        }
 
     def _drop_ssaid_cache(self, adb: str, serial: str) -> None:
         """Delete the per-app SSAID store so no stale mapping survives.
@@ -1112,17 +1212,7 @@ class NativeBridge:
                 break
         if not target:
             raise RuntimeError("settings_secure.xml not readable (need root)")
-        updated, n = re.subn(
-            r'(name="android_id"\s+value=")[0-9a-fA-F]*(")',
-            r"\g<1>" + new_id + r"\g<2>",
-            original,
-        )
-        if n == 0:
-            updated, n = re.subn(
-                r'(value=")[0-9a-fA-F]*(")(\s*/?>[^<]*name="android_id"|name="android_id")',
-                r"\g<1>" + new_id + r"\g<2>\g<3>",
-                original,
-            )
+        updated, n = _rewrite_secure_android_id(original, new_id)
         if n == 0:
             raise RuntimeError("android_id entry not found in settings_secure.xml")
         with tempfile.TemporaryDirectory() as td:
