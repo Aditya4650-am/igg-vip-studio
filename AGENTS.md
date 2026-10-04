@@ -859,15 +859,39 @@ Two mechanisms coexist, deliberately:
   display counter — it is **not** what the game counts a collection from. It
   was removed once for that reason and then restored, so the Stats tab behaves
   the way someone who knows the original zip expects it to.
-- The **Cards tab** is the real edit. `cards.server.ts` writes `OwnedCards`
-  inside `DataStoreCollection > CardCollections`, and the send feature also
-  writes `lastSentCards` plus the two send counters.
+- The **Cards tab was removed entirely on 2026-10-04**, on the report that
+  sends never reached the recipient ("i cant send cards to friends if i send
+  they not recive"). What went: the tab and its markup, the grant path
+  (`grantCards`), the send path (`sendCards` / `CardSend`), the pre-press
+  inspection (`inspectCards` / `friendsList` / `countOwnedCards`), the
+  `cards` / `cardSends` payload fields, the snapshot's `cardsOwned` /
+  `cardsInfo` / `cardFriends`, `src/lib/cards.ts`, the `public/cards/`
+  artwork, and the card i18n keys (only `vi` and `en` ever carried them —
+  the 18 locale packs are `Partial` and fell back). Delivery was never
+  proven: no Playrix write API for cards exists anywhere (see the resource
+  sweep below), so the feature could only ever write a save-side record and
+  hope the game accepted it. **Nothing else in the tool changed.**
+
+Two things were deliberately kept, because neither is a feature:
+
+- The **push gate** in `cards.server.ts` — `cardProblems` /
+  `assertCardCollectionsSafe`, wired into `encodeSave`. It is reachable
+  without any card UI: the Stats tab's `crd` can raise `FullCardCollections`
+  on a save with no card rows (the 10-point tutorial-task ban), and a restore
+  can copy card state. Removing it would have weakened push protection for
+  Stats and restore, which is the opposite of what a ban report asks for.
+- `crd` in the Stats tab, unchanged — it is one field inside Stats, not the
+  cards feature.
 
 `Session.friendCards` is still absent: `fetchFriendCity` / `attachFriendXml` /
 `snapshot` expose no card counter for the friend. `INICIAL_VARS` in
 `desban.server.ts` intentionally still lists `FullCardCollections` — the unban
 restore list must mirror the game's own reset exactly, so it is not part of
 this feature.
+
+Guard rail: `ui-regressions.test.mts` no longer greps for the send panel (the
+test went with it); `studio-pipeline.test.ts` keeps the three push-gate tests
+and lost the sixteen grant/send ones, so **210/210** is the new count.
 
 ### Grants: what a real city can hold
 

@@ -557,7 +557,6 @@ export function revealSave(p: {
   decor?: string[];
   barnItems?: Record<string, number>;
   museum?: string[];
-  cards?: Record<string, number>;
   zoo?: string[];
   upgrades?: { factory?: Record<string, number>; train?: Record<string, number>; island?: Record<string, number> };
 }) {
@@ -566,9 +565,6 @@ export function revealSave(p: {
     profile: remapGroups("profile", p.profile),
     avatars: (p.avatars ?? []).filter((id) => /^\d+$/.test(id)),
     museum: (p.museum ?? []).filter((id) => /^a\d+$/.test(id)),
-    cards: Object.fromEntries(
-      Object.entries(p.cards ?? {}).filter(([id]) => /^card_0*\d+$/.test(id)),
-    ),
     zoo: (p.zoo ?? []).filter((id) => /^[^:]+:\d+$/.test(id)),
     skins: remapGroups("skin", p.skins),
     items: remapRecord("item", p.items),

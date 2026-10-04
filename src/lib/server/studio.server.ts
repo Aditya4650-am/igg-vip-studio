@@ -11,7 +11,7 @@ import { findUnbalancedTag } from "./township/xml-edit.server";
 import { applyBarnCapacity, applyBarnItems, barnInfo, ensureBarnCapacity } from "./township/barn.server";
 import { assertRegattaSafe, injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, injectUpgradeLevels, inspectRegatta, parseProfileUnlocked, upgradeMaxLevel, discoverUpgrades, REGATTA_DEFAULT_TASKS, REGATTA_MAX_TASKS, UPGRADE_REF_CAP } from "./township/inject.server";
 import { grantArtifacts } from "./township/museum.server";
-import { assertCardCollectionsSafe, grantCards, countOwnedCards, friendsList, inspectCards, sendCards, type CardSend } from "./township/cards.server";
+import { assertCardCollectionsSafe } from "./township/cards.server";
 import { assertProgressionsSafe, assertSaveShapeSafe, stripUnknownAvatars } from "./township/save-shape.server";
 import { completeZoo, discoverZoo, type ZooPaddock } from "./township/zoo.server";
 import {
@@ -404,10 +404,6 @@ export type SavePayload = {
   decorQty?: number;
   sticker?: string[];
   museum?: string[];
-  cards?: Record<string, number>;
-  /** Queued card sends — one (card, friend) pair each, validated against the
-   * save's own `FriendsList` and `OwnedCards` on the server. */
-  cardSends?: CardSend[];
   zoo?: string[];
   barnUpgrades?: number;
   barnItems?: Record<string, number>;
@@ -634,31 +630,6 @@ function applySaveEdits(p: SavePayload) {
     }
     s.rawXml = r.xml;
     parts.push(`museum(${r.changed})`);
-  }
-  if (Object.keys(revealed.cards).length) {
-    const r = grantCards(s.rawXml, revealed.cards);
-    if (!r.changed) {
-      throw new Error(
-        `Không có thẻ nào thay đổi — tất cả đã có đủ số lượng`,
-      );
-    }
-    s.rawXml = r.xml;
-    parts.push(`cards(${r.changed})`);
-  }
-  if (p.cardSends?.length) {
-    try {
-      const r = sendCards(s.rawXml, p.cardSends);
-      s.rawXml = r.xml;
-      parts.push(`card-sends(${r.changed})`);
-    } catch (e) {
-      // Same rule as the regatta refusal: a refusal rolls the whole batch
-      // back rather than leaving the card grant already applied behind an
-      // error the next push would apply a second time.
-      s.rawXml = prevXml;
-      s.unban = prevUnban;
-      s.regatta = prevRegatta;
-      throw e;
-    }
   }
   if (revealed.zoo.length) {
     const r = completeZoo(s.rawXml, revealed.zoo);
@@ -991,9 +962,6 @@ export function snapshot(s: Session) {
     regatta: s.regatta,
     regattaInfo: inspectRegatta(s.rawXml ?? ""),
     zoo: s.zoo,
-    cardsOwned: countOwnedCards(s.rawXml ?? ""),
-    cardsInfo: inspectCards(s.rawXml ?? ""),
-    cardFriends: friendsList(s.rawXml ?? ""),
     friends: s.friends,
     friendCity: s.friendCity,
     unban: s.unban,

@@ -13,7 +13,6 @@ import { LANGS, isLang, t, type Lang, type Dict } from "@/lib/i18n";
 import { isDeviceId, mintDeviceId, normalizeDeviceId } from "@/lib/device-id";
 import { AVATAR_MAX, avatarEmoji, avatarGroupId, avatarIconPath, avatarsInRange, type Group, type Item } from "@/lib/catalogs";
 import { MUSEUM_IDS, artifactEmoji, artifactIconPath, museumLabel } from "@/lib/museum";
-import { CARD_GROUPS, CARD_SEND_MAX_PER_RUN, cardIconPath, cardNumber } from "@/lib/cards";
 import { iconForBarn, iconForDecorLabel, iconForGem, iconForGroup, iconForItemLabel, iconForProfileLabel, iconForSkin, iconForStat, iconForSticker, iconForUpgradeLabel, iconForZoo } from "@/lib/game-icon-map";
 import { REGATTA_MAX_TASKS, REGATTA_DEFAULT_TASKS, regattaReason, type RegattaReason } from "@/lib/regatta";
 import {
@@ -36,7 +35,7 @@ import {
   restoreFreshStart,
 } from "@/lib/studio-api";
 
-type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "regatta" | "barn" | "museum" | "cards" | "zoo" | "upgrades" | "newgame";
+type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "regatta" | "barn" | "museum" | "zoo" | "upgrades" | "newgame";
 type SessionSnap = Awaited<ReturnType<typeof connectLoad>>;
 type Catalogs = Awaited<ReturnType<typeof getCatalogs>>;
 type UnbanMode = "inicial" | "completo" | "novo";
@@ -114,7 +113,7 @@ function downloadText(name: string, text: string) {
 
 // "regatta" sits at index 8, the first overflow slot, so the eight primary
 // tabs keep their exact positions and only the second row gains a member.
-const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "regatta", "barn", "museum", "cards", "zoo", "upgrades", "newgame"];
+const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "regatta", "barn", "museum", "zoo", "upgrades", "newgame"];
 // Premium tab bar: 8 primary slots + a "More" overflow for the rest, so
 // labels never compress or wrap. Derived from TABS — one source of truth.
 const PRIMARY_TABS: Tab[] = TABS.slice(0, 8);
@@ -131,7 +130,6 @@ const TAB_KEY: Record<Tab, keyof Dict> = {
   regatta: "regatta",
   barn: "tabBarn",
   museum: "tabMuseum",
-  cards: "tabCards",
   zoo: "tabZoo",
   upgrades: "tabUpgrades",
   newgame: "tabNewGame",
@@ -148,7 +146,6 @@ const TAB_EMOJI: Record<Tab, string> = {
   regatta: "⛵",
   barn: "🌾",
   museum: "🏛️",
-  cards: "🃏",
   zoo: "🐾",
   upgrades: "⚙️",
   newgame: "🎮",
@@ -175,27 +172,9 @@ const REGATTA_WHY_KEY = {
   already_full: "regattaWhyFull",
 } as const;
 
-/** Why the Cards tab will (or will not) accept a send batch. Mirrors
- *  `CardsInfo.reason` in cards.server.ts so the refusal the server would
- *  give is the one the user reads before pressing anything. */
-const CARDS_REASON_KEY = {
-  ok: "cardsReady",
-  no_event: "cardsNoEvent",
-  window_closed: "cardsWindowClosed",
-  no_friends: "cardsNoFriends",
-} as const;
-
-/**
- * `CARD_STOCK_MAX` from `cards.server.ts`, duplicated because that module is
- * server-only and cannot be imported here. The server clamps regardless —
- * this only keeps the input from *asking* for a number no real city holds.
- */
-const CARD_STOCK_MAX = 4;
-
 function groupIcon(id: string): GameIconName {
   const value = id.toLowerCase();
   if (value.startsWith("ava_")) return "avatar";
-  if (value.startsWith("cards-")) return "cards";
   if (value.startsWith("paddock_")) return "zoo";
   if (value.includes("frame") || value.includes("badge") || value.includes("theme")) return "sticker";
   if (value.includes("style") || value.includes("skin")) return "skin";
@@ -225,7 +204,6 @@ function statEmoji(id: string): string {
 function groupEmoji(id: string): string {
   const value = id.toLowerCase();
   if (value.startsWith("ava_")) return "🧑";
-  if (value.startsWith("cards-")) return "🃏";
   if (value.startsWith("paddock_")) return "🐾";
   if (value.includes("badge") || value.includes("rank") || value === "expranks") return "🏅";
   if (value.includes("frame")) return "🖼️";
@@ -315,7 +293,6 @@ function itemEmoji(groupId: string | undefined, label: string, kind?: string): s
   if (g.includes("coupon")) return "🎟️";
   if (g.includes("gem")) return "💎";
   if (g.startsWith("paddock_")) return "🐾";
-  if (g.startsWith("cards-")) return "🃏";
   if (g.includes("order")) return "📦";
   if (g.includes("badge")) return "🏅";
   if (g.includes("rank") || g === "expranks") return "👑";
@@ -903,7 +880,6 @@ type GameIconName =
   | "items"
   | "barn"
   | "museum"
-  | "cards"
   | "zoo"
   | "feedback"
   | "language"
@@ -980,9 +956,6 @@ function GameIcon({ name, className, ...props }: { name: GameIconName; className
       break;
     case "museum":
       content = <><path d="m12 3.5 8.5 4v2H3.5v-2z" /><path d="M5.5 9.5v9M9.5 9.5v9M14.5 9.5v9M18.5 9.5v9" /><path d="M3.5 18.5h17M4.5 21h15" /></>;
-      break;
-    case "cards":
-      content = <><rect x="6" y="3.5" width="12" height="17" rx="2" /><path d="M12 7.2c-1.5 1.8-3.2 3-3.2 4.7a1.9 1.9 0 0 0 3.2 1.4 1.9 1.9 0 0 0 3.2-1.4c0-1.7-1.7-2.9-3.2-4.7z" /><path d="M12 13.6v2.9" /></>;
       break;
     case "zoo":
       content = <><circle cx="12" cy="14.5" r="3.4" /><circle cx="6.6" cy="9.5" r="1.7" /><circle cx="10" cy="7" r="1.7" /><circle cx="14" cy="7" r="1.7" /><circle cx="17.4" cy="9.5" r="1.7" /></>;
@@ -1276,18 +1249,6 @@ export function StudioApp() {
   const skinSel = useSetMap();
   const itemSel = useSetMap();
   const zooSel = useSetMap();
-  const [cardsQty, setCardsQty] = useState<Record<string, number>>({});
-  const [cardsFill, setCardsFill] = useState("1");
-  // Queued card sends: one entry per (card, friend). Validated server-side
-  // against the save's own FriendsList + OwnedCards, then written into
-  // lastSentCards exactly the way a real save records them.
-  const [cardSends, setCardSends] = useState<{ cardId: string; toUserId: string }[]>([]);
-  // Cards ticked in the send picker. The queue itself stays one entry per
-  // (card, friend) — a card may be sent to a friend once, which is all any
-  // real save has ever shown — so this is only "which rows are lit".
-  const [sendSel, setSendSel] = useState<Set<string>>(new Set());
-  const [sendFriend, setSendFriend] = useState("");
-  const [openPack, setOpenPack] = useState<string | null>("pack-1");
   const [decorSel, setDecorSel] = useState<Set<string>>(new Set());
   const [stickerSel, setStickerSel] = useState<Set<string>>(new Set());
   const [museumSel, setMuseumSel] = useState<Set<string>>(new Set());
@@ -1662,9 +1623,6 @@ export function StudioApp() {
       avatarSel.clear();
       skinSel.clear();
       itemSel.clear();
-      setCardsQty({});
-      setCardSends([]);
-      setSendSel(new Set());
       zooSel.clear();
       setDecorSel(new Set());
       setStickerSel(new Set());
@@ -1698,10 +1656,8 @@ export function StudioApp() {
     return Object.entries(barnItems).some(([k, v]) => v !== (session.barn.items[k] ?? 0));
   }, [session, barnUpgrades, barnItems]);
 
-  const cardsCount = useMemo(() => Object.values(cardsQty).filter((v) => v > 0).length, [cardsQty]);
-
   const pending =
-    profileSel.count + avatarSel.count + skinSel.count + itemSel.count + cardsCount + cardSends.length + zooSel.count + decorSel.size + stickerSel.size + museumSel.size +
+    profileSel.count + avatarSel.count + skinSel.count + itemSel.count + zooSel.count + decorSel.size + stickerSel.size + museumSel.size +
     upgradeFactorySel.count + upgradeTrainSel.count + upgradeIslandSel.count +
     (barnDirty ? 1 : 0) + (pendingRegatta ? 1 : 0) + (pendingSeason ? 1 : 0) + (pendingUnban ? 1 : 0) +
     (pendingDecorFragments ? 1 : 0) + (pendingDecorClone ? 1 : 0) + (pendingDecorMaxAll ? 1 : 0) +
@@ -1727,12 +1683,6 @@ export function StudioApp() {
       const unbanStage = pendingUnban === "inicial" ? 1 : pendingUnban === "completo" ? 2 : pendingUnban === "novo" ? 3 : 0;
       const qty = parseQty();
       const itemIds = Object.values(itemSel.asRecord()).flat();
-      const changedCards: Record<string, number> = {};
-      for (const [k, v] of Object.entries(cardsQty)) {
-        // Clamped here too: the server enforces it, the input should not
-        // offer a stock count no city the server has ever seen can hold.
-        if (v > 0) changedCards[k] = Math.min(CARD_STOCK_MAX, Math.floor(v));
-      }
       const changedBarn: Record<string, number> = {};
       for (const [k, v] of Object.entries(barnItems)) {
         if (v !== (session.barn.items[k] ?? 0)) changedBarn[k] = v;
@@ -1801,7 +1751,6 @@ export function StudioApp() {
         avatarSel.count > 0 ||
         skinSel.count > 0 ||
         itemSel.count > 0 ||
-        cardsCount > 0 ||
         zooSel.count > 0 ||
         decorSel.size > 0 ||
         stickerSel.size > 0 ||
@@ -1847,8 +1796,6 @@ export function StudioApp() {
           avatars: Object.values(avatarSel.asRecord()).flat(),
           skins: skinSel.asRecord(),
           items: Object.fromEntries(itemIds.map((id) => [id, qty])),
-          cards: Object.keys(changedCards).length ? changedCards : undefined,
-          cardSends: cardSends.length ? cardSends : undefined,
           zoo: Object.values(zooSel.asRecord()).flat(),
           decor: [...decorSel],
           decorQty: parseDecorQty(),
@@ -1890,9 +1837,6 @@ export function StudioApp() {
       avatarSel.clear();
       skinSel.clear();
       itemSel.clear();
-      setCardsQty({});
-      setCardSends([]);
-      setSendSel(new Set());
       zooSel.clear();
       profileSel.clear();
       setDecorSel(new Set());
@@ -1917,7 +1861,7 @@ export function StudioApp() {
     } finally {
       setBusy(false);
     }
-  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, cardsQty, cardSends, zooSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, regattaTasks, pendingSeason, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingTownClone, pendingDecorMaxAll, parseDecorQty, tr, device, upgradeFactorySel, upgradeTrainSel, upgradeIslandSel, upgradeTargetLevel]);
+  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, zooSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, regattaTasks, pendingSeason, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingTownClone, pendingDecorMaxAll, parseDecorQty, tr, device, upgradeFactorySel, upgradeTrainSel, upgradeIslandSel, upgradeTargetLevel]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1970,76 +1914,6 @@ export function StudioApp() {
   };
 
   const fields = useMemo(() => catalogs?.fields ?? [], [catalogs]);
-  // Cards closeup: 151 cards rotate across 5 pack arts (see cardIconPath), so
-  // the tab shows 5 pack tiles; tapping one expands its 30 cards.
-  const cardPacks = useMemo(
-    () =>
-      Array.from({ length: 5 }, (_, p) => {
-        const n = p + 1;
-        const items = CARD_GROUPS.flatMap((g) => g.items).filter((it) => {
-          const c = cardNumber(it.id);
-          return c !== null && ((c - 1) % 5) + 1 === n;
-        });
-        return { id: `pack-${n}`, label: `Pack ${n}`, art: `/cards/pack_${n}.webp`, items };
-      }),
-    [],
-  );
-
-  // Send-cards panel. A card can be sent only if the save already holds it or
-  // this same push is about to grant it (grants run first on the server), and
-  // only to someone on this save's own FriendsList — both rules are re-checked
-  // server-side; this just keeps the picker from offering a combination the
-  // save would then refuse.
-  const cardLabelOf = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const g of CARD_GROUPS) for (const it of g.items) m.set(it.id, it.label);
-    return m;
-  }, []);
-  const cardsInfo = session?.cardsInfo ?? null;
-  const cardFriends = session?.cardFriends ?? [];
-  const sendableIds = useMemo(() => {
-    const set = new Set<string>(session?.cardsInfo?.ownedIds ?? []);
-    for (const [id, n] of Object.entries(cardsQty)) if (n > 0) set.add(id);
-    return [...set].sort();
-  }, [session, cardsQty]);
-  const sendFriendValue = cardFriends.some((f) => f.id === sendFriend)
-    ? sendFriend
-    : (cardFriends[0]?.id ?? "");
-
-  // What the ticked picker would actually add for this recipient: cards this
-  // push could send (owned now, or granted by the same Save) that are not
-  // already queued to them — one entry per (card, friend) is all any real save
-  // has ever shown, and the server enforces the same rule.
-  //
-  // `sendRoom` is how many pairs the push may still take. The server refuses a
-  // batch above CARD_SEND_MAX_PER_RUN and rolls the whole push back, so the
-  // button has to know the number before it is pressed rather than after.
-  const sendPicked = useMemo(
-    () => sendableIds.filter((id) => sendSel.has(id)),
-    [sendableIds, sendSel],
-  );
-  const queuedHere = useMemo(
-    () => new Set(cardSends.filter((s) => s.toUserId === sendFriendValue).map((s) => s.cardId)),
-    [cardSends, sendFriendValue],
-  );
-  const sendFresh = (ids: string[]) => ids.filter((id) => !queuedHere.has(id));
-  const sendRoom = CARD_SEND_MAX_PER_RUN - cardSends.length;
-  const sendPickedCount = sendFresh(sendPicked).length;
-  const sendPickedOver = sendPickedCount > sendRoom;
-  const sendAllIds = sendFresh(sendableIds).slice(0, Math.max(0, sendRoom));
-
-  const queueSend = (ids: string[]) => {
-    if (!sendFriendValue) return;
-    setCardSends((prev) => {
-      const next = [...prev];
-      for (const id of ids) {
-        if (!next.some((x) => x.cardId === id && x.toUserId === sendFriendValue)) {
-          next.push({ cardId: id, toUserId: sendFriendValue });
-        }
-      }
-      return next;
-    });
-  };
 
   const zooGroups: Group[] = useMemo(    () =>
       (session?.zoo ?? []).map((p) => ({
@@ -2307,7 +2181,6 @@ export function StudioApp() {
     regatta: pendingRegatta ? regattaTasks : 0,
     barn: barnDirty ? 1 : 0,
     museum: museumSel.size,
-    cards: cardsCount,
     zoo: zooSel.count,
     upgrades: upgradeFactorySel.count + upgradeTrainSel.count + upgradeIslandSel.count,
     newgame: freshPhase === "idle" ? 0 : 1,
@@ -2953,306 +2826,6 @@ export function StudioApp() {
                           />
                         ))}
                       </div>
-                    </section>
-                  </div>
-                )}
-
-                {tab === "cards" && (
-                  <div className="space-y-3">
-                    <p className="rounded-md bg-input px-3 py-2 text-sm text-amber">{tr("cardsNote")}</p>
-                    <Bar
-                      hint={tr("cardsHint")}
-                      onAll={() => {
-                        const n = Math.min(CARD_STOCK_MAX, Math.max(1, Number.parseInt(cardsFill, 10) || 1));
-                        const next: Record<string, number> = {};
-                        for (const g of CARD_GROUPS) for (const it of g.items) next[it.id] = n;
-                        setCardsQty(next);
-                      }}
-                      onClear={() => setCardsQty({})}
-                      allLabel={tr("selectAll")}
-                      clearLabel={tr("clear")}
-                      extra={
-                        <label className="flex items-center gap-2 text-xs text-muted">
-                          {tr("cardsFill")}
-                          <input
-                            className="field field-qty"
-                            inputMode="numeric"
-                            aria-label={tr("cardsFill")}
-                            value={cardsFill}
-                            onChange={(e) => setCardsFill(e.target.value.replace(/[^\d]/g, ""))}
-                          />
-                        </label>
-                      }
-                    />
-                    {cardPacks.map((pack, i) => {
-                      const open = openPack === pack.id;
-                      const filled = pack.items.filter((it) => (cardsQty[it.id] ?? 0) > 0).length;
-                      return (
-                      <section key={pack.id} className="panel inventory-group">
-                        <div
-                          className="mb-3 flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
-                          onClick={() => setOpenPack(open ? null : pack.id)}
-                          role="button"
-                          tabIndex={0}
-                          aria-expanded={open}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              setOpenPack(open ? null : pack.id);
-                            }
-                          }}
-                        >
-                          <span className="group-asset" aria-hidden="true">
-                            <img
-                              src={pack.art}
-                              alt=""
-                              className="group-asset-img"
-                              draggable={false}
-                              onLoad={(e) => {
-                                const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
-                                if (fallback) fallback.style.display = "none";
-                              }}
-                              onError={(e) => {
-                                e.currentTarget.style.display = "none";
-                              }}
-                            />
-                            <span className="group-emoji">🃏</span>
-                          </span>
-                          <h3 className={cn("truncate text-xs font-bold tracking-wider uppercase", groupTone(pack.id, i))}>
-                            {pack.label}
-                          </h3>
-                          <span className="text-xs text-muted tabular-nums">
-                            {filled}/{pack.items.length}
-                          </span>
-                          <span className="ml-auto flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              type="button"
-                              className="h-8 px-2 text-xs text-muted hover:text-primary"
-                              onClick={() => {
-                                const n = Math.min(CARD_STOCK_MAX, Math.max(1, Number.parseInt(cardsFill, 10) || 1));
-                                setCardsQty((prev) => {
-                                  const next = { ...prev };
-                                  for (const it of pack.items) next[it.id] = n;
-                                  return next;
-                                });
-                              }}
-                            >
-                              {tr("allShort")}
-                            </button>
-                            <button
-                              type="button"
-                              className="h-8 px-2 text-xs text-muted hover:text-primary"
-                              onClick={() => {
-                                setCardsQty((prev) => {
-                                  const next = { ...prev };
-                                  for (const it of pack.items) delete next[it.id];
-                                  return next;
-                                });
-                              }}
-                            >
-                              {tr("noneShort")}
-                            </button>
-                          </span>
-                          <ChevronDown
-                            className={cn(
-                              "size-4 shrink-0 text-muted transition-transform duration-200 ease-smooth",
-                              !open && "-rotate-90",
-                            )}
-                          />
-                        </div>
-                        {open ? (
-                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                          {pack.items.map((it) => (
-                            <label key={it.id} className="premium-chip flex min-h-11 items-center justify-between gap-3 rounded-lg border border-transparent bg-input px-3 hover:border-primary/25">
-                              <span className="flex min-w-0 items-center gap-2.5">
-                                <span className="chip-asset chip-emoji" aria-hidden="true">
-                                  {cardIconPath(it.id) ? (
-                                    <img
-                                      src={cardIconPath(it.id)!}
-                                      alt=""
-                                      className="chip-asset-img"
-                                      draggable={false}
-                                      onLoad={(e) => {
-                                        const glyph = e.currentTarget.nextElementSibling as HTMLElement | null;
-                                        if (glyph) glyph.style.display = "none";
-                                      }}
-                                      onError={(e) => {
-                                        e.currentTarget.style.display = "none";
-                                      }}
-                                    />
-                                  ) : null}
-                                  <span className="chip-emoji-glyph">🃏</span>
-                                </span>
-                                <span className="chip-label truncate">{it.label}</span>
-                              </span>
-                              <input
-                                className="field field-qty"
-                                inputMode="numeric"
-                                aria-label={it.label}
-                                value={cardsQty[it.id] ?? 0}
-                                onChange={(e) => {
-                                  const n = Number.parseInt(e.target.value.replace(/[^\d]/g, ""), 10);
-                                  // Never let the field hold a stock count no real
-                                  // city has ever carried — the server clamps too.
-                                  setCardsQty((prev) => ({
-                                    ...prev,
-                                    [it.id]: Number.isFinite(n) ? Math.min(CARD_STOCK_MAX, n) : 0,
-                                  }));
-                                }}
-                              />
-                            </label>
-                          ))}
-                        </div>
-                        ) : null}
-                      </section>
-                      );
-                    })}
-
-                    {/* Send cards to friends: queued into Save & push like every
-                        other edit, so a refusal rolls the whole batch back. */}
-                    <section className="panel space-y-3">
-                      <div>
-                        <h3 className="text-xs font-bold tracking-wider uppercase">{tr("sendTitle")}</h3>
-                        <p className="mt-1 text-xs text-muted">{tr("sendHint")}</p>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2 text-xs">
-                        <span
-                          className={cn(
-                            "rounded px-2 py-1",
-                            cardsInfo?.reason === "ok" ? "bg-success/15 text-success" : "bg-amber/15 text-amber",
-                          )}
-                        >
-                          {tr(CARDS_REASON_KEY[cardsInfo?.reason ?? "no_event"])}
-                        </span>
-                        <span className="text-muted tabular-nums">
-                          {tr("sendStatOwned")} {cardsInfo?.owned ?? 0} · {tr("sendStatFriends")} {cardFriends.length} ·{" "}
-                          {tr("sendStatSent")} {cardsInfo?.sent ?? 0} · {tr("sendStatHistory")}{" "}
-                          {cardsInfo?.history ?? 0}
-                        </span>
-                      </div>
-
-                      {!cardFriends.length ? (
-                        <p className="text-xs text-amber">{tr("sendNoFriends")}</p>
-                      ) : !sendableIds.length ? (
-                        <p className="text-xs text-amber">{tr("sendNothing")}</p>
-                      ) : (
-                        <div className="space-y-3">
-                        <div className="flex flex-wrap items-end gap-2">
-                          <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-muted">
-                            {tr("sendFriend")}
-                            <select
-                              className="field"
-                              aria-label={tr("sendFriend")}
-                              value={sendFriendValue}
-                              onChange={(e) => setSendFriend(e.target.value)}
-                            >
-                              {cardFriends.map((f) => (
-                                <option key={f.id} value={f.id}>
-                                  {f.name === f.id ? f.id : `${f.name} · ${f.id}`}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        </div>
-
-                        <Bar
-                          hint={tr("sendPickHint")}
-                          onAll={() => setSendSel(new Set(sendableIds))}
-                          onClear={() => setSendSel(new Set())}
-                          allLabel={tr("selectAll")}
-                          clearLabel={tr("clear")}
-                          extra={
-                            <span className="text-xs text-muted tabular-nums">
-                              {tr("sendCard")}: {sendPicked.length}/{sendableIds.length}
-                            </span>
-                          }
-                        />
-
-                        {/* The whole sendable collection, ticked rather than
-                            chosen one dropdown at a time — 30 cards is one
-                            press, not 30. Only cards this push could actually
-                            send are offered; everything else is refused
-                            server-side anyway. */}
-                        <div className="max-h-72 overflow-y-auto pr-1">
-                          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-5">
-                            {sendableIds.map((id) => (
-                              <Chip
-                                key={id}
-                                label={cardLabelOf.get(id) ?? id}
-                                iconSrc={cardIconPath(id)}
-                                emoji="🃏"
-                                checked={sendSel.has(id)}
-                                onChange={() =>
-                                  setSendSel((prev) => {
-                                    const next = new Set(prev);
-                                    if (next.has(id)) next.delete(id);
-                                    else next.add(id);
-                                    return next;
-                                  })
-                                }
-                              />
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            className="btn btn-primary"
-                            disabled={
-                              busy || cardsInfo?.reason !== "ok" || sendPickedCount === 0 || sendPickedOver
-                            }
-                            onClick={() => queueSend(sendFresh(sendPicked))}
-                          >
-                            {tr("sendAdd")} ({sendPickedCount})
-                          </button>
-                          <button
-                            type="button"
-                            className="btn"
-                            disabled={busy || cardsInfo?.reason !== "ok" || sendAllIds.length === 0}
-                            onClick={() => queueSend(sendAllIds)}
-                          >
-                            {tr("sendAddAll")} ({sendAllIds.length})
-                          </button>
-                        </div>
-                        {sendPickedOver ? (
-                          <p className="text-xs text-amber">
-                            {tr("sendCapNote").replace("{count}", String(CARD_SEND_MAX_PER_RUN))}
-                          </p>
-                        ) : null}
-                        </div>
-                      )}
-
-                      {cardSends.length ? (
-                        <ul className="max-h-56 space-y-1 overflow-y-auto pr-1">
-                          {cardSends.map((s) => (
-                            <li
-                              key={`${s.cardId}|${s.toUserId}`}
-                              className="flex items-center gap-2 rounded bg-input px-2 py-1 text-xs"
-                            >
-                              <span className="truncate">{cardLabelOf.get(s.cardId) ?? s.cardId}</span>
-                              <span className="text-muted">→ {s.toUserId}</span>
-                              <button
-                                type="button"
-                                className="ml-auto h-7 px-2 text-muted hover:text-primary"
-                                onClick={() =>
-                                  setCardSends((prev) =>
-                                    prev.filter((x) => !(x.cardId === s.cardId && x.toUserId === s.toUserId)),
-                                  )
-                                }
-                              >
-                                ✕
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
-                      {cardSends.length ? (
-                        <p className="text-xs text-muted">
-                          {tr("sendQueueNote")} · {cardSends.length}
-                        </p>
-                      ) : null}
                     </section>
                   </div>
                 )}

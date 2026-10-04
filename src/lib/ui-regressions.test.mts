@@ -172,52 +172,6 @@ test("the regatta tab shows the save's own daily quota, not a hardcoded number",
   assert.ok(substituted >= 2, "both the hint and the refusal must carry the save's quota");
 });
 
-test("the send panel takes a ticked batch, not one card per press", () => {
-  // Reported as "not like this 1 card send": choosing a card from a dropdown
-  // and pressing Add, thirty times over. The panel now lights the cards it is
-  // about to send and queues them in one press — while staying inside the
-  // ceiling the server enforces, because a batch above it is refused and the
-  // whole push is rolled back.
-  const tsx = read("../components/studio-app.tsx");
-  const tab = tsx.slice(tsx.indexOf('{tab === "cards" &&'), tsx.indexOf('{tab === "zoo" &&'));
-  assert.ok(tab.length > 0, "could not locate the cards tab markup");
-
-  // the one-card dropdown is gone...
-  assert.ok(!tab.includes("setSendCard"), "the single-card picker must be gone");
-  assert.ok(!tab.includes("sendableIds.includes(sendCard)"), "no dropdown choosing one card at a time");
-
-  // ...replaced by a ticked grid over everything this push could send
-  assert.ok(tab.includes("checked={sendSel.has(id)}"), "the picker must be tickable");
-  assert.ok(tab.includes("setSendSel(new Set(sendableIds))"), "select all must light every sendable card");
-  assert.ok(/queueSend\(sendFresh\(sendPicked\)\)/.test(tab), "one press must queue the whole selection");
-  assert.ok(/\{tr\("sendAdd"\)\} \(\{sendPickedCount\}\)/.test(tab), "the button must show how many it will add");
-
-  // One press still means one entry per (card, friend): anything already
-  // queued to this recipient is not counted or written a second time.
-  assert.ok(tab.includes("sendFresh("), "cards already queued to this friend must not be queued again");
-
-  // The ceiling has to be the server's own number, not a guess in the UI, or
-  // "send every card I have" queues 151 and the server refuses all 151.
-  assert.ok(tab.includes("CARD_SEND_MAX_PER_RUN"), "the button must count against the shared ceiling");
-  assert.match(
-    read("cards.ts"),
-    /export const CARD_SEND_MAX_PER_RUN = 150/,
-    "the ceiling lives in the browser-safe module",
-  );
-  const server = read("server/township/cards.server.ts");
-  assert.ok(/export \{ CARD_SEND_MAX_PER_RUN \}/.test(server), "the server must re-export that same number");
-  assert.ok(!/export const CARD_SEND_MAX_PER_RUN/.test(server), "a second definition would drift from the first");
-
-  // A disabled button that says nothing reads as broken — same lesson as the
-  // regatta tab, where the refusal is spelled out where the user is looking.
-  const i18n = read("i18n.ts");
-  for (const key of ["sendPickHint", "sendCapNote"]) {
-    assert.ok(new RegExp(`\\b${key}:`).test(i18n), `${key} must exist in the dictionary`);
-  }
-  assert.ok(/\bsendCapNote:\s*"[^"]*\{count\}/.test(i18n), "sendCapNote must name the ceiling");
-  assert.ok(tab.includes('tr("sendCapNote")'), "an over-cap selection must say why it cannot be queued");
-});
-
 test("the copy is never gated, and no age banner is drawn over it", () => {
   const tab = read("../components/studio-app.tsx");
   const server = read("server/studio.server.ts");
