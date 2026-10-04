@@ -1,0 +1,1064 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>IGG VIP Studio — Complete User Guide</title>
+<meta name="description" content="The complete, step-by-step guide to IGG VIP Studio — from first launch to advanced city editing for Township." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   IGG VIP STUDIO — GUIDE THEME
+   ============================================================ */
+:root{
+  --bg:#05070d;
+  --bg-2:#090d18;
+  --surface:rgba(255,255,255,.035);
+  --surface-2:rgba(255,255,255,.06);
+  --stroke:rgba(255,255,255,.09);
+  --stroke-2:rgba(255,255,255,.16);
+  --txt:#e9edf7;
+  --muted:#98a2b8;
+  --gold:#f3c653;
+  --gold-2:#ffdf8e;
+  --gold-3:#b98a1e;
+  --cyan:#4fd8ff;
+  --violet:#a98bff;
+  --green:#4ade80;
+  --red:#ff6b6b;
+  --orange:#ffa94d;
+  --radius:20px;
+  --shadow:0 24px 70px rgba(0,0,0,.55);
+  --grad-gold:linear-gradient(135deg,#ffdf8e 0%,#f3c653 38%,#c9962a 72%,#ffdf8e 100%);
+  --grad-hero:linear-gradient(120deg,#f3c653 0%,#fff1c4 25%,#f3c653 50%,#4fd8ff 80%,#a98bff 100%);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:86px}
+body{
+  font-family:'Outfit',system-ui,-apple-system,'Segoe UI',sans-serif;
+  background:var(--bg);
+  color:var(--txt);
+  line-height:1.7;
+  overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+body::before{
+  content:"";position:fixed;inset:0;z-index:-2;
+  background:
+    radial-gradient(900px 520px at 12% -8%, rgba(243,198,83,.14), transparent 62%),
+    radial-gradient(820px 520px at 88% 4%, rgba(79,216,255,.11), transparent 60%),
+    radial-gradient(1000px 700px at 50% 108%, rgba(169,139,255,.10), transparent 65%);
+}
+body::after{
+  content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.4;
+  background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(ellipse at 50% 30%,#000 25%,transparent 78%);
+}
+img{max-width:100%}
+a{color:inherit}
+
+/* ---------- progress bar ---------- */
+#progress{position:fixed;top:0;left:0;height:3px;width:0%;z-index:200;
+  background:var(--grad-gold);box-shadow:0 0 16px rgba(243,198,83,.8);transition:width .1s linear}
+
+/* ---------- nav ---------- */
+nav{
+  position:sticky;top:0;z-index:150;
+  backdrop-filter:blur(18px) saturate(150%);
+  -webkit-backdrop-filter:blur(18px) saturate(150%);
+  background:rgba(5,7,13,.78);
+  border-bottom:1px solid var(--stroke);
+}
+.nav-in{max-width:1240px;margin:0 auto;padding:14px 22px;display:flex;align-items:center;gap:20px}
+.brand{display:flex;align-items:center;gap:11px;font-weight:800;letter-spacing:.4px;white-space:nowrap}
+.brand .mark{
+  width:36px;height:36px;border-radius:11px;display:grid;place-items:center;font-size:17px;
+  background:var(--grad-gold);color:#1a1204;box-shadow:0 6px 20px rgba(243,198,83,.35);
+}
+.brand b{font-size:16.5px}
+.brand span{font-size:11px;color:var(--muted);font-weight:500;letter-spacing:2.4px;text-transform:uppercase;display:block;line-height:1.1}
+.nav-links{display:flex;gap:5px;margin-left:auto;flex-wrap:wrap;justify-content:flex-end}
+.nav-links a{
+  text-decoration:none;font-size:13.5px;font-weight:600;color:var(--muted);
+  padding:7px 13px;border-radius:99px;transition:.22s;border:1px solid transparent;
+}
+.nav-links a:hover{color:#0d0f16;background:var(--gold);border-color:var(--gold)}
+.nav-toggle{display:none;margin-left:auto;background:var(--surface-2);border:1px solid var(--stroke);
+  color:var(--txt);border-radius:11px;padding:8px 13px;font-size:17px;cursor:pointer}
+
+/* ---------- hero ---------- */
+header.hero{max-width:1240px;margin:0 auto;padding:88px 22px 62px;text-align:center;position:relative}
+.pill{
+  display:inline-flex;align-items:center;gap:9px;padding:8px 18px;border-radius:99px;
+  background:linear-gradient(180deg,rgba(243,198,83,.16),rgba(243,198,83,.05));
+  border:1px solid rgba(243,198,83,.42);color:var(--gold-2);
+  font-size:12.5px;font-weight:700;letter-spacing:2.6px;text-transform:uppercase;
+  box-shadow:0 0 40px rgba(243,198,83,.14);
+}
+h1{
+  font-size:clamp(40px,7.2vw,86px);font-weight:900;line-height:1.03;letter-spacing:-2.6px;
+  margin:26px 0 0;
+}
+h1 .shine{
+  background:var(--grad-hero);background-size:220% auto;
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  animation:shimmer 7s linear infinite;
+}
+@keyframes shimmer{to{background-position:220% center}}
+.lede{max-width:760px;margin:24px auto 0;font-size:clamp(16px,2vw,19.5px);color:var(--muted);font-weight:400}
+.hero-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:36px}
+.btn{
+  display:inline-flex;align-items:center;gap:9px;padding:14px 28px;border-radius:99px;
+  font-weight:700;font-size:15px;text-decoration:none;transition:.25s;border:1px solid transparent;cursor:pointer;
+}
+.btn-gold{background:var(--grad-gold);color:#181002;box-shadow:0 14px 36px rgba(243,198,83,.3)}
+.btn-gold:hover{transform:translateY(-3px);box-shadow:0 20px 46px rgba(243,198,83,.42)}
+.btn-ghost{background:var(--surface);border-color:var(--stroke-2);color:var(--txt)}
+.btn-ghost:hover{background:var(--surface-2);transform:translateY(-3px);border-color:var(--gold)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:14px;max-width:940px;margin:56px auto 0}
+.stat{
+  background:var(--surface);border:1px solid var(--stroke);border-radius:18px;padding:20px 16px;
+  backdrop-filter:blur(12px);
+}
+.stat .n{font-size:31px;font-weight:900;background:var(--grad-gold);-webkit-background-clip:text;background-clip:text;color:transparent;line-height:1.2}
+.stat .l{font-size:12px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;font-weight:600;margin-top:4px}
+
+/* ---------- layout ---------- */
+main{max-width:1240px;margin:0 auto;padding:0 22px 60px}
+section{margin-top:74px}
+.sec-head{display:flex;align-items:center;gap:16px;margin-bottom:26px;flex-wrap:wrap}
+.sec-num{
+  font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;color:#1a1204;
+  background:var(--grad-gold);padding:7px 13px;border-radius:10px;letter-spacing:1px;box-shadow:0 6px 18px rgba(243,198,83,.28);
+}
+.sec-head h2{font-size:clamp(27px,4vw,40px);font-weight:800;letter-spacing:-1.1px}
+.sec-sub{color:var(--muted);font-size:16.5px;max-width:860px;margin:-10px 0 26px}
+
+.card{
+  background:linear-gradient(160deg,rgba(255,255,255,.055),rgba(255,255,255,.02));
+  border:1px solid var(--stroke);border-radius:var(--radius);padding:26px;
+  backdrop-filter:blur(14px);box-shadow:var(--shadow);transition:.28s;
+}
+.card:hover{border-color:rgba(243,198,83,.4);transform:translateY(-4px)}
+.grid{display:grid;gap:18px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(268px,1fr))}
+.g4{grid-template-columns:repeat(auto-fit,minmax(215px,1fr))}
+
+h3{font-size:20.5px;font-weight:700;letter-spacing:-.3px;margin-bottom:9px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+h4{font-size:16px;font-weight:700;margin:20px 0 8px;color:var(--gold-2);display:flex;align-items:center;gap:8px}
+p{color:#c3cadb;font-size:15.6px}
+.card p+p{margin-top:10px}
+.dim{color:var(--muted);font-size:14.4px}
+.mono{font-family:'JetBrains Mono',monospace;font-size:13.4px;background:rgba(79,216,255,.09);
+  border:1px solid rgba(79,216,255,.24);color:#a8ecff;padding:2px 8px;border-radius:7px;white-space:nowrap}
+
+/* ---------- steps ---------- */
+.steps{counter-reset:s;display:grid;gap:18px}
+.step{
+  position:relative;background:var(--surface);border:1px solid var(--stroke);
+  border-radius:var(--radius);padding:24px 24px 24px 78px;transition:.28s;
+}
+.step:hover{border-color:rgba(243,198,83,.45);background:var(--surface-2)}
+.step::before{
+  counter-increment:s;content:counter(s);
+  position:absolute;left:22px;top:22px;width:38px;height:38px;border-radius:12px;
+  display:grid;place-items:center;font-weight:900;font-size:16px;color:#1a1204;
+  background:var(--grad-gold);box-shadow:0 8px 20px rgba(243,198,83,.3);
+}
+.step h3{font-size:18.5px}
+.step .k{font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--gold);font-weight:700}
+
+/* ---------- lists ---------- */
+ul.checks,ul.bullets{list-style:none;display:grid;gap:9px;margin-top:12px}
+ul.checks li,ul.bullets li{position:relative;padding-left:29px;font-size:15.2px;color:#c3cadb}
+ul.checks li::before{content:"✅";position:absolute;left:0;top:1px;font-size:14px}
+ul.bullets li::before{content:"◆";position:absolute;left:4px;top:6px;font-size:9px;color:var(--gold)}
+ul.warn li::before{content:"⚠️"}
+
+/* ---------- badges ---------- */
+.badge{display:inline-flex;align-items:center;gap:6px;font-size:11.6px;font-weight:700;
+  padding:4px 11px;border-radius:99px;letter-spacing:.7px;text-transform:uppercase}
+.b-gold{background:rgba(243,198,83,.15);color:var(--gold-2);border:1px solid rgba(243,198,83,.35)}
+.b-cyan{background:rgba(79,216,255,.13);color:#a8ecff;border:1px solid rgba(79,216,255,.3)}
+.b-green{background:rgba(74,222,128,.13);color:#9df5c1;border:1px solid rgba(74,222,128,.3)}
+.b-red{background:rgba(255,107,107,.13);color:#ffb3b3;border:1px solid rgba(255,107,107,.32)}
+.b-violet{background:rgba(169,139,255,.14);color:#d3c6ff;border:1px solid rgba(169,139,255,.34)}
+
+/* ---------- tab showcase ---------- */
+.tabs-preview{
+  display:flex;flex-wrap:wrap;gap:9px;padding:20px;border-radius:16px;
+  background:rgba(0,0,0,.32);border:1px solid var(--stroke);margin-bottom:22px;
+}
+.tp{
+  display:inline-flex;align-items:center;gap:7px;padding:9px 15px;border-radius:99px;
+  background:var(--surface-2);border:1px solid var(--stroke);font-size:13.6px;font-weight:600;transition:.2s;
+}
+.tp:hover{border-color:var(--gold);background:rgba(243,198,83,.13);transform:translateY(-2px)}
+.tp.more{border-style:dashed;color:var(--muted)}
+
+/* ---------- callouts ---------- */
+.callout{
+  border-radius:16px;padding:20px 22px 20px 60px;position:relative;margin-top:18px;
+  border:1px solid;font-size:15.3px;
+}
+.callout::before{position:absolute;left:19px;top:18px;font-size:21px}
+.c-info{background:rgba(79,216,255,.07);border-color:rgba(79,216,255,.3)}
+.c-info::before{content:"💡"}
+.c-good{background:rgba(74,222,128,.07);border-color:rgba(74,222,128,.3)}
+.c-good::before{content:"✅"}
+.c-warn{background:rgba(255,169,77,.07);border-color:rgba(255,169,77,.34)}
+.c-warn::before{content:"⚠️"}
+.c-danger{background:rgba(255,107,107,.07);border-color:rgba(255,107,107,.34)}
+.c-danger::before{content:"🛑"}
+.callout b{color:#fff}
+
+/* ---------- tables ---------- */
+.tbl-wrap{overflow-x:auto;border-radius:16px;border:1px solid var(--stroke);background:rgba(0,0,0,.3)}
+.card .tbl-wrap table{min-width:0}
+table{width:100%;border-collapse:collapse;font-size:14.6px;min-width:520px}
+th{background:linear-gradient(180deg,rgba(243,198,83,.16),rgba(243,198,83,.07));
+  color:var(--gold-2);text-align:left;padding:14px 17px;font-weight:700;font-size:12.6px;
+  letter-spacing:1.4px;text-transform:uppercase;border-bottom:1px solid var(--stroke-2)}
+td{padding:13px 17px;border-bottom:1px solid rgba(255,255,255,.055);color:#c3cadb;vertical-align:top}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:rgba(255,255,255,.032)}
+td strong{color:#fff}
+
+/* ---------- code ---------- */
+pre{
+  font-family:'JetBrains Mono',monospace;font-size:13.2px;background:rgba(0,0,0,.45);
+  border:1px solid var(--stroke);border-left:3px solid var(--gold);border-radius:12px;
+  padding:17px 19px;overflow-x:auto;color:#cfe3ff;line-height:1.72;margin-top:13px;
+}
+pre .c{color:#6b7a99}
+pre .g{color:#9df5c1}
+pre .y{color:var(--gold-2)}
+
+/* ---------- faq ---------- */
+details{
+  background:var(--surface);border:1px solid var(--stroke);border-radius:15px;
+  padding:0 20px;margin-top:11px;transition:.25s;overflow:hidden;
+}
+details[open]{border-color:rgba(243,198,83,.4);background:var(--surface-2)}
+summary{
+  cursor:pointer;list-style:none;padding:17px 0;font-weight:650;font-size:16px;
+  display:flex;align-items:center;gap:12px;
+}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"＋";font-size:19px;color:var(--gold);font-weight:700;transition:.25s;flex-shrink:0}
+details[open] summary::before{content:"−";transform:rotate(180deg)}
+details .body{padding:0 0 18px 30px;color:#c3cadb;font-size:15.2px}
+
+/* ---------- reveal ---------- */
+.reveal{opacity:0;transform:translateY(30px);transition:opacity .7s cubic-bezier(.2,.7,.3,1),transform .7s cubic-bezier(.2,.7,.3,1)}
+.reveal.in{opacity:1;transform:none}
+
+/* ---------- footer ---------- */
+footer{
+  margin-top:90px;border-top:1px solid var(--stroke);
+  background:linear-gradient(180deg,rgba(243,198,83,.05),transparent 55%);
+  backdrop-filter:blur(14px);
+}
+.foot-in{max-width:1240px;margin:0 auto;padding:54px 22px 34px;text-align:center}
+.foot-logo{
+  width:74px;height:74px;border-radius:23px;margin:0 auto 18px;display:grid;place-items:center;
+  font-size:33px;background:var(--grad-gold);color:#1a1204;box-shadow:0 18px 46px rgba(243,198,83,.36);
+  animation:float 5s ease-in-out infinite;
+}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}
+.foot-name{font-size:clamp(21px,3.4vw,29px);font-weight:800;letter-spacing:-.6px}
+.foot-name em{font-style:normal;background:var(--grad-hero);background-size:200% auto;
+  -webkit-background-clip:text;background-clip:text;color:transparent}
+.foot-tag{color:var(--muted);font-size:14.6px;margin-top:8px}
+.foot-credit{
+  margin-top:26px;padding:20px 26px;border-radius:18px;display:inline-block;
+  background:linear-gradient(135deg,rgba(243,198,83,.14),rgba(79,216,255,.08));
+  border:1px solid rgba(243,198,83,.4);
+}
+.foot-credit .small{font-size:11.4px;letter-spacing:3.4px;text-transform:uppercase;color:var(--gold-2);font-weight:700}
+.foot-credit .big{font-size:clamp(17px,3vw,23px);font-weight:800;margin-top:7px;letter-spacing:-.3px}
+.foot-credit .big span{background:var(--grad-gold);-webkit-background-clip:text;background-clip:text;color:transparent}
+.foot-links{display:flex;gap:20px;justify-content:center;flex-wrap:wrap;margin-top:28px}
+.foot-links a{color:var(--muted);text-decoration:none;font-size:14.4px;font-weight:600;transition:.2s}
+.foot-links a:hover{color:var(--gold)}
+.copy{margin-top:24px;color:#5f6a80;font-size:13.4px}
+
+/* ---------- to top ---------- */
+#top{
+  position:fixed;right:22px;bottom:22px;z-index:140;width:47px;height:47px;border-radius:15px;
+  background:var(--grad-gold);color:#181002;border:none;font-size:20px;cursor:pointer;
+  box-shadow:0 14px 34px rgba(243,198,83,.4);opacity:0;pointer-events:none;transition:.3s;
+}
+#top.on{opacity:1;pointer-events:auto}
+#top:hover{transform:translateY(-4px)}
+
+@media(max-width:860px){
+  .nav-links{display:none;position:absolute;top:100%;left:0;right:0;flex-direction:column;
+    background:rgba(5,7,13,.97);border-bottom:1px solid var(--stroke);padding:12px;gap:4px}
+  .nav-links.open{display:flex}
+  .nav-links a{text-align:center;padding:11px}
+  .nav-toggle{display:block}
+  .step{padding:66px 22px 24px}
+  .step::before{left:22px;top:20px}
+}
+</style>
+</head>
+<body>
+
+<div id="progress"></div>
+
+<!-- ================= NAV ================= -->
+<nav>
+  <div class="nav-in">
+    <div class="brand">
+      <div class="mark">⚡</div>
+      <div><b>IGG VIP STUDIO</b><span>User Guide</span></div>
+    </div>
+    <button class="nav-toggle" id="navToggle" aria-label="Menu">☰</button>
+    <div class="nav-links" id="navLinks">
+      <a href="#start">🚀 Getting Started</a>
+      <a href="#workspace">🖥️ Workspace</a>
+      <a href="#tabs">🧩 All Tabs</a>
+      <a href="#unban">🔓 Unban</a>
+      <a href="#safety">🛡️ Safety</a>
+      <a href="#faq">❓ FAQ</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ================= HERO ================= -->
+<header class="hero">
+  <div class="pill">⚡ Premium Township Suite · v1.1.28</div>
+  <h1>The Complete<br /><span class="shine">IGG VIP Studio Guide</span></h1>
+  <p class="lede">
+    From the very first launch to advanced city engineering — everything you need to
+    connect a device, back up safely, restore a city, run a regatta, max your factories
+    and push a clean save. 🎯
+  </p>
+  <div class="hero-cta">
+    <a class="btn btn-gold" href="#start">🚀 Start the Guide</a>
+    <a class="btn btn-ghost" href="#tabs">🧩 Browse All Tabs</a>
+    <a class="btn btn-ghost" href="#faq">❓ Quick Answers</a>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="n">14</div><div class="l">Feature Tabs</div></div>
+    <div class="stat"><div class="n">20</div><div class="l">Languages</div></div>
+    <div class="stat"><div class="n">5</div><div class="l">Push Gates</div></div>
+    <div class="stat"><div class="n">100%</div><div class="l">Backup & Rollback</div></div>
+  </div>
+</header>
+
+<main>
+
+<!-- ================= 01 GETTING STARTED ================= -->
+<section id="start" class="reveal">
+  <div class="sec-head"><span class="sec-num">01</span><h2>🚀 Getting Started</h2></div>
+  <p class="sec-sub">Do these five steps in order. Nothing is written to your device until you press <strong style="color:var(--gold)">💾 Save &amp; push</strong>.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="k">Prerequisites</div>
+      <h3>🖥️ Prepare your machine</h3>
+      <ul class="bullets">
+        <li><strong>Windows 10 / 11</strong> PC — the tool is a windowed desktop app.</li>
+        <li>An <strong>Android emulator</strong> with ADB (MEmu, LDPlayer, BlueStacks…). Rooted gives the full feature set.</li>
+        <li><strong>Township</strong> installed and signed in on that emulator.</li>
+        <li>Free disk space — at least <strong>1 GB</strong> free in <span class="mono">%TEMP%</span>.</li>
+      </ul>
+    </div>
+
+    <div class="step">
+      <div class="k">Download</div>
+      <h3>⬇️ Install the EXE</h3>
+      <p>Grab the latest build from the GitHub release page. No installer, no setup — it is a single portable file.</p>
+      <pre><span class="c"># Latest stable release</span>
+IGG.VIP.TOOL.exe   <span class="y">v1.1.28</span>
+
+<span class="c"># Release page</span>
+<span class="g">https://github.com/Aditya4650-am/igg-vip-studio/releases</span></pre>
+      <div class="callout c-warn">
+        <b>“decompression resulted in return code -1”?</b> That is not a corrupt file — it means your
+        disk is full. The EXE unpacks about 300 MB into <span class="mono">%TEMP%</span> on every launch.
+        Clear temp space and run it again; do <b>not</b> re-download or rebuild.
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="k">Connect</div>
+      <h3>🔌 Connect &amp; load</h3>
+      <p>Start your emulator, open Township, then press <strong style="color:var(--gold)">🔌 Connect &amp; load</strong> in the top bar. The tool finds your save automatically — it searches every known layout (<span class="mono">saves/</span>, <span class="mono">files/</span>, package root) instead of assuming one path.</p>
+      <ul class="checks">
+        <li>Your city appears in the <strong>Workspace</strong> panel.</li>
+        <li>The <strong>System Console</strong> fills with what just happened.</li>
+        <li>All tabs unlock with your real data.</li>
+      </ul>
+      <div class="callout c-danger">
+        <b>Backup first, always.</b> Press <strong>⬇️ Export current XML</strong> before your first edit.
+        It returns your save <em>exactly as it arrived</em> — that is your undo button for life.
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="k">The Golden Rule</div>
+      <h3>💾 Everything queues — one button applies it</h3>
+      <p>Every tab works the same way. You tick, type or drag — the tool <strong>queues</strong> the change. Nothing touches your save until you press the single green button:</p>
+      <pre><span class="y">Select / edit</span>  →  <span class="y">queued</span>  →  <span class="g">💾 Save &amp; push</span>  →  <span class="y">applied + written to device</span></pre>
+      <p>Queue as many features as you like across different tabs — they all land in <strong>one</strong> push, and the push runs every safety gate first.</p>
+    </div>
+
+    <div class="step">
+      <div class="k">After the push</div>
+      <h3>🎮 Open the game</h3>
+      <p>Force-stop Township, reopen it and let it finish loading. If the save was rejected by the game, the tool would have refused to push it in the first place — that is exactly what the gates are for.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 02 WORKSPACE ================= -->
+<section id="workspace" class="reveal">
+  <div class="sec-head"><span class="sec-num">02</span><h2>🖥️ The Workspace</h2></div>
+  <p class="sec-sub">Three permanent zones, everywhere you go.</p>
+
+  <div class="grid g3">
+    <div class="card">
+      <h3>🧭 Top Bar</h3>
+      <p>Language selector (20 languages), the <strong>🔌 Connect &amp; load</strong> button and the green <strong>💾 Save &amp; push</strong> button. Save &amp; push always shows a badge like <span class="mono">Save &amp; push 3</span> — that is how many queued actions are about to land.</p>
+    </div>
+    <div class="card">
+      <h3>🗂️ Tab Bar</h3>
+      <p>Eight primary tabs are always visible. The rest live behind a <strong>⋯ More</strong> overflow so labels never wrap or squeeze. Everything is searchable inside each tab.</p>
+    </div>
+    <div class="card">
+      <h3>📜 System Console</h3>
+      <p>Every action writes a line here — what was read, what was written, what was refused and <em>why</em>. If something looks wrong, read the console first.</p>
+    </div>
+  </div>
+
+  <div class="callout c-info" style="margin-top:22px">
+    <b>Language switch</b> — pick your language from the top bar. All 14 tabs translate live;
+    the System Console messages are English and Vietnamese by design.
+  </div>
+</section>
+
+<!-- ================= 03 ALL TABS ================= -->
+<section id="tabs" class="reveal">
+  <div class="sec-head"><span class="sec-num">03</span><h2>🧩 Every Tab, Explained</h2></div>
+  <p class="sec-sub">Fourteen tabs. The first eight are primary; the rest are under <strong>⋯ More</strong>.</p>
+
+  <div class="tabs-preview">
+    <span class="tp">📊 Data Center</span>
+    <span class="tp">👤 Profile Studio</span>
+    <span class="tp">🎭 Avatar Studio</span>
+    <span class="tp">🎨 Skin Gallery</span>
+    <span class="tp">🔓 Unban Center</span>
+    <span class="tp">🖼️ Decor Studio</span>
+    <span class="tp">💬 Sticker Hub</span>
+    <span class="tp">📦 Item Manager</span>
+    <span class="tp more">⋯ More</span>
+    <span class="tp">⛵ Regatta</span>
+    <span class="tp">🌾 Barn</span>
+    <span class="tp">🏛️ Museum</span>
+    <span class="tp">🐾 Zoo</span>
+    <span class="tp">⚙️ Upgrades</span>
+    <span class="tp">🎮 New Account</span>
+  </div>
+
+  <div class="grid g2">
+    <!-- DATA -->
+    <div class="card">
+      <h3>📊 Data Center <span class="badge b-gold">Most used</span></h3>
+      <p>Every headline number in your city, in one editable list: money, level, XP, residents, regatta tasks, card collections, achievements and hundreds more.</p>
+      <h4>🎯 How to use</h4>
+      <ul class="checks">
+        <li>Search for a value, or browse by category.</li>
+        <li>Type the new number — the tool validates it is a real integer.</li>
+        <li>Press <strong>💾 Save &amp; push</strong>.</li>
+      </ul>
+      <div class="callout c-info">
+        Fields use the game's own names internally, so a stat that exists in your save is
+        always editable. Statistics copied from a friend stay governed by the safety rules
+        in <a href="#safety" style="color:var(--gold)">section 06</a>.
+      </div>
+    </div>
+
+    <!-- PROFILE -->
+    <div class="card">
+      <h3>👤 Profile Studio</h3>
+      <p>Your public face: badges, frames, styles, experience ranks and themes from <span class="mono">PlayerProfile &gt; Configs</span>.</p>
+      <h4>🎯 How to use</h4>
+      <ul class="checks">
+        <li>Expand a category to see the ids your save actually holds.</li>
+        <li>Tick what you want, or use the unlock-all control.</li>
+        <li>Press <strong>💾 Save &amp; push</strong>.</li>
+      </ul>
+      <p class="dim">Only ids the game really ships are offered — inventing an id would be a shape the server reads for free.</p>
+    </div>
+
+    <!-- AVATARS -->
+    <div class="card">
+      <h3>🎭 Avatar Studio</h3>
+      <p>Profile pictures <span class="mono">ava1 … ava398</span>, with the artwork shown right in the picker for <span class="mono">ava1 … ava349</span>.</p>
+      <h4>🎯 How to use</h4>
+      <ul class="checks">
+        <li>Expand a group of 50 — same pattern as Profile and Skins.</li>
+        <li>Or drag across a range to select many at once.</li>
+        <li>Press <strong>💾 Save &amp; push</strong>.</li>
+      </ul>
+      <div class="callout c-warn">
+        <b>The ceiling is 398, on purpose.</b> Every genuinely fetched city tops out there.
+        Anything past it is an id no city on record holds — the picker will not offer it.
+      </div>
+    </div>
+
+    <!-- SKINS -->
+    <div class="card">
+      <h3>🎨 Skin Gallery</h3>
+      <p>Skins for trains, stations, the airport, helicopters, animals and buildings — read from your save's own <span class="mono">&lt;Skins&gt;</span> block.</p>
+      <h4>🎯 How to use</h4>
+      <ul class="checks">
+        <li>Expand a building or animal type.</li>
+        <li>Tick the skins you want.</li>
+        <li>Press <strong>💾 Save &amp; push</strong>.</li>
+      </ul>
+      <p class="dim">Ids come from the decoded game data — a wrong id would be written and then silently ignored in game.</p>
+    </div>
+
+    <!-- DECOR -->
+    <div class="card">
+      <h3>🖼️ Decor Studio</h3>
+      <p>The full decoration inventory: search, tick, and add items straight into your stash. Paged so thousands of rows stay smooth.</p>
+      <h4>🎯 How to use</h4>
+      <ul class="checks">
+        <li>Search by name.</li>
+        <li>Tick items into your stash, or use <strong>🔓 Unlock all</strong>.</li>
+        <li>Press <strong>💾 Save &amp; push</strong>.</li>
+      </ul>
+      <div class="callout c-good">
+        Decorating is <b>cumulative</b> — copying a second friend's decor <em>adds</em> to the first
+        friend's instead of replacing it.
+      </div>
+    </div>
+
+    <!-- STICKER -->
+    <div class="card">
+      <h3>💬 Sticker Hub</h3>
+      <p>Chat stickers for co-op and friend chat — the <span class="mono">st*</span>, <span class="mono">sp*</span> and <span class="mono">v*</span> id families, from your save's own unlock list.</p>
+      <h4>🎯 How to use</h4>
+      <ul class="checks">
+        <li>Search or use unlock-all.</li>
+        <li>Press <strong>💾 Save &amp; push</strong>.</li>
+        <li>Then send them in game.</li>
+      </ul>
+      <div class="callout c-danger">
+        <b>Unlock before you send.</b> Sending a sticker your account does not own is a ban trigger.
+        Read <a href="#safety" style="color:var(--gold)">section 06</a> before your first co-op chat.
+      </div>
+    </div>
+
+    <!-- ITEMS -->
+    <div class="card">
+      <h3>📦 Item Manager</h3>
+      <p>Gifts, tools and boosts in bulk.</p>
+      <h4>🎯 How to use</h4>
+      <ul class="checks">
+        <li>Set a <strong>Quantity</strong> first.</li>
+        <li>Tick the items you want.</li>
+        <li>Press <strong>💾 Save &amp; push</strong> — the server <em>adds</em> that amount.</li>
+      </ul>
+      <p class="dim">It adds, never replaces — your existing stock is preserved.</p>
+    </div>
+
+    <!-- REGATTA -->
+    <div class="card">
+      <h3>⛵ Regatta <span class="badge b-violet">Clone-based</span></h3>
+      <p>Complete a week's worth of regatta tasks by <strong>cloning tasks your own save already finished</strong> — never fabricating ids, scores or dates.</p>
+      <h4>🎯 How to use</h4>
+      <ul class="checks">
+        <li>The tab shows a live badge: <strong>Templates · Pool · Daily limit</strong>.</li>
+        <li>Set the number you want the week to total — it is a <em>target total</em>, not “add N more”.</li>
+        <li>Press the Add button only when the badge reads <strong>ready</strong>.</li>
+        <li>Press <strong>💾 Save &amp; push</strong>.</li>
+      </ul>
+      <div class="callout c-warn">
+        <b>Greyed-out button? The reason is printed right under it.</b> Typical reasons:
+        <em>no active regatta</em>, <em>no template to clone</em>, <em>window closed</em>,
+        <em>already full</em>, or the batch would not fit the daily quota.
+      </div>
+      <p class="dim">The batch is capped so one push never writes more than a strong real week holds, and timestamps always land inside the live window, in the past, strictly ordered.</p>
+    </div>
+
+    <!-- BARN -->
+    <div class="card">
+      <h3>🌾 Barn Inventory</h3>
+      <p>Capacity plus every product quantity in your barn.</p>
+      <h4>🎯 How to use</h4>
+      <ul class="checks">
+        <li>Pick a <strong>Barn capacity</strong>, or use <strong>FILL ALL</strong>.</li>
+        <li>Edit individual product quantities.</li>
+        <li>Press <strong>💾 Save &amp; push</strong>.</li>
+      </ul>
+      <div class="callout c-warn">
+        <b>Over capacity?</b> The tool refuses and asks you to raise capacity first — a barn
+        claiming more stock than it can hold is a contradiction a server reads for free.
+      </div>
+      <p class="dim">Only goods already in your barn get collected — keep at least 1 of each in stock.</p>
+    </div>
+
+    <!-- MUSEUM -->
+    <div class="card">
+      <h3>🏛️ Museum</h3>
+      <p>Tick the artifacts you want; the server unlocks them at <strong>3 copies</strong>.</p>
+      <h4>🎯 How to use</h4>
+      <ul class="checks">
+        <li>Tick artifacts in the grid.</li>
+        <li>Press <strong>💾 Save &amp; push</strong>.</li>
+      </ul>
+      <div class="callout c-info">
+        The Museum building must actually be built in that city, or the artifacts will not
+        show up in game.
+      </div>
+    </div>
+
+    <!-- ZOO -->
+    <div class="card">
+      <h3>🐾 Zoo</h3>
+      <p>Expand a family, tick the animals, then save.</p>
+      <h4>🎯 How to use</h4>
+      <ul class="checks">
+        <li>Expand a family.</li>
+        <li>Tick the animals you want.</li>
+        <li>Press <strong>💾 Save &amp; push</strong>.</li>
+      </ul>
+      <p class="dim"><strong>No Zoo yet?</strong> Open the Zoo in game once, then press Connect again. Completing families unlocks the animals — claim the rewards inside the Zoo.</p>
+    </div>
+
+    <!-- UPGRADES -->
+    <div class="card">
+      <h3>⚙️ Upgrades <span class="badge b-green">Factories · Trains · Islands</span></h3>
+      <p>Raise factory, train and island levels to a target — per row or all at once.</p>
+      <h4>🎯 How to use</h4>
+      <ul class="checks">
+        <li>Choose a group: <strong>Factories</strong>, <strong>Trains</strong> or <strong>Islands</strong>.</li>
+        <li>Set <strong>Target level</strong> — defaults to your save's own maximum.</li>
+        <li>Tick rows, or press <strong>Unlock Max ALL</strong>.</li>
+        <li>Press <strong>💾 Save &amp; push</strong>.</li>
+      </ul>
+      <div class="callout c-good">
+        <b>Never exceeds your own save's max.</b> A level your city never reached cannot be shown
+        to be valid, so the ceiling is the highest level already in your file (reference caps:
+        Factories 53 / Trains 31 / Islands 31).
+      </div>
+      <div class="callout c-warn">
+        <b>“No workshop changed”?</b> Every requested row already sits at the target — that is a
+        no-op, reported honestly instead of pretending success.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 04 UNBAN ================= -->
+<section id="unban" class="reveal">
+  <div class="sec-head"><span class="sec-num">04</span><h2>🔓 Unban Center — The Copy Workflow</h2></div>
+  <p class="sec-sub">Copy a friend's city into your own account. This is the most powerful tab, so it is also the most careful one — it runs in <strong>staged order</strong>, exactly the way a reference tool does.</p>
+
+  <div class="grid g2">
+    <div class="card">
+      <h3>🧭 The 3 steps</h3>
+      <ul class="bullets">
+        <li><strong>1 · Friends list</strong> — pick someone from your friends, or paste a cityId manually.</li>
+        <li><strong>2 · Download city</strong> — the server fetches that city from Playrix and keeps the session.</li>
+        <li><strong>3 · Restore</strong> — the server merges and hands back a file ready to push.</li>
+      </ul>
+      <div class="callout c-info" style="margin-top:16px">
+        <b>Multi-friend is pick → fetch → copy, repeat.</b> Each new FetchCity simply replaces
+        the donor — your own cityId, session and device are never touched.
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>🎚️ The three restore buttons</h3>
+      <ul class="bullets" style="margin-top:14px">
+        <li><strong>🧮 Basic stats</strong><br /><span class="dim">Level, money and city numbers only. No town, no lifetime history.</span></li>
+        <li><strong>🏙️ Full city</strong><br /><span class="dim">The town layout plus its history — but <em>never</em> your name, stickers, avatars or co-op.</span></li>
+        <li><strong>🌐 All</strong><br /><span class="dim">Everything the reference tool copies, in one restore.</span></li>
+      </ul>
+      <div class="callout c-warn">
+        <b>The town follows the friend — your identity does not.</b> Name, stickers, avatars,
+        badges and co-op membership stay yours in every mode. That split is deliberate.
+      </div>
+    </div>
+  </div>
+
+  <h4 style="margin-top:32px"> staged copy — the recommended path</h4>
+  <p class="dim" style="max-width:880px">Copying a whole city in one go is what the reference tools stopped doing. Ours splits it into <strong>three separate pushes with the game opened in between</strong> — each step unlocks only after the previous one actually pushed.</p>
+
+  <div class="grid g3" style="margin-top:16px">
+    <div class="card">
+      <span class="badge b-gold">Step 1</span>
+      <h3 style="margin-top:11px">🧮 Basic stats</h3>
+      <p>Applied. Now <strong>open the game, play the whole tutorial, reach at least level 3 and unlock the Zoo</strong>, let it finish loading — then come back.</p>
+    </div>
+    <div class="card">
+      <span class="badge b-cyan">Step 2</span>
+      <h3 style="margin-top:11px">🏘️ Town + Zoo</h3>
+      <p>Applied. <strong>Open the game once more and let it load fully</strong>, then come back for the final step.</p>
+    </div>
+    <div class="card">
+      <span class="badge b-violet">Step 3</span>
+      <h3 style="margin-top:11px">🧩 Advanced blocks</h3>
+      <p>The last pieces. When the tab says <em>All 3 steps are copied</em>, you are done.</p>
+    </div>
+  </div>
+
+  <div class="callout c-danger" style="margin-top:22px">
+    <b>⚠️ New accounts die on day one.</b> Every save ever banned on file was under
+    <strong>one hour old</strong>. If your account is new, <em>play it first</em> — finish the
+    tutorial, reach day two — before you copy a big city onto it. Read
+    <a href="#safety" style="color:var(--gold)">section 06</a>.
+  </div>
+
+  <h4 style="margin-top:34px">🧭 Co-op readiness checklist</h4>
+  <p class="dim" style="max-width:880px">Before you join a co-op and type anything, the Unban tab shows a checklist read from <strong>your own save</strong>. It never blocks a push — it simply tells you the truth:</p>
+  <div class="grid g4" style="margin-top:14px">
+    <div class="card"><h3 style="font-size:16px">🏷️ Your town name</h3><p class="dim">Name the town in game first.</p></div>
+    <div class="card"><h3 style="font-size:16px">💬 Stickers owned</h3><p class="dim">Sending one you don't own bans. Unlock it first.</p></div>
+    <div class="card"><h3 style="font-size:16px">🎓 Tutorial finished</h3><p class="dim">Clear the open tutorial flags.</p></div>
+    <div class="card"><h3 style="font-size:16px">📅 Past day one</h3><p class="dim">Give the account age before it gets seen.</p></div>
+  </div>
+  <div class="callout c-info">
+    <b>Device standing cannot be read from any file.</b> A once-banned device bans again no
+    matter how clean the save looks — use one clean device or ID per account.
+  </div>
+</section>
+
+<!-- ================= 05 NEW ACCOUNT ================= -->
+<section id="newaccount" class="reveal">
+  <div class="sec-head"><span class="sec-num">05</span><h2>🎮 New Account — Build a Level-1 City</h2></div>
+  <p class="sec-sub">A wipe alone never creates a new city: with no save, the game asks Playrix which city belongs to this device — and gets the <strong>old banned one</strong> back. This tab reproduces the exact, proven injection script instead.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="k">Step 1</div>
+      <h3>⬇️ Backup city &amp; login</h3>
+      <p>Snapshots your current save and login state so you can always return to it. <strong>Required</strong> — injecting overwrites your current save.</p>
+    </div>
+    <div class="step">
+      <div class="k">Step 2</div>
+      <h3>🆔 New device ID <span class="badge b-red">Do this before injecting</span></h3>
+      <p>Resets the Android ID and wipes the GSF id <strong>first</strong>. Skip it and the server simply re-links your fresh city straight back to the old ban.</p>
+      <div class="callout c-warn">
+        <b>Sign out of every Google account</b> on the emulator and turn off Play Games cloud
+        backup first — otherwise the banned city restores itself or auto-signs back in.
+      </div>
+    </div>
+    <div class="step">
+      <div class="k">Step 3</div>
+      <h3>💉 Inject Level-1 city</h3>
+      <p>Stops the game, clears the save folder, then writes a verified fresh pair — byte-checked before anything is reported as success. Root is required; if it cannot verify, it raises instead of pretending.</p>
+    </div>
+    <div class="step">
+      <div class="k">Step 4</div>
+      <h3>🎮 Open the game</h3>
+      <p>Launch Township so it mints the new city. If a cloud restore offer appears, <strong>DECLINE it</strong>.</p>
+    </div>
+    <div class="step">
+      <div class="k">Step 5</div>
+      <h3>✅ Verify fresh city</h3>
+      <p>Pulls the city back and checks that it is genuinely new and at level 1. Green means you are ready to play.</p>
+    </div>
+  </div>
+
+  <div class="callout c-danger" style="margin-top:22px">
+    <b>What a local wipe cannot lift:</b> bans tied to a linked Facebook/Google account, emulator
+    hardware fingerprints, or the <em>“YOU'RE USING AN EMULATOR”</em> notice — that one is Playrix
+    policy, not a ban. Those need a fresh login or a brand-new emulator instance
+    (<em>MEmu multi-instance → New</em>, not Clone).
+  </div>
+</section>
+
+<!-- ================= 06 SAFETY ================= -->
+<section id="safety" class="reveal">
+  <div class="sec-head"><span class="sec-num">06</span><h2>🛡️ Safety — What Runs Before Every Push</h2></div>
+  <p class="sec-sub">Five independent gates sit between your edit and your device. Each one refuses <strong>only what this tool newly broke</strong> — a save that arrived with an oddity keeps it and stays pushable.</p>
+
+  <div class="grid g3">
+    <div class="card">
+      <h3>🪪 Identity Gate</h3>
+      <p>Refuses a save that declares <strong>another player</strong> as its owner — a foreign cityId, deviceId, mainPlayer or saveId. This is the one proven instant-ban vector.</p>
+    </div>
+    <div class="card">
+      <h3>📐 Save-Shape Gate</h3>
+      <p>Unbalanced XML, avatar ids outside the real range, a sticker list with the wrong comma shape, an upgrade whose <span class="mono">slx</span> doesn't match its <span class="mono">level</span>, an integer var holding text, population over its own cap.</p>
+    </div>
+    <div class="card">
+      <h3>📈 Progression Gate</h3>
+      <p>A lifetime counter or a factory level walking <strong>backwards</strong> without a reason, or a level rising while its experience does not.</p>
+    </div>
+    <div class="card">
+      <h3>⛵ Regatta Gate</h3>
+      <p>Refuses a fabricated task batch — invented ids, uniform scores, dates outside the window, a completed task left on the offer list, records with no tally.</p>
+    </div>
+    <div class="card">
+      <h3>🃏 Card Block Gate</h3>
+      <p>Refuses a <span class="mono">CardCollections</span> block that vanishes, appears from nowhere, or breaks an invariant real cities keep.</p>
+    </div>
+    <div class="card">
+      <h3>↩️ Automatic Rollback</h3>
+      <p>If any gate refuses, your save is <strong>rolled back to the state it was in before</strong> — no half-applied edits, no stuck session. The reason is printed in the console.</p>
+    </div>
+  </div>
+
+  <h4 style="margin-top:36px">✅ The safe operating process</h4>
+  <div class="grid g2">
+    <div class="card">
+      <ul class="checks">
+        <li><strong>Back up first</strong> — Export current XML before your first edit.</li>
+        <li><strong>Let the account age</strong> — play it past day one before a big copy.</li>
+        <li><strong>Copy in 3 stages</strong> — never one giant push onto a newborn.</li>
+        <li><strong>Unlock before you send</strong> — own the sticker before using it in co-op.</li>
+        <li><strong>Join quietly</strong> — text first, stickers and requests later.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <ul class="checks" style="--x:0">
+        <li><strong>One clean device per account</strong> — a flagged device re-bans on its own.</li>
+        <li><strong>Read the console</strong> — a refusal always says exactly why.</li>
+        <li><strong>Don't stack everything at once</strong> — give the game time to load between stages.</li>
+        <li><strong>Verify against the server</strong> — fetch your own cityId and compare it to your device after a push.</li>
+        <li><strong>Keep the backup</strong> — it reverts anything that misbehaves in game.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout c-danger" style="margin-top:24px">
+    <b>🛑 The honest limit — please read this.</b> No tool can guarantee 100% protection against
+    a ban. A green gate means <b>“nothing provably wrong was found in the file”</b> —
+    <b>never “cannot be banned”</b>. Playrix keeps its own server-side record of every account,
+    and behaviour it can see from outside the file still matters. Use this tool responsibly,
+    on accounts you can afford to lose, and <b>never</b> on an account you cannot replace.
+  </div>
+</section>
+
+<!-- ================= 07 TROUBLESHOOTING ================= -->
+<section id="trouble" class="reveal">
+  <div class="sec-head"><span class="sec-num">07</span><h2>🛠️ Troubleshooting</h2></div>
+  <p class="sec-sub">The most common messages, decoded.</p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:36%">Message</th><th>What it means &amp; what to do</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>⚠️ EXE closes with “return code -1”</strong></td>
+          <td><strong>Disk full, not corrupt.</strong> The portable EXE unpacks ~300 MB into <span class="mono">%TEMP%</span> each launch. Free space and run again — do not re-download.</td>
+        </tr>
+        <tr>
+          <td><strong>📵 Device not found</strong></td>
+          <td>Start the emulator, enable ADB, and make sure no other ADB server is holding the port. Reconnect, then press <strong>Connect &amp; load</strong> again.</td>
+        </tr>
+        <tr>
+          <td><strong>🌐 FetchCity failed</strong></td>
+          <td>Usually the app version or the cityId. A <em>“no data”</em> answer simply means Playrix stores no city for that id — the player never synced, or it isn't a city id.</td>
+        </tr>
+        <tr>
+          <td><strong>🛑 “Không đẩy file lên máy — …”</strong></td>
+          <td>A push gate refused the edit. The text after the dash names the exact rule. Your save was <strong>rolled back</strong>; fix the value it names and push again.</td>
+        </tr>
+        <tr>
+          <td><strong>😴 “No workshop changed”</strong></td>
+          <td>Every selected row was already at the target level — a genuine no-op, not an error.</td>
+        </tr>
+        <tr>
+          <td><strong>🧩 “This file is not a city”</strong></td>
+          <td>The fetched file has no town layout. Pick a different donor, or fetch again.</td>
+        </tr>
+        <tr>
+          <td><strong>🎯 Regatta button greyed out</strong></td>
+          <td>The reason is printed directly under it — no active regatta, no template, window closed, already full, or over the daily quota.</td>
+        </tr>
+        <tr>
+          <td><strong>🚫 “EXE too old”</strong></td>
+          <td>Download the latest release build — the New Account tab needs a newer bridge.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ================= 08 FAQ ================= -->
+<section id="faq" class="reveal">
+  <div class="sec-head"><span class="sec-num">08</span><h2>❓ Frequently Asked</h2></div>
+
+  <details open>
+    <summary>🤔 Does editing my save get me banned?</summary>
+    <div class="body">
+      Any modification carries risk — that is the honest truth. What the five gates guarantee is
+      that the file leaving this tool contains <b>nothing provably wrong</b>. They refuse a save
+      that would contradict itself in a field a server can read for free. They cannot see
+      Playrix's own records of your account, and they cannot see how old your account is or what
+      device it sits on. <b>Never treat a green gate as “cannot be banned”.</b>
+    </div>
+  </details>
+
+  <details>
+    <summary>💾 Where is my backup and how do I restore it?</summary>
+    <div class="body">
+      Press <b>⬇️ Export current XML</b> any time — it returns the save <b>exactly as it arrived</b>
+      (before any edit in that session). Save that file somewhere safe outside the tool. To go back,
+      write it to your device or start a fresh session and load it.
+    </div>
+  </details>
+
+  <details>
+    <summary>🧩 Why do some tabs sit behind “⋯ More”?</summary>
+    <div class="body">
+      Eight primary tabs are always visible so labels never wrap or squeeze. The rest — Regatta,
+      Barn, Museum, Zoo, Upgrades and New Account — live in the overflow. Nothing is hidden; it is
+      a layout choice to keep the bar readable on any screen.
+    </div>
+  </details>
+
+  <details>
+    <summary>🔁 Do I press Save &amp; push after every single change?</summary>
+    <div class="body">
+      No — that is the point of the queue. Make changes across as many tabs as you like, watch the
+      badge count climb, then press <b>💾 Save &amp; push</b> once. Every queued action lands together
+      and every gate runs over the final result.
+    </div>
+  </details>
+
+  <details>
+    <summary>⛵ Why is the Regatta Add button greyed out?</summary>
+    <div class="body">
+      Because your save genuinely cannot take the batch — the tab prints the exact reason under the
+      button. Common ones: your city has no active regatta window, there is no completed task to
+      clone, the week is already full, or the batch would exceed the daily quota read from your
+      own save. The badge above shows <b>Templates · Pool · Daily limit</b> so you can see the state
+      before pressing anything.
+    </div>
+  </details>
+
+  <details>
+    <summary>🏗️ Can I raise a factory past what my city ever had?</summary>
+    <div class="body">
+      No, deliberately. The ceiling is the <b>highest level already in your save</b> (with reference
+      caps of 53 / 31 / 31 when your save has no data yet). A level your city never reached cannot
+      be shown to be valid — writing one would create a contradiction a server can read instantly.
+    </div>
+  </details>
+
+  <details>
+    <summary>🙋 What happens if a gate refuses my push?</summary>
+    <div class="body">
+      Nothing is written to your device. Your save is <b>rolled back</b> to exactly how it was before
+      that push, the other queued actions are not half-applied, and the System Console prints the
+      precise reason. Fix the value it names and push again — your session stays fully usable.
+    </div>
+  </details>
+
+  <details>
+    <summary>🌍 Which languages are supported?</summary>
+    <div class="body">
+      Twenty — including English, Vietnamese, Portuguese, Spanish, French, German, Italian, Russian,
+      Turkish, Arabic, Hindi, Thai, Japanese, Korean, Chinese, Indonesian, Dutch, Polish, Ukrainian
+      and Malay. Switch from the top bar; all fourteen tabs translate live.
+    </div>
+  </details>
+</section>
+
+<!-- ================= QUICK REFERENCE ================= -->
+<section id="quickref" class="reveal">
+  <div class="sec-head"><span class="sec-num">09</span><h2>⚡ One-Page Cheat Sheet</h2></div>
+
+  <div class="grid g2">
+    <div class="card">
+      <h3>🔁 The Daily Loop</h3>
+      <pre><span class="c">1.</span>  <span class="y">🔌 Connect &amp; load</span>       <span class="c">— read your save</span>
+<span class="c">2.</span>  <span class="y">⬇️ Export current XML</span>   <span class="c">— take a backup</span>
+<span class="c">3.</span>  <span class="y">🧩 Edit across tabs</span>     <span class="c">— everything queues</span>
+<span class="c">4.</span>  <span class="g">💾 Save &amp; push</span>          <span class="c">— gates run, then apply</span>
+<span class="c">5.</span>  <span class="y">🎮 Open the game</span>        <span class="c">— let it load fully</span></pre>
+    </div>
+    <div class="card">
+      <h3>🚦 Green means…</h3>
+      <ul class="checks">
+        <li>Identity is yours — nobody else's ids in the file.</li>
+        <li>The XML is balanced and well-shaped.</li>
+        <li>No lifetime counter or level walked backwards.</li>
+        <li>Any regatta batch is cloned, not fabricated.</li>
+        <li>The card block is intact.</li>
+      </ul>
+      <div class="callout c-warn" style="margin-top:14px">
+        …<b>nothing provably wrong</b> — not “cannot be banned”.
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ================= FOOTER ================= -->
+<footer>
+  <div class="foot-in">
+    <div class="foot-logo">⚡</div>
+    <div class="foot-name">IGG <em>VIP Studio</em></div>
+    <div class="foot-tag">The complete Township save studio — connect, edit, restore, push.</div>
+
+    <div class="foot-credit">
+      <div class="small">Tool Design &amp; Developed By</div>
+      <div class="big"><span>Zenitsu</span> &amp; <span>IGG</span></div>
+    </div>
+
+    <div class="foot-links">
+      <a href="#start">🚀 Getting Started</a>
+      <a href="#tabs">🧩 All Tabs</a>
+      <a href="#unban">🔓 Unban Center</a>
+      <a href="#safety">🛡️ Safety</a>
+      <a href="#faq">❓ FAQ</a>
+      <a href="#quickref">⚡ Cheat Sheet</a>
+    </div>
+
+    <div class="copy">
+      © 2026 IGG VIP Studio · Guide v1.1.28 · For educational and personal use only.
+      No tool can guarantee 100% protection — a green gate means “nothing provably wrong”, never “cannot be banned”.
+    </div>
+  </div>
+</footer>
+
+<button id="top" title="Back to top">↑</button>
+
+<script>
+(function(){
+  /* scroll progress */
+  var bar=document.getElementById('progress'),top=document.getElementById('top');
+  function onScroll(){
+    var h=document.documentElement,max=h.scrollHeight-h.clientHeight;
+    var p=max>0?(h.scrollTop||document.body.scrollTop)/max*100:0;
+    bar.style.width=p+'%';
+    top.classList.toggle('on',(h.scrollTop||document.body.scrollTop)>520);
+  }
+  document.addEventListener('scroll',onScroll,{passive:true});onScroll();
+
+  /* back to top */
+  top.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'})});
+
+  /* mobile nav */
+  var t=document.getElementById('navToggle'),l=document.getElementById('navLinks');
+  t.addEventListener('click',function(){l.classList.toggle('open')});
+  l.addEventListener('click',function(e){if(e.target.tagName==='A')l.classList.remove('open')});
+
+  /* reveal on scroll */
+  var io=new IntersectionObserver(function(es){
+    es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}});
+  },{threshold:.08,rootMargin:'0px 0px -40px 0px'});
+  document.querySelectorAll('.reveal').forEach(function(el){io.observe(el)});
+})();
+</script>
+</body>
+</html>
