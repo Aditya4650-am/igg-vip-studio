@@ -75,6 +75,10 @@ test("coop readiness: unknown age is no rule", () => {
       '<Var name="cityId" v="C1" t="s"/>' +
         '<Var name="townName" v="mine"/>' +
         `<Var name="UnlockedChatEmoji" v="${EMOJI_3}"/>` +
+        // A completed record implies the counter that counts it — 0 of the 22
+        // saves on file carry the record without it, so this is the realistic
+        // form of the fixture.
+        '<Var name="RegataTasksCompleted" v="1" t="i"/>' +
         RECORD +
         ROW,
     ),
@@ -88,13 +92,19 @@ test("coop readiness: each missing piece fails its own check", () => {
   const failKeys = (r: { checks: { key: string; ok: boolean }[] }) =>
     r.checks.filter((c) => !c.ok).map((c) => c.key);
 
+  // A completed record implies the lifetime counter that counts it, so these
+  // name/stickers fixtures carry both halves — otherwise they would be testing
+  // the split rule in the test below rather than the field they are about.
+  const CTR = '<Var name="RegataTasksCompleted" v="1" t="i"/>';
   // No name at all.
-  assert.deepEqual(failKeys(base(RECORD + ROW)), ["name", "stickers"]);
+  assert.deepEqual(failKeys(base(CTR + RECORD + ROW)), ["name", "stickers"]);
   // No stickers: sending anything would spend what the account never owned.
-  assert.deepEqual(failKeys(base('<Var name="townName" v="mine"/>' + RECORD + ROW)), ["stickers"]);
+  assert.deepEqual(failKeys(base('<Var name="townName" v="mine"/>' + CTR + RECORD + ROW)), ["stickers"]);
   // Broken envelope is not an owned set either (`,a,,b,,` + one more comma).
   assert.deepEqual(
-    failKeys(base('<Var name="townName" v="mine"/><Var name="UnlockedChatEmoji" v=",st1,,st2,,"/>' + RECORD + ROW)),
+    failKeys(
+      base('<Var name="townName" v="mine"/><Var name="UnlockedChatEmoji" v=",st1,,st2,,"/>' + CTR + RECORD + ROW),
+    ),
     ["stickers"],
   );
   // A lone veteran counter with no records behind it.
@@ -125,6 +135,44 @@ test("coop readiness: each missing piece fails its own check", () => {
   assert.equal(coopReadiness("").ready, false);
 });
 
+test("coop readiness: a live board with no lifetime counter fails", () => {
+  // The mirror of the rule in `each missing piece`, and the shape
+  // `mGameInfo.current-22.xml` reached a first regatta task with: a 12-offer /
+  // 18-taken board, `RegataTasksCompleted` absent — so the game runs the
+  // first-timer regatta flow on a city claiming years of history. Every clean
+  // save on file carries both halves; the split is what this flags.
+  const r = coopReadiness(
+    xml(
+      '<Var name="cityId" v="C1" t="s"/>' +
+        '<Var name="townName" v="mine"/>' +
+        `<Var name="UnlockedChatEmoji" v="${EMOJI_3}"/>` +
+        AGED +
+        '<FreeTask id="t1" num="1" ver="1"/>' +
+        '<TakenTask id="t2" num="2" ver="1"/>' +
+        ROW,
+    ),
+  );
+  assert.deepEqual(
+    r.checks.filter((c) => !c.ok).map((c) => c.key),
+    ["counters"],
+  );
+  // And a genuine rookie with neither half is not flagged: that is an account
+  // that has simply never touched a regatta, not a save contradicting itself.
+  const rookie = coopReadiness(
+    xml(
+      '<Var name="cityId" v="C1" t="s"/>' +
+        '<Var name="townName" v="mine"/>' +
+        `<Var name="UnlockedChatEmoji" v="${EMOJI_3}"/>` +
+        AGED +
+        ROW,
+    ),
+  );
+  assert.deepEqual(
+    rookie.checks.filter((c) => !c.ok).map((c) => c.key),
+    [],
+  );
+});
+
 test("coop readiness: only an open tutorial flag fails, never a cleared one", () => {
   const doc = (flag: string) =>
     xml(
@@ -132,6 +180,9 @@ test("coop readiness: only an open tutorial flag fails, never a cleared one", ()
         '<Var name="townName" v="mine"/>' +
         `<Var name="UnlockedChatEmoji" v="${EMOJI_3}"/>` +
         AGED +
+        // Both regatta halves, so `counters` stays out of this test's way —
+        // it is here to speak about the tutorial flag only.
+        '<Var name="RegataTasksCompleted" v="1" t="i"/>' +
         RECORD +
         ROW +
         flag,

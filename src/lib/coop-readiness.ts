@@ -78,7 +78,14 @@ export function coopReadiness(xml: string): CoopReadiness {
   // gate share. (Mirrored here rather than imported: this module ships to
   // the browser, which cannot import server files.)
   const boarded = /<MyOldTask[\s>/]/i.test(xml) || /<(FreeTask|TakenTask)[\s>/]/i.test(xml);
-  const regattaOk = varInt(xml, "RegataTasksCompleted") === 0 || boarded;
+  // Both halves or neither. The rule above only caught the counter with no
+  // board behind it (`mGameInfo.current-14.xml`); the mirror shape is the one
+  // `mGameInfo.current-22.xml` was banned with — a live 12-offer/18-taken
+  // board while `RegataTasksCompleted` is absent, so the game runs the
+  // first-timer regatta flow on a city claiming years of history. Measured on
+  // the 21 saves on file: every clean save has both, and flagging the split
+  // catches that save while raising no key on any of them.
+  const regattaOk = (varInt(xml, "RegataTasksCompleted") === 0) === !boarded;
   const cardsOk =
     varInt(xml, "FullCardCollections") === 0 || /<DataElem\b[^>]*\bname="cardId"/i.test(xml);
   checks.push({ key: "counters", ok: regattaOk && cardsOk });
