@@ -162,16 +162,6 @@ const REGATTA_REASON_KEY = {
   already_full: "regattaFull",
 } as const;
 
-/** Shown directly under the disabled button. The badge above only names the
- *  state, and a greyed-out button with a badge somewhere else reads as "this
- *  thing is broken" — this says what is wrong and what to do about it. */
-const REGATTA_WHY_KEY = {
-  no_active_regatta: "regattaWhyNoRegatta",
-  no_template: "regattaWhyNoTemplate",
-  window_closed: "regattaWhyWindow",
-  already_full: "regattaWhyFull",
-} as const;
-
 function groupIcon(id: string): GameIconName {
   const value = id.toLowerCase();
   if (value.startsWith("ava_")) return "avatar";
@@ -3104,8 +3094,6 @@ export function StudioApp() {
 
                 {tab === "regatta" && (
                   <div className="space-y-3">
-                    <p className="text-sm text-muted">{tr("regattaHint")}</p>
-
                     <section className="panel">
                       <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-cyan uppercase">
                         <GameIcon name="regatta" className="size-4" />
@@ -3125,7 +3113,7 @@ export function StudioApp() {
                           {tr(REGATTA_REASON_KEY[regattaState])}
                         </span>
                         <span className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums">
-                          {tr("regattaDone")} {session.regattaInfo.current} / {Math.min(regattaTasks, REGATTA_MAX_TASKS)}
+                          {tr("regattaDone")} {session.regattaInfo.current} / {regattaTasks}
                         </span>
                         <span className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums">
                           {tr("regattaTemplates")} {session.regattaInfo.templates}
@@ -3133,16 +3121,9 @@ export function StudioApp() {
                         <span className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums">
                           {tr("regattaPool")} {session.regattaInfo.pool}
                         </span>
-                        <span
-                          className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums"
-                          title={tr("regattaDayTip")}
-                        >
-                          {tr("regattaDay")} {session.regattaInfo.quota}
-                        </span>
                       </div>
-                      <p className="mt-3 text-xs text-muted">{tr("regattaGuards")}</p>
                       {session.regattaInfo.window ? (
-                        <p className="mt-1 text-xs text-muted tabular-nums">
+                        <p className="mt-3 text-xs text-muted tabular-nums">
                           {tr("regattaWindow")}: {new Date(session.regattaInfo.window.start * 1000).toLocaleString()} →{" "}
                           {new Date(session.regattaInfo.window.end * 1000).toLocaleString()}
                         </p>
@@ -3165,18 +3146,13 @@ export function StudioApp() {
                             setRegattaTasks(raw > 0 ? Math.min(REGATTA_MAX_TASKS, raw) : REGATTA_DEFAULT_TASKS);
                           }}
                         />
-                        <span className="text-xs text-muted">
-                          {tr("regattaCountHint")
-                            .replace("{max}", String(REGATTA_MAX_TASKS))
-                            .replace("{day}", String(session.regattaInfo.quota))}
-                        </span>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button
                           size="sm"
                           className="tool-action tool-action--regatta"
                           variant="purple"
-                          disabled={busy || pendingRegatta || regattaState !== "ok"}
+                          disabled={busy || pendingRegatta}
                           onClick={() => void tool("regatta")}
                         >
                           <GameIcon name="regatta" className="size-4" />
@@ -3188,14 +3164,6 @@ export function StudioApp() {
                           </Button>
                         ) : null}
                       </div>
-                      {!pendingRegatta && regattaState !== "ok" ? (
-                        <p className="mt-2 text-xs text-amber">
-                          {tr(REGATTA_WHY_KEY[regattaState])
-                            .replace("{count}", String(session.regattaInfo.current))
-                            .replace("{max}", String(REGATTA_MAX_TASKS))
-                            .replace("{day}", String(session.regattaInfo.quota))}
-                        </p>
-                      ) : null}
                     </section>
                   </div>
                 )}

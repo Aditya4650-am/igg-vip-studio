@@ -118,58 +118,48 @@ test("factory and train/island tabs are gone", () => {
   assert.ok(src.includes("factories") || src.includes("upgrades"), "studio.server must expose upgrades");
 });
 
-test("the regatta button answers for the count on screen, not the default batch", () => {
+test("the regatta button is pressable on sight and never explains a refusal in place", () => {
   const tsx = read("../components/studio-app.tsx");
   const tab = tsx.slice(tsx.indexOf('{tab === "regatta" &&'), tsx.indexOf('{tab === "barn" &&'));
   assert.ok(tab.length > 0, "could not locate the regatta tab markup");
 
   // snapshot() cannot know which number the user is about to pick, so
-  // `regattaInfo.reason` is decided for the default 12. Reading it straight
-  // into `disabled` is what let a save holding 12 show a dead button with the
-  // count raised to 15, and a save holding 5 show a live button with the count
-  // dropped to 3 — a push the server then refused.
+  // `regattaInfo.reason` is decided for the default 12. It must never reach
+  // the tab at all — not to grey the button out, not anywhere.
   assert.ok(!tab.includes("session.regattaInfo.reason"), "the button must not read the default-batch reason");
-  assert.ok(tab.includes('regattaState !== "ok"'), "the button must gate on the count-aware state");
-  assert.ok(tsx.includes("regattaReason("), "the tab must re-run the server's own reason helper");
 
-  // A greyed-out button with a badge two panels above it reads as "broken".
-  // The refusal is now spelled out where the user is actually looking.
-  assert.ok(tab.includes("REGATTA_WHY_KEY"), "the disabled button must explain itself in place");
+  // The count no longer gates anything: type a number, press the button, done.
+  // A greyed-out button with a paragraph of prose underneath it is exactly
+  // what was asked to go, so nothing may re-introduce either half.
+  assert.ok(!tab.includes('regattaState !== "ok"'), "the button must not be gated on the count-aware state");
+  assert.ok(!tab.includes("REGATTA_WHY_KEY"), "no refusal is spelled out under the button");
+  assert.ok(/disabled=\{busy \|\| pendingRegatta\}/.test(tab), "only a push already in flight may disable it");
 
-  const i18n = read("i18n.ts");
-  for (const key of ["regattaWhyNoRegatta", "regattaWhyNoTemplate", "regattaWhyWindow", "regattaWhyFull"]) {
-    const m = new RegExp(`\\b${key}:\\s*"([^"]*)"`).exec(i18n);
-    assert.ok(m, `${key} must exist in the dictionary`);
-    assert.ok(m[1].length > 20, `${key} must say what to do, got: ${m[1]}`);
+  // The notes, the guard line and the limit hint are all gone from the tab.
+  for (const gone of ["regattaHint", "regattaGuards", "regattaCountHint"]) {
+    assert.ok(!tab.includes(gone), `${gone} must no longer be rendered`);
   }
-  assert.ok(/\bregattaWhyFull:\s*"[^"]*\{count\}[^"]*\{max\}/.test(i18n), "regattaWhyFull must name the count and the ceiling");
 });
 
-test("the regatta tab shows the save's own daily quota, not a hardcoded number", () => {
-  // The game itself reads out the limit — "Today's Tasks: 4/17", "Quota resets
-  // in: 11h 10m" — and it lives in the save as `<Var name="TaskQuota">`. A
-  // badge that hid it (or worse, printed a constant) would leave the user
-  // unable to see why a batch of 40 was fine on one save and refused on
-  // another with the same window.
+test("regatta spacing still follows the save's own daily quota, but the tab prints no limit", () => {
+  // The quota is the game's own number — it lives in the save as
+  // `<Var name="TaskQuota">` and it is what spaces one completion from the
+  // next, so a batch never collapses a day's worth of tasks into one pile.
+  // That arithmetic is untouched. What went away is the badge that printed
+  // the quota *as* a limit and the prose around it.
   const tsx = read("../components/studio-app.tsx");
   const tab = tsx.slice(tsx.indexOf('{tab === "regatta" &&'), tsx.indexOf('{tab === "barn" &&'));
-  assert.ok(tab.includes("session.regattaInfo.quota"), "the tab must read the quota the save states");
+  assert.ok(!tab.includes("session.regattaInfo.quota"), "the tab must not print the quota as a limit");
+  assert.ok(!tab.includes("regattaDay"), "no daily-limit badge may come back");
 
-  // The decision the button makes has to be taken with that same quota, or
-  // "pressable" and "will succeed" drift apart again.
+  // The decision still has to be taken with that same quota, or the batch the
+  // button queues and the batch the server writes drift apart.
   const reason = tsx.slice(tsx.indexOf("const regattaState"), tsx.indexOf("const tool ="));
   assert.ok(/quota:\s*session\.regattaInfo\.quota/.test(reason), "regattaReason must be given the save's quota");
 
-  // Every string that talks about the number has to interpolate it rather than
-  // leave a raw `{day}` in front of the user.
-  const i18n = read("i18n.ts");
-  for (const key of ["regattaDay", "regattaDayTip", "regattaCountHint", "regattaWhyWindow"]) {
-    assert.ok(new RegExp(`\\b${key}:`).test(i18n), `${key} must exist in the dictionary`);
-  }
-  const raw = (tab.match(/\{day\}/g) ?? []).length;
-  const substituted = (tab.match(/\.replace\("\{day\}"/g) ?? []).length;
-  assert.equal(raw, substituted, "every {day} in the tab must be substituted before it is rendered");
-  assert.ok(substituted >= 2, "both the hint and the refusal must carry the save's quota");
+  // No placeholder may reach the user once the hints are gone.
+  assert.ok(!tab.includes("{day}"), "no raw {day} placeholder may be rendered");
+  assert.ok(!tab.includes("{max}"), "no raw {max} placeholder may be rendered");
 });
 
 test("the copy is never gated, and no age banner is drawn over it", () => {

@@ -834,11 +834,17 @@ test("the daily ceiling is the game's own quota, read out of the save", () => {
   // very one `injectRegata` throws on: the usable range has to leave
   // `regattaMinGap(quota)` between every pair of tasks. Same window, same
   // save, only the stated quota differs — and the ceiling moves with it.
-  assert.equal(inspectRegatta(none, 46).reason, "ok", "quota 17 fills the range at 46");
-  assert.equal(inspectRegatta(none, 47).reason, "window_closed", "47 will not fit inside 2.6 days at 5083s apart");
-  assert.equal(inspectRegatta(at("9"), 25).reason, "ok", "quota 9 stops at 25");
-  assert.equal(inspectRegatta(at("9"), 26).reason, "window_closed", "the tighter quota refuses the same window sooner");
-  assert.throws(() => injectRegata(at("9"), 26), /regatta/i, "and the push refuses it too, not only the badge");
+  //
+  // The range is the *whole* elapsed window rather than the preferred 65%
+  // slice of it, which is what took quota 17 from 46 to 68 and quota 9 from
+  // 25 to 36 on this very save: the numbers below are the point at which the
+  // window physically runs out of room at that spacing, not a figure this
+  // tool chose.
+  assert.equal(inspectRegatta(none, 68).reason, "ok", "quota 17 fills the range at 68");
+  assert.equal(inspectRegatta(none, 69).reason, "window_closed", "69 will not fit inside 4 days at 5083s apart");
+  assert.equal(inspectRegatta(at("9"), 36).reason, "ok", "quota 9 stops at 36");
+  assert.equal(inspectRegatta(at("9"), 37).reason, "window_closed", "the tighter quota runs out of the same window sooner");
+  assert.throws(() => injectRegata(at("9"), 37), /regatta/i, "and the push refuses it too, not only the badge");
 
   // What it writes obeys its own quota rather than merely claiming to.
   const low = times(injectRegata(at("9"), 25));
@@ -852,6 +858,36 @@ test("the daily ceiling is the game's own quota, read out of the save", () => {
     busiestRolling = Math.max(busiestRolling, i - j + 1);
   }
   assert.ok(busiestRolling <= 9, `a rolling day took ${busiestRolling} of a quota that only allows 9`);
+});
+
+test("regatta takes any count the window can hold — the ceiling is a typo guard, not a rule", () => {
+  // The field used to snap back to 73 and the payload was clamped to the same
+  // figure, so asking for 100 came back as 73 with a paragraph of prose under
+  // the button explaining a limit nobody had asked for. Both are gone: the
+  // number is taken as typed, and all that survives is a bound large enough
+  // that a stray digit cannot ask the injector to emit a million records and
+  // hang the session.
+  assert.ok(REGATTA_MAX_TASKS >= 100, "the ceiling must sit above any count a user realistically types");
+  assert.notEqual(REGATTA_MAX_TASKS, 73, "the old policy figure must not come back");
+  assert.equal(regattaWant(50), 50, "50 is taken as typed");
+  assert.equal(regattaWant(100), 100, "100 is taken as typed");
+  assert.equal(regattaWant(REGATTA_MAX_TASKS + 1), REGATTA_MAX_TASKS, "a typo still cannot ask for a million");
+
+  // A count that used to come back "the regatta has closed" now fits, because
+  // the batch may use the whole elapsed window instead of only the newest 65%
+  // of it. Nothing else about the spacing moved: the completions are still
+  // `regattaMinGap` apart, still inside the window, still in the past.
+  const xml = liveRegattaSave();
+  assert.equal(inspectRegatta(xml, 68).reason, "ok", "the whole window is open to the batch");
+
+  const out = injectRegata(xml, 60);
+  assert.equal((out.match(/<MyOldTask\b/g) ?? []).length, 60, "60 are written on top of the save's own record");
+  const times = [...out.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)].map((m) => Number(m[1])).sort((a, b) => a - b);
+  const now = Math.floor(Date.now() / 1000);
+  for (let i = 0; i < times.length; i++) {
+    if (i) assert.ok(times[i]! - times[i - 1]! >= REGATTA_MIN_GAP, "two completions sat closer than a day allows");
+    assert.ok(times[i]! < now, "a completion must never be dated in the future");
+  }
 });
 
 test("the day's share is a spacing, so a rolling day can never hold one more", () => {

@@ -77,10 +77,11 @@ const saveSchema = z.object({
   barnUpgrades: z.number().optional(),
   barnItems: z.record(z.string(), z.number()).optional(),
   regatta: z.boolean().optional(),
-  // Must stay in step with REGATTA_MAX_TASKS in server/township/inject.server.ts.
-  // This module is bundled for the browser, so the constant cannot be imported
-  // here; the server clamps the value again regardless of what arrives.
-  regattaTasks: z.number().int().min(1).max(73).optional(),
+  // Must stay in step with REGATTA_MAX_TASKS in src/lib/regatta.ts. This
+  // module is bundled for the browser, so the constant cannot be imported
+  // here; the server clamps the value again regardless of what arrives. The
+  // number is a typo guard, not a rule about how many tasks a week may hold.
+  regattaTasks: z.number().int().min(1).max(9999).optional(),
   season: z.boolean().optional(),
   unbanMode: z.enum(["inicial", "completo", "novo"]).optional(),
   decorFragments: z.boolean().optional(),

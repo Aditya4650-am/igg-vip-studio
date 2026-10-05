@@ -381,8 +381,8 @@ function readCounter(xml: string, name: string): number | null {
 
 /**
  * City level — `levelup`, falling back to `level` for saves that name it that
- * way (`sanitizeStatChanges` reads both, so this does too). The pattern is
- * anchored on a closing quote, so `level` never matches `levelup`.
+ * way (both spellings appear across builds). The pattern is anchored on a
+ * closing quote, so `level` never matches `levelup`.
  */
 function readLevel(xml: string): number | null {
   return readCounter(xml, "levelup") ?? readCounter(xml, "level");

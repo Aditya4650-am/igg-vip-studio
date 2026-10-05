@@ -1179,7 +1179,10 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   // figure the server never wrote.
   const quota = regattaDailyQuota(regattaTaskQuota(block.inner));
   const minGap = regattaMinGap(quota);
-  const { hi, lo } = regattaBounds(win, now, lastDone, minGap);
+  // `need - 1` is handed to `regattaBounds` so the preferred 35% slice can
+  // widen backwards to the start of the window when the count does not fit
+  // inside it, instead of the batch refusing for a room it actually has.
+  const { hi, lo } = regattaBounds(win, now, lastDone, minGap, need - 1);
   // Both floors matter: the first keeps `lo` clear of `win.start + 122` below,
   // so task times never collapse onto one another; the second leaves every task
   // `minGap` of its own, which is what bounds any single day at this save's own

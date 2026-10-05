@@ -24,22 +24,20 @@
  */
 
 /**
- * The ceiling is what a **real** week can show is valid, not a guess.
+ * The ceiling on **one batch** — a safety rail, not a rule about regattas.
  *
- * 73 is the largest completed week ever recorded in the corpus; the weeks
- * measurable directly off the saves on file are 36, spread over 5 days. 105
- * exists only in the old fabricator's output — and its tell was never the
- * weekly count but that all 105 landed on **one calendar day**.
+ * It used to be 73, the largest completed week ever recorded in the corpus,
+ * and it was presented to the user as "the maximum". That number is gone as a
+ * policy: the field takes whatever is typed. What remains is a bound large
+ * enough that a typo cannot ask the injector to emit a million records and
+ * hang the session — nobody has ever needed more than a handful of hundred.
  *
- * Which is why the weekly number is the weaker of the two rails here. A
- * 10-task batch is what actually got an account banned, and it went down for
- * *shape* — a score that out-ran its own history, a `ver="0"`, a completed id
- * still sitting on the offer list — not for being too big. `REGATTA_MAX_PER_DAY`
- * below is the rail that carries the weight: it bounds how dense one day may
- * become, which is what stops a week's worth of tasks from collapsing into the
- * fabricator's single-day pile.
+ * The daily spacing below is a different thing and still carries weight: it
+ * bounds how dense one *day* may become, which is what stops a batch from
+ * collapsing into the fabricator's single-day pile. The busiest day in any
+ * real week on file is 12.
  */
-export const REGATTA_MAX_TASKS = 73;
+export const REGATTA_MAX_TASKS = 9999;
 export const REGATTA_DEFAULT_TASKS = 12;
 
 /**
@@ -131,10 +129,25 @@ export function regattaBounds(
   now: number,
   lastDone = 0,
   minGap: number = REGATTA_MIN_GAP,
+  gaps = 0,
 ): { hi: number; lo: number } {
   const hi = Math.min(win.end, now) - 60;
-  let lo = win.start + Math.floor((hi - win.start) * 0.35);
-  if (lastDone > 0) lo = Math.max(lo, lastDone + minGap);
+  const elapsed = hi - win.start;
+  // Nothing may be dated before the week opened, and nothing before the newest
+  // completion already on record — the second floor is what keeps the block in
+  // document order across repeat pushes.
+  const floorLo = Math.max(win.start, lastDone > 0 ? lastDone + minGap : win.start);
+  let lo = win.start + Math.floor(elapsed * 0.35);
+  if (lo < floorLo) lo = floorLo;
+  // 35% of the elapsed window is a *preference* about where a batch sits, not
+  // a rule. When the requested count does not fit in that slice, widen it
+  // backwards towards the start of the window rather than refusing: the
+  // alternative turned a count the save could plainly hold into "the regatta
+  // has closed", which reads to the user as a broken button. `floorLo` still
+  // holds, so ordering and the window's own start are untouched — if the
+  // caller still finds the range short after this, there is genuinely no room
+  // left and it says so.
+  if (gaps > 0 && hi - lo < gaps * minGap) lo = Math.max(floorLo, hi - gaps * minGap);
   return { hi, lo };
 }
 
@@ -167,7 +180,8 @@ export function regattaReason(
   // approximations of each other. `need` is >= 1 here, so a single task always
   // fits and a range with no room left at all still refuses.
   const minGap = regattaMinGap(state.quota);
-  const { hi, lo } = regattaBounds(win, now, state.lastDone ?? 0, minGap);
-  if (hi - win.start < 600 || hi - lo < (want - state.current - 1) * minGap) return "window_closed";
+  const gaps = want - state.current - 1;
+  const { hi, lo } = regattaBounds(win, now, state.lastDone ?? 0, minGap, gaps);
+  if (hi - win.start < 600 || hi - lo < gaps * minGap) return "window_closed";
   return "ok";
 }

@@ -308,24 +308,28 @@ positions); the sidebar *Tools* button was removed, leaving Season there.
   so; the label used to read "tasks to add", which promised a delta the server
   never performed. Do not "fix" the semantics by making it a delta without
   changing both, or the badge starts lying.
-- The batch is capped at `REGATTA_MAX_TASKS = 15` (a strong week), default
-  `REGATTA_DEFAULT_TASKS = 12`. `SavePayload.regattaTasks` is clamped on the
-  server; the zod bound in `studio-api.ts` duplicates it because that module is
-  bundled for the browser and cannot import a server constant.
+- The batch takes whatever number is typed, default
+  `REGATTA_DEFAULT_TASKS = 12`. `REGATTA_MAX_TASKS = 9999` is **not a policy
+  figure** — it used to be 73, the largest real week on record, and the tab
+  presented it as *the* maximum (see *No limits on these two tabs* below). All
+  that survives is a bound large enough that a stray digit cannot ask the
+  injector to emit a million records and hang the session; `regattaWant` and
+  the zod bound in `studio-api.ts` both apply it, the latter by literal value
+  because that module is bundled for the browser and cannot import a constant.
 - `applySave` rolls `s.rawXml` **and `s.unban` back on refusal: a restore
   queued in the same batch has already rewritten `s.rawXml`, so leaving it in
   place while reporting a failure would make the next push apply it twice.
   `applyRegatta` is now a one-line delegate to `applySave`, so the identity
   gate, the balance check and the rollback are shared rather than duplicated.
 
-### Why the Add button looked broken
+### Why the Add button looked broken — and what replaced the fix
 
-The button is `disabled={busy || pendingRegatta || regattaState !== "ok"}`, and
-`regattaState` is computed in the tab from **the count the user actually
-picked**. It used to read `session.regattaInfo.reason` straight off the
-snapshot — but `snapshot()` calls `inspectRegatta(rawXml)` with the **default
-12**, because it cannot know which number the user is about to type. Two
-symptoms, both reported as "the button is not clickable":
+The button used to be `disabled={busy || pendingRegatta || regattaState !== "ok"}`,
+with `regattaState` computed in the tab from **the count the user actually
+picked**. It had read `session.regattaInfo.reason` straight off the snapshot —
+but `snapshot()` calls `inspectRegatta(rawXml)` with the **default 12**, because
+it cannot know which number the user is about to type. Two symptoms, both
+reported as "the button is not clickable":
 
 - save holding 12 tasks, user raises the count to 15 → badge says *already has
   enough*, button dead, though 15 would have worked;
@@ -334,17 +338,29 @@ symptoms, both reported as "the button is not clickable":
 
 `src/lib/regatta.ts` holds `regattaWant` / `regattaBounds` / `regattaReason`
 and the two constants — **pure and browser-safe (no fs, no server imports)**.
-The server's `inspectRegatta` and the tab's `regattaState` both call it, so
-"pressable" and "will succeed" are one decision instead of two that drift. The
-tab re-runs it on every keystroke of the count field, and a disabled button now
-prints the reason *in place* (`REGATTA_WHY_KEY`, under the button) instead of
-only as a badge two panels above it. The badge's colour and icon follow
-`regattaState` too.
+The server's `inspectRegatta` and the tab's `regattaState` both call it, so the
+badge and the push stay one decision instead of two that drift.
 
-Even with the shared helper, a **real** save can still be legitimately
-un-injectable: `mGameInfo.current.xml` has **no `<Regata>` block at all** →
-`no_active_regatta` → correctly disabled. That is not a bug, and the hint line
-is what tells the user so.
+**The gating itself is gone as of 2026-10-05.** The button is now
+`disabled={busy || pendingRegatta}` — the count gates nothing, so typing a
+number and pressing the button is the whole interaction. With it went the
+reason paragraph under the button (`REGATTA_WHY_KEY`), the `regattaCountHint`
+limit line, the `regattaGuards` prose and the `regattaHint` tab intro: the
+request was for no limits and no warnings. The **badge row survives** (state,
+current/target, templates, pool) because it is the only remaining way to see
+what the save holds; it now reports rather than blocks. `regattaWhy*` and
+`regattaCountHint` remain in `i18n.ts` unrendered — dropping keys means
+auditing 18 `Partial` overlays for no gain.
+
+`regattaState` is still computed and still feeds the badge, which is why
+`regattaReason` is still passed the save's own quota.
+
+A **real** save can still be legitimately un-injectable:
+`mGameInfo.current.xml` has **no `<Regata>` block at all**, and every corpus
+save's week had *closed* when this was measured (`end=1791187200` against
+`now=1791215096` — 7 h past). Both answer `no_active_regatta`. The button now
+stays pressable and the push says why; that is the game's calendar, not a tool
+limit, and inventing a window would be writing server-held state.
 
 Guard rails: `xml-edit.test.mts` proves field-for-field cloning, in-window
 ordered past timestamps, the monotonic lifetime counter, self-closing-block
@@ -396,10 +412,10 @@ obvious claim — "everyone has regatta, copy them" — turned out to be false:
   with a preset in front of it.
 - Real weeks hold far more than 15 if you only look at `<PrevRegata>`
   (`36, 36, 73` measured, spanning 4–7 days of `realEndTime`), while *current*
-  blocks measure `1, 14, 20`. `REGATTA_MAX_TASKS = 15` stays a ceiling on what
-  **one batch** writes, not a claim about what a week can contain — and the save
-  still refuses `already_full` when it already holds ≥ the requested total, so
-  the tool never pushes a week *down* or rewrites it.
+  blocks measure `1, 14, 20`. `REGATTA_MAX_TASKS` is no longer a policy figure
+  at all (see *No limits on these two tabs* below) — the batch takes whatever is
+  typed — and the save still refuses `already_full` when it already holds ≥ the
+  requested total, so the tool never pushes a week *down* or rewrites it.
 
 ### TWN's newer builds are packed, and how to read them (2026-10-01)
 
@@ -640,9 +656,9 @@ block's **own** copy that decides here.
 **`REGATTA_MAX_PER_DAY` went 15 -> 17** for that reason: 15 was this repo's
 inference (between the busiest real day, 12, and the 18/day the 73-week
 implies), 17 is what the game prints. The weekly ceiling `REGATTA_MAX_TASKS =
-73` is untouched and still binds first for most weeks — 73 over a seven-day
-week averages ~10/day — so raising the daily rail does not widen what a push
-may carry on its own.
+73` is gone as of 2026-10-05 (see *No limits on these two tabs* below), so this
+daily rail is now the one that binds first — which is the right place for it,
+because it is the game's own number rather than one this repo chose.
 
 **The spacing has to be `floor(86400 / q) + 1`, not `ceil`.** With spacing `s`
 any rolling 86400s window holds at most `floor(86400 / s) + 1` points, and only
@@ -667,17 +683,128 @@ small one: `injectRegata` spreads the batch evenly over the usable range
 17, 25 is `ok` and 26 `window_closed` at quota 9. `regattaReason` takes the
 same `state.quota`, so the badge and the push stay one decision.
 
-Shown in the UI as a **Daily limit** badge next to Templates/Pool, and named in
-`regattaCountHint` / `regattaWhyWindow` via `{day}` — a greyed-out button with
-no number leaves the user unable to see why 40 was fine on one save and refused
-on another with the same window.
+**Those two numbers moved on 2026-10-05 — up, not down.** `regattaBounds` took
+a fifth parameter, `gaps`, and the preferred `lo = win.start + 0.35 * elapsed`
+is now a *preference* rather than a floor: when the batch does not fit in that
+slice, `lo` widens backwards towards `win.start` (never past it, and never
+before `lastDone + minGap`, which is what keeps document order across repeat
+pushes). The same fixture now reads **68 `ok` / 69 `window_closed` at quota 17
+and 36 / 37 at quota 9**, because the batch may use the whole elapsed window
+instead of only the newest 65% of it. Nothing about the *spacing* moved — the
+completions are still `regattaMinGap` apart, still inside the window, still in
+the past. On a real save this is what took a push of 50 from `window_closed` to
+`ok`.
+
+**What still refuses, and why it is not a limit.** `window_closed` is the
+game's calendar, not a figure this repo invented: capacity is roughly
+`elapsed_days × daily_quota`, so 100 completions need most of a seven-day week
+to have already run at quota 15. Refusing to date a completion before the week
+opened is the same rule that stops a future timestamp; relaxing it would mean
+writing state the server holds. `no_active_regatta` and `no_template` are the
+same kind — measured on 2026-10-05, *every* save in the corpus answered
+`no_active_regatta` because that week had closed 7 hours earlier
+(`end=1791187200` vs `now=1791215096`), and `mGameInfo.current.xml` has no
+`<Regata>` block at all.
+
+No badge prints the quota any more (see *No limits on these two tabs* below);
+the state / current / templates / pool chips remain and now only report.
 
 Guard rails: `xml-edit.test.mts` pins `REGATTA_MAX_PER_DAY === 17`, the
-quota-17/9/30 clamping, both refusals above (badge *and* push), the rolling-day
-bound at quota 9, and `regattaMinGap` keeping `floor(86400/gap) + 1 <= q` for
-every quota from 1 to 17; `ui-regressions.test.mts` pins that the tab reads
-`regattaInfo.quota`, hands it to `regattaReason`, and substitutes `{day}`
-everywhere it is used.
+quota-17/9/30 clamping, both refusals above (badge *and* push) at their new
+68/69 and 36/37 boundaries, the rolling-day bound at quota 9, `regattaMinGap`
+keeping `floor(86400/gap) + 1 <= q` for every quota from 1 to 17, and
+`regatta takes any count the window can hold — the ceiling is a typo guard, not
+a rule` (50/100 taken as typed, 68 still `ok`, 60 really written, no two
+completions closer than `REGATTA_MIN_GAP`, none dated in the future);
+`ui-regressions.test.mts` pins that the button gates only on
+`busy || pendingRegatta`, that no reason paragraph or `regattaHint` /
+`regattaGuards` / `regattaCountHint` line renders, and that `regattaReason` is
+still handed the save's own quota so the badge and the push cannot drift apart.
+
+### No limits on these two tabs (2026-10-05)
+
+Reported as *"why the regatta feature, and the data center tab all features you
+set the limit, i want these two tabs has no limits"*, with the reference being
+`IGG TOOL.zip` — *"deep research this zip and do properly the regatta and data
+center features as it is like this zip … also ban protection"*.
+
+**What that zip is, which decides how far it can be copied.** 5.2 MB, 130
+files, `Server/` + `Client/`, the same `township/*.server.ts` names, the same
+Vietnamese strings and the same `studio-app.tsx` — it is an **earlier build of
+this same codebase**, not a third-party tool, and it predates every ban
+protection here: zero hits across the whole extraction for `assertPushSafe`,
+`assertNoForeignIdentity`, `assertSaveShapeSafe`, `assertProgressionsSafe`,
+`assertCardCollectionsSafe`, `assertRegattaSafe`. Its `encodeSave` is six
+lines that base64 the XML and return.
+
+**Data Center: the one limit was a silent rewrite, and it is gone.**
+`sanitizeStatChanges()` in `vars.server.ts` clamped two fields by a level band
+(`tca` 3,000/8,000/15,000/30,000/50,000 under levels 20/35/50/70/70+; `coi`
+200,000/1,000,000/5,000,000) — type `999999` on a level-10 city and the save
+received `3000`, with nothing on screen to say so. The zip has no such
+function. It was **never one of the five push gates** — a writer-side rewrite,
+not a check — so removing it takes no ban protection away; the five gates in
+`encodeSave` are untouched. The reasoning is the same one that lifted the `crd`
+raise rule: *holding the single field the user came to edit reads as a broken
+feature rather than a guard*. Measured afterwards over all 22 corpus saves:
+`tca=999999 coi=99999999` on every one, zero clamped. The `Soft cap (anti-ban)`
+log line in `applySave` went with it, because it could never fire again.
+
+What that does **not** change: a level-10 city holding 999,999 T-cash is
+something a server can read. Nothing here is a promise that a value like that
+is safe — it is only that the tool no longer silently disagrees with the user.
+
+**Regatta: the caps were policy, the refusals were not.** Three numbers went:
+
+| was | now | why |
+| --- | --- | --- |
+| `REGATTA_MAX_TASKS = 73` | `9999` | 73 was the largest real week on record, presented in the UI as *the* maximum. Now a typo guard only — nobody needs a million records, and one would hang the session. |
+| zod `.max(73)` | `.max(9999)` | mirrors it, by literal value (that module is bundled for the browser) |
+| input `Math.min(73, raw)` | same clamp, at the new bound | the field took 100 and handed back 73 |
+
+And one real gain: `regattaBounds` gained its `gaps` argument so the batch may
+use the **whole elapsed window** rather than only the newest 65% of it — see
+the daily-quota section above for the new 68/69 and 36/37 boundaries.
+
+**What was deliberately *not* copied from the zip.** Its `injectRegata(xml, 105,
+135)` hardcodes the batch and: overwrites `RegataTasksCompleted` with 105 (a
+lifetime counter, so it can move *backwards*), invents a `<Regata>` block when
+the save has none, **deletes every existing `<MyOldTask>`**, dates every record
+`now + 3600 + i*90` (all in the future, ~90 s apart, all on one calendar day),
+puts `score="135"` and `ver="1"` on all of them, falls back to invented
+`match3_${i}` ids while leaving completed ids sitting in `<FreeTask>`, and
+writes only `realEndTime` — no `endTime`, `need`, `have`, `target`, `anlLimit`
+and no block counters. Every one of those is a key `regattaProblems()` refuses,
+and AGENTS.md keeps that exact output on file as the anti-reference; a real
+account was banned on a batch shaped like it on 2026-09-30. The zip's button
+"works with no limits" **because it has no gates at all**, so copying it
+literally would mean deleting `assertRegattaSafe` — the direct opposite of the
+*"also ban protection"* in the same request. The record builder is therefore
+untouched: what came out was the caps, the gating and the prose.
+
+Two further notes. `regattaProblem`'s keys are unchanged, so a save that arrived
+with an oddity still pushes (loaded-vs-pushed diff throughout). And
+`REGATTA_MAX_PER_DAY = 17` is **not** one of the removed caps — it is the
+game's own `TaskQuota`, and it still sets the spacing between completions.
+
+**UI.** `disabled={busy || pendingRegatta}` — the count gates nothing. Gone:
+the reason paragraph under the button (`REGATTA_WHY_KEY`), `regattaCountHint`,
+`regattaGuards`, the `regattaHint` tab intro and the **Daily limit** badge.
+Kept: the state chip, current/target, templates and pool, because they are the
+only remaining way to see what the save holds — they report rather than block.
+The `regattaWhy*` / `regattaCountHint` keys stay in `i18n.ts` unrendered;
+dropping keys means auditing 18 `Partial` overlays for nothing.
+
+**Guard rails.** `vars-sanitize.test.mts` was rewritten from *the caps hold* to
+*the caps do not exist* — it fails if `tca`/`coi` are ever clamped again at any
+level, and it still pins that an empty field cannot wipe a counter. The three
+regatta guard rails listed in the quota section above cover the new boundaries,
+the widened range and the always-pressable button.
+
+**Honest limit, unchanged.** None of this makes a value or a batch safe. The
+gates say *nothing provably wrong*, never *cannot be banned* — no tool can
+promise 100% protection, and removing a clamp removes a safety rail whether or
+not anyone can show it ever fired.
 
 ## Factory / upgrade levels
 
