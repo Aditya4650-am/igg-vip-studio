@@ -158,7 +158,6 @@ const REGATTA_REASON_KEY = {
   ok: "regattaReady",
   no_active_regatta: "regattaNoRegatta",
   no_template: "regattaNoTemplate",
-  already_full: "regattaFull",
 } as const;
 
 function groupIcon(id: string): GameIconName {
@@ -1867,10 +1866,13 @@ export function StudioApp() {
   // 12 — `snapshot()` cannot know which number the user is about to pick. The
   // button has to answer for the count on screen: a save already holding 12
   // read "enough tasks" with the count raised to 15 (dead button, but 15 would
-  // have worked), and a save holding 5 read "ready" with the count dropped to
-  // 3 (live button, then the push threw `already_full`). Both look like a
-  // broken button. Re-running the server's own helper here makes "pressable"
+  // have worked). Re-running the server's own helper here makes "pressable"
   // and "will succeed" the same decision.
+  //
+  // The count no longer decides anything — it is how many tasks this push adds
+  // — so what is left for it to answer is the two things that genuinely depend
+  // on the block rather than on the number: whether a regatta is open, and
+  // whether there is a record to copy.
   const regattaState: RegattaReason = session
     ? regattaReason(
         {
@@ -3112,7 +3114,8 @@ export function StudioApp() {
                           {tr(REGATTA_REASON_KEY[regattaState])}
                         </span>
                         <span className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums">
-                          {tr("regattaDone")} {session.regattaInfo.current} / {regattaTasks}
+                          {tr("regattaDone")} {session.regattaInfo.current} →{" "}
+                          {session.regattaInfo.current + regattaTasks}
                         </span>
                         <span className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums">
                           {tr("regattaTemplates")} {session.regattaInfo.templates}

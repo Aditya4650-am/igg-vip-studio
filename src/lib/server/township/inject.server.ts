@@ -2,6 +2,7 @@ import {
   REGATTA_DEFAULT_TASKS,
   REGATTA_MAX_PER_DAY,
   REGATTA_MAX_TASKS,
+  REGATTA_MIN_WINDOW_AGE,
   regattaDailyQuota,
   regattaMinGap,
   regattaReason,
@@ -473,7 +474,6 @@ const REGATTA_ERR = {
     "Save chưa có regatta đang diễn ra. Vào regatta trong game trước rồi thử lại - không thêm task ngoài một regatta đang mở, vì Playrix đối chiếu cửa sổ thời gian.",
   no_template:
     "Save chưa có task regatta thật nào để chép, và không có task nào trong pool đủ dữ liệu thật (need/score/type) để dựng. Không tạo task giả.",
-  already_full: "Regatta này đã có đủ task (%s) - không thêm nữa.",
 } as const;
 
 /**
@@ -1006,7 +1006,7 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
   const quota = regattaDailyQuota(regattaTaskQuota(block.inner));
   const scores = [...block.inner.matchAll(/<MyOldTask\b[^>]*\bscore="(\d+)"/g)].map((m) => Number(m[1]));
   const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
-  const active = !!win && now >= win.start && now <= win.end;
+  const active = !!win && now >= win.start + REGATTA_MIN_WINDOW_AGE && now <= win.end;
   // Exactly what `injectRegata` will decide for this batch size, in the same
   // order — now shared with the tab, which re-runs it for the count the user
   // actually picked instead of trusting this default-12 answer.
@@ -1020,7 +1020,11 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
   // A synthesized batch has no equivalent ceiling: it emits as many records as
   // are asked for, so the length test below can only fail if it emitted none,
   // which the `templates` check above already reports as `no_template`.
-  const need = reason === "ok" ? regattaWant(nTasks) - current : 0;
+  // The batch the injector will build: the count **added**, never
+  // `want - current`. Subtracting what the save already holds is what made a
+  // second push answer `already_full`, so the plan has to be sized the same
+  // way or "pressable" and "will succeed" drift apart again.
+  const need = reason === "ok" ? regattaWant(nTasks) : 0;
   const shortPlan =
     reason === "ok" &&
     (sources.synthetic ? sources.tags.length === 0 : regattaClonePlan(block.inner, sources.tags, need) === null);
@@ -1143,9 +1147,12 @@ function bumpRegattaTaskVars(varsInner: string, added: number, countAfter: numbe
  *
  * Refuses (rather than reporting a success the game ignores) when the save has
  * no live `<Regata>`, or an offer list that holds no id any save has ever
- * completed, or already has enough tasks. Throws, so `applySave` surfaces the
- * reason instead of ticking. Nothing is refused for the count: the batch is
- * spread across whatever span the block still has.
+ * completed. Throws, so `applySave` surfaces the reason instead of ticking.
+ *
+ * `nTasks` is **how many tasks this push adds**, not the week's target total,
+ * so a save that already holds tasks still takes more and the same number may
+ * be pushed again and again in one day. Nothing is refused for the count: the
+ * batch is spread across whatever span the block still has.
  */
 export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): string {
   const text0 = asText(xml).replace(/^\uFEFF/, "");
@@ -1154,14 +1161,25 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   const block = regattaBlock(text0);
   const win = block ? regattaWindow(block.attrs) : null;
   const now = Math.floor(Date.now() / 1000);
-  if (!block || !win || now < win.start || now > win.end) throw new Error(REGATTA_ERR.no_active_regatta);
+  // `REGATTA_MIN_WINDOW_AGE` seconds of the block's own window have to be
+  // behind us before a record can be dated inside it and before now at the
+  // same time — see `regatta.ts`. The tab runs the same test.
+  if (!block || !win || now < win.start + REGATTA_MIN_WINDOW_AGE || now > win.end)
+    throw new Error(REGATTA_ERR.no_active_regatta);
 
   const src = regattaSources(text0, want);
   if (!src.tags.length) throw new Error(REGATTA_ERR.no_template);
 
-  const current = (block.inner.match(/<MyOldTask\b/gi) ?? []).length;
-  const need = want - current;
-  if (need <= 0) throw new Error(REGATTA_ERR.already_full.replace("%s", `${current}/${want}`));
+  // `want` is **how many tasks this push adds**, not the week's target total.
+  // Reading it as a total is what made a second push impossible: after the
+  // first one landed the save held those records, `need = want - current`
+  // came out at or below zero, and the user got "Regatta này đã có đủ task
+  // (50/50)" on a week they had only just started filling. Adding 50 to a save
+  // that already holds 50 now writes 50 more, and may be repeated all day.
+  //
+  // There is deliberately no `already_full` left: `regattaWant` clamps the
+  // count to at least 1, so there is no input that means "do nothing".
+  const need = want;
   // No ceiling on a synthesized plan any more. It used to stop where the fresh
   // offers it could put back ran out (about 21 on a real save) and then refuse
   // the rest as "no real tasks to copy" while the badge above the button
@@ -1208,13 +1226,37 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   // completion and this batch's first, when there is that much room left: two
   // completions a second apart is not a shape any save shows. It no longer
   // decides whether the push happens.
-  const floor = win.start + 2;
   const latest = Math.min(win.end, now - 1);
-  const anchor =
-    lastDone > 0 ? lastDone + Math.min(regattaMinGap(quota), Math.max(1, latest - lastDone)) : 0;
-  const lo = Math.min(Math.max(floor, anchor), Math.max(floor, latest));
+  // Nothing may be dated before the week opened. The second floor — nothing
+  // before the block's own newest completion — is what keeps document order
+  // across repeat pushes: realEndTime is non-decreasing in document order in
+  // every block of the corpus (35/35, 14/14, 104/104), and a second push that
+  // recomputed the range from the window alone used to write a record completed
+  // *before* the one above it.
+  const floor = Math.min(win.start + 2, latest);
+  let lo = floor;
+  if (lastDone > 0) {
+    // Start just after the newest completion already on record, but never spend
+    // more than a `need`th of the room that is left on that one gap, and never
+    // less than a single second — so the batch lands *after* the record above
+    // it rather than on top of it.
+    //
+    // The offset used to be `min(minGap, room)` in full, and that is what broke
+    // a second push made the same day: with `room` (the time since the first
+    // batch's last record) below `regattaMinGap`, the whole room was consumed
+    // as the offset, `lo` landed on `latest`, the span came out at zero and
+    // **every record of the second batch sat on the same second**. Dividing the
+    // room by `need` instead spreads the batch evenly over the time that
+    // actually exists between the two pushes — which is the only place these
+    // completions may go: they may not be dated in the future, and they may
+    // not be dated before the batch above them.
+    const room = Math.max(1, latest - lastDone);
+    const share = Math.max(1, Math.floor(room / Math.max(1, need)));
+    const after = lastDone + Math.min(regattaMinGap(quota), share);
+    lo = Math.max(floor, Math.min(after, latest));
+  }
   const hi = Math.max(lo, latest);
-  const gap = need > 1 ? Math.floor(Math.max(0, hi - lo) / (need - 1)) : 0;
+  const span = Math.max(0, hi - lo);
 
   // `takenCounter` runs monotonically across the `MyOldTask` list of a single
   // block: a real save's archived week reads 2,3,…,37 in document order, and
@@ -1253,7 +1295,16 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
     // three inside the window. The headroom each record needs is derived from
     // how far it sits past the window's own start, so it holds even in the
     // first minutes of a week instead of only after `win.start + 122`.
-    const endTime = Math.min(lo + i * gap, hi);
+    //
+    // Placed by dividing the span rather than by stepping a pre-rounded gap:
+    // `floor(span / (need-1))` collapses to 0 whenever the room is shorter
+    // than the batch, which put every record on one second while seconds were
+    // still available. `floor(i * span / (need-1))` walks the whole span at
+    // once, so the smallest step it ever takes is that same rounded gap — the
+    // spacing never gets *wider*, it only stops being thrown away — and the
+    // last record lands exactly on `hi`.
+    const endTime =
+      need > 1 ? Math.min(lo + Math.floor((i * span) / (need - 1)), hi) : Math.min(lo, hi);
     const back = Math.min(120, Math.max(1, endTime - win.start - 1));
     const complete = Math.max(win.start + 1, endTime - back);
     const take = Math.max(

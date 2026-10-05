@@ -251,17 +251,42 @@ positions); the sidebar *Tools* button was removed, leaving Season there.
   `TASK_TEMPLATE_FIELDS` and no `expired`.
 - `inspectRegatta(xml, nTasks)` is the read-only twin, and its
   `RegattaReason` is exactly what the tab shows **before** the user presses
-  anything: `no_active_regatta` (no `<Regata>` with a window, or `now` outside
-  it), `no_template`, `already_full`. There is no reason for the count itself:
-  see *Any count from 1 to 100 pushes, no error* below.
+  anything: `no_active_regatta` (no `<Regata>` with a window, `now` outside it,
+  or less than `REGATTA_MIN_WINDOW_AGE = 3` seconds of the window elapsed — a
+  record needs `take < complete < real` all inside the window and before now,
+  so a week opened this very second holds none), `no_template`. There is no
+  reason for the count itself: see *Any count from 1 to 100 pushes, no error*
+  below.
 - Refusals **throw** with a Vietnamese message rather than reporting a success
   the game would ignore. There is no code path that invents a `<Regata>`.
-- Timestamps: `lo = max(win.start + 2, lastDone + min(minGap, room))`,
-  `hi = max(lo, min(win.end, now - 1))`, `gap = floor((hi - lo) / (need - 1))`,
-  `endTime = min(lo + i * gap, hi)`. They stay inside the window, strictly in
-  the past, strictly `takeTime < completeTime < realEndTime`, non-decreasing in
-  document order, and `lo` never lands a second task on top of the block's own
-  newest completion when the range has room for a day's share after it.
+- **`nTasks` is how many tasks this push *adds*, not the week's target total**
+  (since 2026-10-05). `injectRegata` uses `need = want` outright, so a save
+  already holding tasks still takes exactly what was typed and the same number
+  may be pushed again and again in one day. `already_full` is **deleted** — from
+  `RegattaReason`, from `REGATTA_ERR` and from `REGATTA_REASON_KEY` — because
+  `regattaWant` clamps to at least 1 and no input means "do nothing". The
+  previous reading (`need = want - current`) is what produced *"after i push 50
+  tasks it works, but if i want to push more then i can't push it shows error"*:
+  the first push filled the target and every later push came back
+  `(50/50)`. The badge now prints `Completed <n> → <n + count>` instead of
+  `<n> / <count>`, so it cannot show a target that no longer exists.
+- Timestamps: `latest = min(win.end, now - 1)`,
+  `floor = min(win.start + 2, latest)`, and when the block already holds a
+  completion, `lo = max(floor, min(lastDone + min(minGap, max(1, floor(room /
+  need))), latest))` where `room = max(1, latest - lastDone)`;
+  `hi = max(lo, latest)`, `span = hi - lo`, and
+  `endTime = min(lo + floor(i * span / (need - 1)), hi)`.
+  They stay inside the window, strictly in the past, strictly
+  `takeTime < completeTime < realEndTime`, non-decreasing in document order,
+  and each of them is derived rather than stepped so a room shorter than the
+  batch cannot collapse the whole thing onto one second. The old offset
+  (`min(minGap, room)` in full) is what broke a **repeat** push: with less than
+  a day of room left it consumed the entire span as its own gap, `lo` landed on
+  `latest` and every record of the second batch sat on the same second — the
+  shape the fabricator produced. Sharing the room with the batch is why a
+  second push an hour later spreads over that hour. `REGATTA_MIN_WINDOW_AGE`
+  seconds of elapsed window are required, so `floor` can never run past
+  `latest` and nothing is ever dated outside the week.
 - `RegataTasksCompleted` is **bumped only when already present**; a save that
   never tracked it gains no fabricated counter.
 - **`<Regata score>` and `scoreUpd` are never written, at all.** They are not
@@ -306,11 +331,16 @@ positions); the sidebar *Tools* button was removed, leaving Season there.
   Team / …`; appending parked the batch after `<Vars>` and `<Team>`, a shape no
   real save has. Guard rail: `regata puts new records where real saves keep
   them`.
-- **`nTasks` is the week's *target total*, not "+N more"** — `injectRegata`
-  computes `need = want - current`. The badge (`current / N`) and the hint say
-  so; the label used to read "tasks to add", which promised a delta the server
-  never performed. Do not "fix" the semantics by making it a delta without
-  changing both, or the badge starts lying.
+- **`nTasks` is "+N more", not the week's *target total*** — `injectRegata`
+  computes `need = want` outright. Both halves had to move together, and now
+  have (2026-10-05): the badge reads `current → current + N` and the label reads
+  *"Tasks to add"*, so neither promises nor shows a target. The older rule here
+  (`need = want - current`, with the label matching) was the direct cause of
+  *"i push 50 tasks it works, but if i want to push more then i can't push it
+  shows error"* — the first push filled the target and the rest of the week was
+  answered `already_full`. Do not revert one half without the other: a delta
+  count behind a `/ N` badge lies again, and a target behind an "add" label
+  refuses again.
 - The batch takes whatever number is typed, default
   `REGATTA_DEFAULT_TASKS = 12`. `REGATTA_MAX_TASKS = 9999` is **not a policy
   figure** — it used to be 73, the largest real week on record, and the tab
@@ -350,10 +380,18 @@ number and pressing the button is the whole interaction. With it went the
 reason paragraph under the button (`REGATTA_WHY_KEY`), the `regattaCountHint`
 limit line, the `regattaGuards` prose and the `regattaHint` tab intro: the
 request was for no limits and no warnings. The **badge row survives** (state,
-current/target, templates, pool) because it is the only remaining way to see
+completed → will-be, templates, pool) because it is the only remaining way to see
 what the save holds; it now reports rather than blocks. `regattaWhy*` and
 `regattaCountHint` remain in `i18n.ts` unrendered — dropping keys means
-auditing 18 `Partial` overlays for no gain.
+auditing 18 `Partial` overlays for no gain — and the label they would sit under
+(`regattaCount`) is now *"Tasks to add"* / *"Số task cần thêm"*, because the
+count is a delta; `regattaWhyFull` still describes the deleted `already_full`
+and can never render.
+
+The badge's own line is
+`{tr("regattaDone")} {current} → {current + regattaTasks}` — it must never
+print `{current} / {regattaTasks}` again: that slash is what made a count look
+like a ceiling the week was being judged against.
 
 `regattaState` is still computed and still feeds the badge, which is why
 `regattaReason` is still passed the save's own quota.
@@ -417,8 +455,9 @@ obvious claim — "everyone has regatta, copy them" — turned out to be false:
   (`36, 36, 73` measured, spanning 4–7 days of `realEndTime`), while *current*
   blocks measure `1, 14, 20`. `REGATTA_MAX_TASKS` is no longer a policy figure
   at all (see *No limits on these two tabs* below) — the batch takes whatever is
-  typed — and the save still refuses `already_full` when it already holds ≥ the
-  requested total, so the tool never pushes a week *down* or rewrites it.
+  typed — and the count is a **delta**, so pushing never rewrites the records a
+  save already holds: each push appends its own after them, numbered above the
+  block's own highest `takenCounter`.
 
 ### TWN's newer builds are packed, and how to read them (2026-10-01)
 
@@ -731,8 +770,9 @@ inside. Measured on 2026-10-05, *every* save in the corpus answered
 (`end=1791187200` vs `now=1791215096`). `no_template` is the same kind — it
 fires only when the offer list holds no id any save in the corpus has ever
 completed, because inventing `need`/`score` for such an id *is* the
-uniform-135 fingerprint. `already_full` is a no-op, not a limit: the save
-already holds as many as was asked for.
+uniform-135 fingerprint. There is no third one: `already_full` went with the
+count's meaning (see the `nTasks` bullet above), so the only two reasons left
+describe the block rather than the number.
 
 No badge prints the quota any more (see *No limits on these two tabs* below);
 the state / current / templates / pool chips remain and now only report.
@@ -746,20 +786,39 @@ past, gate green),
 `regata spreads a batch across the span the block has and never refuses one
 for size`, the quota read per save with **100 accepted at both quota 17 and
 quota 9**, `regatta takes any count the window can hold — the ceiling is a
-typo guard, not a rule` (50/100 taken as typed, 60 really written, no two
-completions closer than `REGATTA_MIN_GAP`, none dated in the future), and
-**`regatta takes any count from 1 to 100 with no error, on every save shape the
-tab reaches`** — the guard rail for the whole report: three fixtures (a save
-with a record to clone, a week opened ten minutes ago, and a green week with a
-full offer pool and nothing completed) × every count from 1 to 100, each
-asserting the badge reads `ok`, the exact count is written, the block stays
-ordered, every timestamp sits inside the block's own window and before now, and
-all three pair gates stay green. `ui-regressions.test.mts` pins that the button
+typo guard, not a rule` (50/100 taken as typed, 61 records after asking for
+60, no two completions closer than `REGATTA_MIN_GAP`, none dated in the
+future), and **`regatta takes any count from 1 to 100 with no error, on every
+save shape the tab reaches`** — the guard rail for the whole report: three
+fixtures (a save with a record to clone, a week opened ten minutes ago, and a
+green week with a full offer pool and nothing completed) × every count from 1
+to 100, each asserting the badge reads `ok`, **the records the save already
+held plus exactly the count** are written, the block stays ordered, every
+timestamp sits inside the block's own window and before now, and all three
+pair gates stay green.
+
+Two more guard that same fix, both added for *"after i push 50 tasks it works,
+but if i want to push more then i can't push it shows error"*:
+`regata counts how many tasks to add, so a save already holding some still
+takes more` (1 → ok and 2 records on a save that already holds one) and
+`a second push adds what was asked, and uses the time it has instead of piling
+up` (50 on top of an hour-old record → 51 records, 50 **distinct** completion
+times inside that hour, ordered, in-window, in the past, gate green). The
+second one exists because the old offset collapsed a repeat push onto a single
+second; `studio-pipeline.test.ts`'s
+`regatta: repeated apply keeps adding, and the file stays a valid save` covers
+the session-level half (13 then 25 records, both balanced).
+
+`ui-regressions.test.mts` pins that the button
 gates only on `busy || pendingRegatta`, that no reason paragraph or
 `regattaHint` / `regattaGuards` / `regattaCountHint` **or `regattaWindow`** line
 renders, that neither `window_closed` nor its label `regattaNoWindow` survives
-in the component, and that the tab prints no quota as a limit
-(`session.regattaInfo.quota` and `regattaDay` must stay absent).
+in the component, that the tab prints no quota as a limit
+(`session.regattaInfo.quota` and `regattaDay` must stay absent), and — for this
+fix — `the regatta count is how many tasks to add, so nothing can say the week
+is full`: no `{current} / {regattaTasks}` badge, no `already_full` anywhere in
+the component or in `REGATTA_ERR`, the three-reason union spelled out, and both
+dictionaries labelling the field *"Tasks to add"* / *"Số task cần thêm"*.
 
 ### No limits on these two tabs (2026-10-05)
 
@@ -832,7 +891,7 @@ game's own `TaskQuota`, and it still sets the spacing between completions.
 **UI.** `disabled={busy || pendingRegatta}` — the count gates nothing. Gone:
 the reason paragraph under the button (`REGATTA_WHY_KEY`), `regattaCountHint`,
 `regattaGuards`, the `regattaHint` tab intro and the **Daily limit** badge.
-Kept: the state chip, current/target, templates and pool, because they are the
+Kept: the state chip, completed → will-be, templates and pool, because they are the
 only remaining way to see what the save holds — they report rather than block.
 The `regattaWhy*` / `regattaCountHint` keys stay in `i18n.ts` unrendered;
 dropping keys means auditing 18 `Partial` overlays for nothing.

@@ -7,14 +7,18 @@
  * the push that follows it:
  *
  *   - save holding 12 tasks, user raises the count to 15 -> badge says
- *     "already has enough", button dead, even though 15 would have worked;
- *   - save holding 5 tasks, user drops the count to 3    -> badge says ready,
- *     button live, and `injectRegata` then throws `already_full`.
+ *     "already has enough", button dead, even though 15 would have worked.
  *
- * Both cases read to the user as "the button is broken". The tab now re-runs
- * `regattaReason` with the number it is actually going to send, and the server
- * runs the very same function, so "pressable" and "will succeed" are one
- * decision rather than two that can drift apart.
+ * The number the user types is **how many tasks this push adds**, not the
+ * week's target total — see `regattaWant`. That is what makes a second push
+ * possible at all: once the first one landed, the save *holds* those tasks,
+ * so a target-total reading would answer "already has enough" to every later
+ * push for the rest of the week, which is exactly what a user reported as
+ * "I pushed 50, now it says 50/50 and won't let me push more".
+ *
+ * The tab re-runs `regattaReason` with the number it is actually going to
+ * send, and the server runs the very same function, so "pressable" and "will
+ * succeed" are one decision rather than two that can drift apart.
  *
  * Pure and browser-safe on purpose: no fs, no server imports, so
  * `studio-app.tsx` can bundle it.
@@ -96,17 +100,40 @@ export function regattaMinGap(quota: number = REGATTA_MAX_PER_DAY): number {
 export const REGATTA_MIN_GAP = regattaMinGap();
 
 /**
+ * How much of its own window a `<Regata>` block must already have behind it
+ * before a record may be dated into it.
+ *
+ * A record needs `takeTime < completeTime < realEndTime`, all three inside the
+ * window and all three strictly before *now*, so a block opened this very
+ * second has no instant left to put one in. This is a fact about time, not a
+ * limit on the count: it never applies to a save a real client wrote (the
+ * corpus's youngest week was hours old), and it is checked here and in
+ * `injectRegata` alike so the badge cannot promise a push the server refuses.
+ */
+export const REGATTA_MIN_WINDOW_AGE = 3;
+
+/**
  * Why a save cannot receive regatta tasks. `ok` means it can.
  *
- * `window_closed` used to be in this union. It refused a batch when the count
- * did not fit between the block's own `startTime` and *now* at the save's daily
- * spacing — which on day one of a week is only a couple of tasks, so a save
- * whose regatta had opened that afternoon rejected 20 with "the regatta window
- * is too short". That was arithmetic about how much of the week had passed, not
- * a rule the game states, and it read as a broken button. The batch now spreads
- * over whatever span the block still has and never refuses on it.
+ * `window_closed` and `already_full` used to be in this union.
+ *
+ * `window_closed` refused a batch when the count did not fit between the
+ * block's own `startTime` and *now* at the save's daily spacing — which on
+ * day one of a week is only a couple of tasks, so a save whose regatta had
+ * opened that afternoon rejected 20 with "the regatta window is too short".
+ * That was arithmetic about how much of the week had passed, not a rule the
+ * game states, and it read as a broken button.
+ *
+ * `already_full` fired when `nTasks` was read as the week's **target total**,
+ * so the moment a push landed the save "held" those tasks and every later
+ * push for the rest of the week was refused — "Completed 50 / 50, already has
+ * enough tasks". The count is how many tasks this push **adds**, so there is
+ * no total to be full against and no reason to ask about it.
+ *
+ * Both are gone: a batch is accepted whenever the block exists, has been open
+ * for a few seconds, and holds a record to copy.
  */
-export type RegattaReason = "ok" | "no_active_regatta" | "no_template" | "already_full";
+export type RegattaReason = "ok" | "no_active_regatta" | "no_template";
 
 /** The `<Regata>` window: `startTime` / `endTime` read off the block. */
 export interface RegattaWindow {
@@ -114,7 +141,14 @@ export interface RegattaWindow {
   end: number;
 }
 
-/** The clamp every batch goes through, server and UI alike. */
+/**
+ * The clamp every batch goes through, server and UI alike.
+ *
+ * `nTasks` counts tasks **to add in this push**. It is clamped to
+ * `[1, REGATTA_MAX_TASKS]` so a blank or typed-zero field still pushes the
+ * default-sized batch rather than doing nothing, and a stray digit cannot ask
+ * for a million records.
+ */
 export function regattaWant(nTasks: number): number {
   return Math.max(1, Math.min(REGATTA_MAX_TASKS, Math.floor(Number(nTasks) || 0)));
 }
@@ -126,9 +160,9 @@ export function regattaWant(nTasks: number): number {
  * `reason === "ok"` is the server's own precondition for not refusing.
  *
  * `state.quota` is this save's own `TaskQuota` (already clamped). It feeds the
- * spacing both this function and the injector use, so a save at quota 9 gets
- * the wider gap here *and* there — the tab can never show a batch that the
- * server then refuses, or vice versa.
+ * spacing the injector uses, so a save at quota 9 gets the wider gap than one
+ * at 17 — but it no longer decides *whether* a batch is written, which is why
+ * it is no longer read here.
  */
 export function regattaReason(
   state: { window: RegattaWindow | null; templates: number; current: number; lastDone?: number; quota?: number },
@@ -136,16 +170,14 @@ export function regattaReason(
   now: number = Math.floor(Date.now() / 1000),
 ): RegattaReason {
   const win = state.window;
-  // No block, no parseable window, or a week that has not started / is over:
+  // No block, no parseable window, a week that has not started or is over:
   // all the same answer, because writing tasks into any of them is what a
-  // server checks for first.
-  if (!win || now < win.start || now > win.end) return "no_active_regatta";
+  // server checks for first. The three-second age is `REGATTA_MIN_WINDOW_AGE`.
+  if (!win || now < win.start + REGATTA_MIN_WINDOW_AGE || now > win.end) return "no_active_regatta";
   if (!state.templates) return "no_template";
-  const want = regattaWant(nTasks);
-  if (want <= state.current) return "already_full";
-  // No further check. The batch is placed across the span the block has between
-  // its own start and now, so whatever fits in that span is what gets written;
-  // there is no separate "will the count fit at this spacing" question left to
-  // answer, which is why the tab can no longer disagree with the push.
+  // No further check. The count gates nothing: the batch is placed across the
+  // span the block has between its own start and now, and whatever fits in
+  // that span is what gets written. That is why the tab can no longer disagree
+  // with the push, and why a save that already holds tasks still takes more.
   return "ok";
 }

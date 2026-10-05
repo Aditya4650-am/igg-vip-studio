@@ -363,9 +363,9 @@ const vi = {
   regattaWindow: "Thời gian regatta",
   regattaGuards:
     "Mỗi task được sao chép nguyên vẹn từ một task thật đã có trong save (type, target, need, score, ver...), chỉ đổi thời gian. Thời gian luôn nằm trong khoảng của regatta và luôn ở quá khứ, luôn tăng dần sau task đã có, và mỗi ngày trong tuần chỉ nhận tối đa bằng đúng quota hằng ngày mà chính save đó khai (biến TaskQuota - đúng con số game hiển thị ở \"Today's Tasks\") - nên cả tuần không bao giờ bị gom vào một ngày. Không bao giờ tạo regatta mới, không ghi đè bộ đếm lifetime, không đổi danh tính save.",
-  regattaCount: "Tổng task trong tuần",
+  regattaCount: "Số task cần thêm",
   regattaCountHint:
-    "Số task bạn muốn tuần này có sau khi áp dụng (không phải số thêm vào). Tool không bao giờ vượt {max} task một tuần; riêng một lần đẩy còn bị giới hạn bởi quota mỗi ngày của chính save ({day} task/ngày) và thời gian tuần đã chạy, nên cách đúng là đẩy đều mỗi ngày thay vì gom tất cả vào một lần.",
+    "Số task mà lần đẩy này sẽ thêm vào save - không phải tổng của tuần. Gõ bấy nhiêu thì thêm bấy nhiêu, và đẩy lại bao nhiêu lần trong ngày cũng được.",
   regattaAdd: "Thêm vào Lưu & đẩy",
   regattaQueued: "✓ Đã xếp hàng",
   regattaWhyNoRegatta:
@@ -717,9 +717,9 @@ const en: typeof vi = {
   regattaWindow: "Regatta window",
   regattaGuards:
     "Every task is copied whole from a real record already in your save (type, target, need, score, ver ...) and only its timestamps move. Those always fall inside the regatta window, always in the past, always after the completions already there, and a day can only receive up to this save's own daily quota (the TaskQuota var - exactly the number the game shows as \"Today's Tasks\") - so a week's worth is never piled onto one day. It never creates a regatta, never rewrites a lifetime counter, and never touches your save's identity.",
-  regattaCount: "Total tasks this week",
+  regattaCount: "Tasks to add",
   regattaCountHint:
-    "How many tasks the week should hold once applied (not how many more to add). This tool never goes past {max} in a week, and one push is limited further by this save's own daily quota ({day} tasks/day) and how long the week has already run - so push a little each day rather than all at once.",
+    "How many tasks this push adds to the save - not the week's total. Type a number and that many get added, and you can push again as many times as you like in one day.",
   regattaAdd: "Add to Save & push",
   regattaQueued: "✓ Queued",
   regattaWhyNoRegatta:

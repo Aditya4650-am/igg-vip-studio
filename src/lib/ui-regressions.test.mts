@@ -173,6 +173,34 @@ test("the regatta tab prints no limit, and the quota no longer decides anything"
   assert.ok(!tab.includes("{max}"), "no raw {max} placeholder may be rendered");
 });
 
+test("the regatta count is how many tasks to add, so nothing can say the week is full", () => {
+  // The report: *"after i push 50 tasks it works, but if i want to push more
+  // then i can't push it shows error"*. The count used to be the week's
+  // **target total**, so the first push filled it and the badge read
+  // "Completed 50 / 50" over a refusal telling the user it already had enough
+  // for the rest of the week. It is how many tasks this push *adds*, and both
+  // the badge and the reason list have to say so or the next build quietly
+  // puts the refusal back.
+  const tsx = read("../components/studio-app.tsx");
+  const tab = tsx.slice(tsx.indexOf('{tab === "regatta" &&'), tsx.indexOf('{tab === "barn" &&'));
+
+  assert.ok(!tab.includes("current} / {regattaTasks"), "the badge must not print a target total");
+  assert.ok(!tsx.includes("already_full"), "the removed refusal must not be reintroduced");
+  assert.ok(!read("server/township/inject.server.ts").includes("already_full:"), "nor its error string");
+
+  // The union itself, so a new reason cannot be added without a decision.
+  assert.match(
+    read("regatta.ts"),
+    /export type RegattaReason = "ok" \| "no_active_regatta" \| "no_template";/,
+    "`RegattaReason` may only hold the two remaining refusals plus ok",
+  );
+
+  // And the label the user actually reads, in both dictionaries the tab ships.
+  const dict = read("i18n.ts");
+  assert.ok(dict.includes('regattaCount: "Số task cần thêm"'), "vi must call it the number to add");
+  assert.ok(dict.includes('regattaCount: "Tasks to add"'), "en must call it the number to add");
+});
+
 test("the copy is never gated, and no age banner is drawn over it", () => {
   const tab = read("../components/studio-app.tsx");
   const server = read("server/studio.server.ts");

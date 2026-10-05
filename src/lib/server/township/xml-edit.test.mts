@@ -116,7 +116,7 @@ test("regata clones a real record field for field instead of inventing one", () 
   wellFormed(out);
 
   const tasks = [...out.matchAll(/<MyOldTask\b[^>]*>/g)].map((m) => m[0]);
-  assert.equal(tasks.length, 4, "the save's own record plus three added");
+  assert.equal(tasks.length, 5, "the save's own record plus the four it was asked to add");
 
   // An id the game never issued is the easiest thing for it to reject, so
   // nothing may be invented: every id must be one this save already holds.
@@ -149,7 +149,7 @@ test("regata timestamps sit inside the window, in the past and strictly ordered"
     assert.equal(attrValue(t, "endTime"), attrValue(t, "realEndTime"), `endTime/realEndTime disagree: ${t}`);
     completions.add(complete);
   }
-  assert.equal(completions.size, 12, "each task needs its own completion time, not one shared stamp");
+  assert.equal(completions.size, 13, "each task needs its own completion time, not one shared stamp");
 });
 
 test("regata raises the lifetime counter instead of rewinding it", () => {
@@ -157,7 +157,7 @@ test("regata raises the lifetime counter instead of rewinding it", () => {
   // would move a lifetime stat backwards, which a server can read for free.
   const out = injectRegata(liveRegattaSave({ life: 2315 }), 12);
   const tag = out.match(/<Var\b[^>]*name="RegataTasksCompleted"[^>]*>/)![0];
-  assert.equal(Number(attrValue(tag, "v")), 2315 + 11, "the batch adds to the count already recorded");
+  assert.equal(Number(attrValue(tag, "v")), 2315 + 12, "the batch adds to the count already recorded");
 
   // A save that never tracked it must not gain a fabricated one.
   const none = injectRegata(liveRegattaSave(), 3);
@@ -187,9 +187,9 @@ test("regata numbers new records above the block's own highest", () => {
   // the injector picks is the first row (takenCounter 1).
   const xml = liveRegattaSave().replace("</Regata>", `${rec(3, 1500, 2)}${rec(4, 2400, 3)}</Regata>`);
 
-  const out = injectRegata(xml, 6); // three already there, so three are added
+  const out = injectRegata(xml, 6); // three already there, and six more are added
   const counters = [...out.matchAll(/<MyOldTask\b[^>]*>/g)].map((m) => Number(attrValue(m[0], "takenCounter")));
-  assert.deepEqual(counters, [1, 3, 4, 5, 6, 7], `take counter must keep growing: ${counters.join(",")}`);
+  assert.deepEqual(counters, [1, 3, 4, 5, 6, 7, 8, 9, 10], `take counter must keep growing: ${counters.join(",")}`);
   for (let i = 1; i < counters.length; i++) {
     assert.ok(counters[i]! > counters[i - 1]!, `take counter went backwards at ${i}: ${counters.join(",")}`);
   }
@@ -254,7 +254,11 @@ test("regata takes a batch the moment the window opens — a young week refuses 
   const out = injectRegata(justOpened, 20);
 
   const times = [...out.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)].map((m) => Number(m[1]));
-  assert.equal((out.match(/<MyOldTask\b/g) ?? []).length, 20, "all twenty are written");
+  assert.equal(
+    (out.match(/<MyOldTask\b/g) ?? []).length,
+    21,
+    "the save's own record plus the twenty it was asked to add",
+  );
   // Read the wall clock *after* the push: `injectRegata` dates every record
   // before its own `now`, so a check against a clock taken earlier would race
   // with the seconds the loop itself spends.
@@ -269,12 +273,19 @@ test("regata takes a batch the moment the window opens — a young week refuses 
   assert.doesNotThrow(() => assertRegattaSafe(justOpened, out), "a young window still passes every gate");
 });
 
-test("regata never tops a save up past its own ceiling", () => {
+test("regata counts how many tasks to add, so a save already holding some still takes more", () => {
   const full = liveRegattaSave();
-  // Already holds one task: asking for one more than that is a no-op, and a
-  // no-op must be refused rather than reported as success.
-  assert.equal(inspectRegatta(full, 1).reason, "already_full");
-  assert.throws(() => injectRegata(full, 1), /regatta/i);
+  // The report this replaces: *"after i push 50 tasks it works, but if i want
+  // to push more then i can't push it shows error"*. The count used to be read
+  // as the week's **target total**, so the first push filled it and the next
+  // one came back `already_full (50/50)` for the rest of the week. It is how
+  // many tasks this push *adds*, which is what makes a second push possible.
+  assert.equal(inspectRegatta(full, 1).reason, "ok", "one more than the save already holds is not 'full'");
+  assert.equal(
+    (injectRegata(full, 1).match(/<MyOldTask\b/g) ?? []).length,
+    2,
+    "the save's own record plus the one more it was asked for",
+  );
 
   // Whatever is typed, a week is never asked to hold more than the largest
   // real week on record (73, measured in `<PrevRegata>`). The only blocks
@@ -324,16 +335,16 @@ const varNum = (xml: string, name: string): number | null => {
 const regattaInner = (xml: string) => /<Regata\b[^>]*>([\s\S]*?)<\/Regata\s*>/i.exec(xml)?.[1] ?? "";
 
 test("regata keeps the block's own counters in step with the records it grew", () => {
-  const out = injectRegata(countedRegattaSave(2), 6); // 2 present, so 4 are added
+  const out = injectRegata(countedRegattaSave(2), 6); // 2 present, and 6 more are added
   wellFormed(out);
 
   const inner = regattaInner(out);
   const tasks = (inner.match(/<MyOldTask\b/g) ?? []).length;
-  assert.equal(tasks, 6, "the batch lands in the block");
-  assert.equal(varNum(inner, "taskCounter"), 6, "taskCounter must equal the records the block holds");
-  assert.equal(varNum(inner, "takeConfirm"), 6, "takeConfirm tracks the same records");
+  assert.equal(tasks, 8, "the batch lands in the block");
+  assert.equal(varNum(inner, "taskCounter"), 8, "taskCounter must equal the records the block holds");
+  assert.equal(varNum(inner, "takeConfirm"), 8, "takeConfirm tracks the same records");
   assert.ok(
-    (varNum(inner, "takeAttempts") ?? 0) >= 6,
+    (varNum(inner, "takeAttempts") ?? 0) >= 8,
     `takeAttempts must never trail takeConfirm, got ${varNum(inner, "takeAttempts")}`,
   );
   assert.equal(varNum(inner, "UnrelatedCounter"), 7, "a Var that is not a task count stays put");
@@ -353,10 +364,10 @@ test("regata gives a block that never counted its records the tally every save h
   const out = injectRegata(liveRegattaSave(), 4);
   wellFormed(out);
   const inner = regattaInner(out);
-  assert.equal((inner.match(/<MyOldTask\b/g) ?? []).length, 4, "the save's own record plus three added");
-  assert.equal(varNum(inner, "taskCounter"), 4, "the tally counts every record in the block");
-  assert.equal(varNum(inner, "takeConfirm"), 4, "takeConfirm tracks the same records");
-  assert.equal(varNum(inner, "takeAttempts"), 4, "takeAttempts never trails");
+  assert.equal((inner.match(/<MyOldTask\b/g) ?? []).length, 5, "the save's own record plus the four added");
+  assert.equal(varNum(inner, "taskCounter"), 5, "the tally counts every record in the block");
+  assert.equal(varNum(inner, "takeConfirm"), 5, "takeConfirm tracks the same records");
+  assert.equal(varNum(inner, "takeAttempts"), 5, "takeAttempts never trails");
   assert.ok(inner.indexOf("<MyOldTask") < inner.indexOf("<Vars"), "the tally sits after the records it counts");
   assert.ok(!/<Var\b[^>]*\bname="RegataTasksCompleted"/.test(out), "a lifetime stat it never had stays uncreated");
 });
@@ -738,8 +749,8 @@ test("regata never issues a slot generation the block already holds", () => {
   const out = injectRegata(liveRegattaSave(), 20);
   const recs = [...out.matchAll(/<MyOldTask\b[^>]*?\/?>/g)].map((m) => attrsOf(m[0]));
   const pairs = recs.map((a) => `${a.get("num")}|${a.get("ver")}`);
-  assert.equal(pairs.length, 20, "the save's own record plus nineteen added");
-  assert.equal(new Set(pairs).size, 20, `a generation may only be issued once: ${pairs.join(" ")}`);
+  assert.equal(pairs.length, 21, "the save's own record plus the twenty added");
+  assert.equal(new Set(pairs).size, 21, `a generation may only be issued once: ${pairs.join(" ")}`);
 
   // And none may run up to the slot's own offer row: a completed task has to
   // predate the offer sitting there now, measured 148>145, 65>55, 58>1, 516>479.
@@ -800,7 +811,7 @@ test("regata never dates a completion before the ones already in the block", () 
   const out = injectRegata(xml, 15);
   wellFormed(out);
   const times = [...out.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)].map((m) => Number(m[1]));
-  assert.equal(times.length, 15, "the save's own record plus fourteen added");
+  assert.equal(times.length, 16, "the save's own record plus the fifteen added");
   assert.equal(times[0], real, "the save's own record keeps the time it arrived with");
   for (let i = 1; i < times.length; i++) {
     assert.ok(times[i] > times[i - 1], `completion ${i} (${times[i]}) went back before ${times[i - 1]}`);
@@ -825,7 +836,7 @@ test("regata spreads a batch across the span the block has and never refuses one
   const out = injectRegata(xml, 40);
 
   const times = [...out.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)].map((m) => Number(m[1]));
-  assert.equal((out.match(/<MyOldTask\b/g) ?? []).length, 40, "all forty are written");
+  assert.equal((out.match(/<MyOldTask\b/g) ?? []).length, 41, "the save's own record plus the forty added");
   const winStart = Number(/<Regata\b[^>]*\bstartTime="(\d+)"/.exec(xml)![1]);
   const now = Math.floor(Date.now() / 1000);
   let prev = 0;
@@ -876,7 +887,7 @@ test("the daily quota is the game's own number, read out of the save", () => {
 
   // What it writes obeys its own quota rather than merely claiming to.
   const low = times(injectRegata(at("9"), 25));
-  assert.equal(low.length, 25, "the quota-9 batch really is written");
+  assert.equal(low.length, 26, "the quota-9 batch really is written (one record was already there)");
   for (let i = 1; i < low.length; i++) {
     assert.ok(low[i]! - low[i - 1]! >= regattaMinGap(9), "two completions sat closer than a quota-9 day allows");
   }
@@ -909,7 +920,11 @@ test("regatta takes any count the window can hold — the ceiling is a typo guar
   assert.equal(inspectRegatta(xml, 68).reason, "ok", "the whole window is open to the batch");
 
   const out = injectRegata(xml, 60);
-  assert.equal((out.match(/<MyOldTask\b/g) ?? []).length, 60, "60 are written on top of the save's own record");
+  assert.equal(
+    (out.match(/<MyOldTask\b/g) ?? []).length,
+    61,
+    "sixty added on top of the save's own record",
+  );
   const times = [...out.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)].map((m) => Number(m[1])).sort((a, b) => a - b);
   const now = Math.floor(Date.now() / 1000);
   for (let i = 0; i < times.length; i++) {
@@ -929,6 +944,12 @@ test("regatta takes any count from 1 to 100 with no error, on every save shape t
   //           the fresh offers it could put back (21 on that save) and called
   //           the shortfall missing data — while the badge above the button
   //           read "Templates: 21".
+  //   50 again, later the same day
+  //           "Regatta này đã có đủ task (50/50)"
+  //           the count had been the week's *target total*, so the first push
+  //           filled it and every later push for the rest of the week was
+  //           turned away. It is how many tasks this push adds, which is why
+  //           1 is pressable on a save that already holds a record.
   //
   // Both were limits dressed as facts. Nothing about the record itself changed
   // to lift them: a batch is spread across whatever span the block still has,
@@ -950,19 +971,20 @@ test("regatta takes any count from 1 to 100 with no error, on every save shape t
     '<Vars><Var name="TaskQuota" v="15" t="i"/></Vars>' +
     "</Regata></Global>";
 
-  const fixtures: readonly (readonly [string, string, number])[] = [
-    ["clone", clone, 2], // one record already there, so 1 is a genuine no-op
-    ["young", young, 2],
-    ["green", green, 1],
+  const fixtures: readonly (readonly [string, string])[] = [
+    ["clone", clone], // one record already there
+    ["young", young], // opened ten minutes ago
+    ["green", green], // a full offer pool and nothing completed
   ];
-  for (const [name, xml, from] of fixtures) {
-    for (let n = from; n <= 100; n++) {
+  for (const [name, xml] of fixtures) {
+    const already = (xml.match(/<MyOldTask\b/g) ?? []).length;
+    for (let n = 1; n <= 100; n++) {
       const state = inspectRegatta(xml, n);
       assert.equal(state.reason, "ok", `${name}: ${n} must be pressable, got ${state.reason}`);
       const out = injectRegata(xml, n);
       assert.equal(
         (out.match(/<MyOldTask\b/g) ?? []).length,
-        n,
+        already + n,
         `${name}: ${n} asked but ${((out.match(/<MyOldTask\b/g) ?? []).length)} written`,
       );
       // The three things a server reads without any history at all.
@@ -982,6 +1004,69 @@ test("regatta takes any count from 1 to 100 with no error, on every save shape t
       assert.doesNotThrow(() => assertRegattaSafe(xml, out), `${name} ${n}: every gate must stay green`);
     }
   }
+});
+
+test("a second push adds what was asked, and uses the time it has instead of piling up", () => {
+  // The report, verbatim: *"after i push 50 tasks it works, but if i want to
+  // push more then i can't push it shows error"*. Two separate defects could
+  // produce that, and both are pinned here.
+  //
+  // The first is the count's meaning: it was read as the week's **target
+  // total**, so the first push filled it and every later push computed
+  // `need = 0` and came back `already_full (50/50)`.
+  //
+  // The second is what a repeat push did with its range once it was allowed to
+  // run: the range was anchored `regattaMinGap(quota)` **in full** after the
+  // block's newest completion. `regattaMinGap(17)` is 5083 s, so a save whose
+  // newest completion was an hour old had `room < minGap`, the offset ate all
+  // of it, `lo` landed on `latest`, the span came out at **zero**, and every
+  // record of the second batch sat on one second — the shape the old
+  // fabricator produced when it wrote 105 tasks onto a single day.
+  //
+  // Sharing the room with the batch instead is what this asserts: the offset
+  // may never be allowed to consume the whole span.
+  const now = Math.floor(Date.now() / 1000);
+  const start = now - 4 * 86400;
+  const rec = (real: number, ver: number) =>
+    `<MyOldTask id="match3_bomb_999" type="event_order" eventType="Match3" target="create_bonus_bomb" ` +
+    `need="100" have="100" user="MECITY1" num="4" ver="${ver}" takenCounter="${ver}" score="135" ` +
+    `takeTime="${real - 2100}" completeTime="${real - 120}" endTime="${real}" realEndTime="${real}" ` +
+    `regataCash="17" anlNumber="1" anlLimit="10"/>`;
+  // The state a save is in a short while after its first push of the day: one
+  // record, finished an hour ago, on a week that is four days old.
+  const xml =
+    '<Global><Var name="cityId" v="MECITY1" t="s"/>' +
+    `<Regata id="507" startTime="${start}" endTime="${now + 7 * 86400}" score="135" scoreUpd="${start}">` +
+    '<FreeTask id="match3_bomb_999" num="4" ver="99"/>' +
+    rec(now - 3600, 1) +
+    "</Regata></Global>";
+
+  // 1. The count is added, so a save that already holds a task still takes
+  //    exactly what was typed. This is the half that produced the error.
+  assert.equal(inspectRegatta(xml, 50).reason, "ok", "a save already holding a task is not 'full'");
+  const out = injectRegata(xml, 50);
+  assert.equal(
+    (out.match(/<MyOldTask\b/g) ?? []).length,
+    51,
+    "fifty added on top of the record the save already had",
+  );
+
+  // 2. The hour of room left after that record belongs to the batch, not to
+  //    the offset in front of it: fifty distinct completion times inside it,
+  //    rather than fifty copies of one second.
+  const times = [...out.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)].map((m) => Number(m[1]));
+  const added = times.slice(1);
+  assert.equal(new Set(added).size, 50, "every added record gets its own completion time, none is stacked");
+  const now2 = Math.floor(Date.now() / 1000);
+  let prev = 0;
+  for (const t of times) {
+    assert.ok(t >= prev, "the block stays ordered across the two batches");
+    assert.ok(t >= start && t <= now + 7 * 86400, "and sits inside the block's own window");
+    assert.ok(t < now2, "and is never dated in the future");
+    prev = t;
+  }
+  assert.ok(times[0]! < added[0]!, "the second batch starts after the record the block already held");
+  assert.doesNotThrow(() => assertRegattaSafe(xml, out), "a repeat push must stay clean through the gate");
 });
 
 test("the day's share is a spacing, so a rolling day can never hold one more", () => {
@@ -1018,8 +1103,8 @@ test("regata refreshes a slot's offer row instead of stranding a week on day one
 
   const rowVer = Number(attrValue(/<FreeTask\b[^>]*>/.exec(out)![0], "ver"));
   const recVers = [...out.matchAll(/<MyOldTask\b[^>]*?\bver="(\d+)"/g)].map((m) => Number(m[1]));
-  assert.equal(recVers.length, 4, "the save's own record plus three added");
-  assert.equal(new Set(recVers).size, 4, "a slot generation is issued once");
+  assert.equal(recVers.length, 5, "the save's own record plus the four added");
+  assert.equal(new Set(recVers).size, 5, "a slot generation is issued once");
   assert.ok(rowVer > 2, `the offer row moved forward, got ${rowVer}`);
   for (const v of recVers) {
     assert.ok(v < rowVer, `record ${v} must sit under its slot's offer row ${rowVer}`);

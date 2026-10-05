@@ -225,22 +225,32 @@ test("decoration: a save that already has a self-closing stash is updated in pla
   assert.equal((pushed.match(/<BuildingsStash/g) ?? []).length, 1);
 });
 
-test("regatta: repeated apply stays balanced and the second run refuses", () => {
+test("regatta: repeated apply keeps adding, and the file stays a valid save", () => {
   const snap = townSession(REGATTA_SAVE);
   const first = studio.applyRegatta(token, snap.sessionId);
   balanced(first.xml!);
   balanced(Buffer.from(first.fileB64!, "base64").toString("utf8"));
   assert.equal(
     (Buffer.from(first.fileB64!, "base64").toString("utf8").match(/<MyOldTask\b/g) ?? []).length,
-    12,
-    "one task the save already had plus eleven added",
+    13,
+    "one task the save already had plus the twelve it was asked to add",
   );
 
-  // Running it again has nothing left to add. It must say so rather than
-  // double the batch or tick green over a file that did not change.
-  assert.throws(() => studio.applyRegatta(token, snap.sessionId), /regatta/i);
-  const after = studio.exportCurrent(token, snap.sessionId);
-  assert.equal(after.fileB64, first.fileB64, "a refused run must leave the save untouched");
+  // The count is **added**, so a second run is not a no-op: this is the report
+  // that read *"i push 50 tasks it works, but if i want to push more then i
+  // can't push it shows error"* — the count used to be the week's target total,
+  // so after the first push it was full for the rest of the week. Another
+  // twelve land and the file must still be balanced.
+  const again = studio.applyRegatta(token, snap.sessionId);
+  const twice = Buffer.from(again.fileB64!, "base64").toString("utf8");
+  balanced(again.xml!);
+  balanced(twice);
+  assert.equal(
+    (twice.match(/<MyOldTask\b/g) ?? []).length,
+    25,
+    "the second run adds its own twelve on top of the thirteen",
+  );
+  assert.notEqual(again.fileB64, first.fileB64, "the file really moved");
 });
 
 test("fetch city: validates input before touching python", async () => {
