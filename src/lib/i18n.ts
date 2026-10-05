@@ -376,7 +376,7 @@ const vi = {
   regattaWhyWindow:
     "Nút bị tắt vì tuần regatta chưa chạy đủ lâu để đặt thời gian an toàn cho chừng đó task - mỗi ngày trong tuần chỉ nhận được tối đa {day} task theo quota của chính save. Quay lại sau trong tuần, hoặc giảm số xuống.",
 
-  // ---- Events tab (Bloom & Buzz, game id TrainJourney) ----
+  // ---- Events tab (Bloom & Buzz + Frozen Fortune; ids TrainJourney, DragonNest) ----
   tabEvents: "Sự kiện",
   eventsHint:
     "Thêm token Bloom & Buzz (mã trong game là TrainJourney) vào đúng ví của save này. Chỉ hai con số trong ví thay đổi - Amount và TokensEarned cùng tăng một lượng, nên phần đã tiêu không đổi - và công cụ không bao giờ đọc ví của tài khoản khác.",
@@ -391,6 +391,12 @@ const vi = {
   bloomAdd: "Thêm vào Lưu & đẩy",
   bloomQueued: "✓ Đã xếp hàng",
   toastBloomQueued: "Bloom & Buzz đã chọn - bấm Lưu & đẩy để áp dụng",
+  eventsCardFrozen: "Frozen Fortune",
+  frozenHint:
+    "Frozen Fortune dùng đúng cơ chế ví token của Bloom & Buzz (mã trong game là DragonNest). Nếu badge báo ví chưa có số liệu thì nghĩa là save chưa từng mở sự kiện này - hãy mở nó trong game một lần rồi kéo save lại, sau đó mới thêm token.",
+  frozenAdd: "Thêm vào Lưu & đẩy",
+  frozenQueued: "✓ Đã xếp hàng",
+  toastFrozenQueued: "Frozen Fortune đã chọn - bấm Lưu & đẩy để áp dụng",
 };
 
 const en: typeof vi = {
@@ -746,7 +752,7 @@ const en: typeof vi = {
   regattaWhyWindow:
     "Disabled: the week has not run long enough to place that many tasks safely - a day can hold at most {day}, this save's own quota. Come back later in the week, or lower the number.",
 
-  // ---- Events tab (Bloom & Buzz, game id TrainJourney) ----
+  // ---- Events tab (Bloom & Buzz + Frozen Fortune; ids TrainJourney, DragonNest) ----
   tabEvents: "Events",
   eventsHint:
     "Adds Bloom & Buzz tokens (TrainJourney in game data) to this save's own wallet. Only two numbers move - Amount and TokensEarned rise by the same amount, so the spent difference is unchanged - and no other account's wallet is ever read.",
@@ -761,6 +767,12 @@ const en: typeof vi = {
   bloomAdd: "Add to Save & push",
   bloomQueued: "✓ Queued",
   toastBloomQueued: "Bloom & Buzz queued - press Save & push to apply",
+  eventsCardFrozen: "Frozen Fortune",
+  frozenHint:
+    "Frozen Fortune uses the same token wallet as Bloom & Buzz (DragonNest in game data). If the badge says the wallet has no value, this save has not opened the event yet - open it in game once, pull the save again, then add tokens.",
+  frozenAdd: "Add to Save & push",
+  frozenQueued: "✓ Queued",
+  toastFrozenQueued: "Frozen Fortune queued - press Save & push to apply",
 };
 
 function overlay(p: Partial<typeof en>): typeof en {

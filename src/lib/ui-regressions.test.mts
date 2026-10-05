@@ -344,11 +344,21 @@ test("the Events tab is appended, and its Bloom & Buzz card only queues tokens",
   assert.ok(/^type Tab = [^\n]*"events";/m.test(tsx), "the Tab union must carry events");
   assert.ok(/events: "tabEvents"/.test(tsx), "TAB_KEY must label the tab");
   assert.ok(/events: "🐝"/.test(tsx), "TAB_EMOJI must carry the tab");
-  assert.ok(/events: pendingBloom \? bloomTokens : 0/.test(tsx), "the tab must show what is queued");
+  assert.ok(
+    tsx.includes("pendingBloom ? bloomTokens : 0") && tsx.includes("pendingFrozen ? bloomTokens : 0"),
+    "the tab must show what is queued — both cards, since either may be queued in one batch",
+  );
 
   const panel = tsx.slice(tsx.indexOf('{tab === "events" &&'), tsx.indexOf('{tab === "newgame" &&'));
   assert.ok(panel.includes('{tr("eventsCard")}'), "the Bloom & Buzz card must be rendered");
   assert.ok(panel.includes('onClick={() => tool("bloom")}'), "the button must queue the feature");
+
+  // The second card is Frozen Fortune (`DragonNest`) — the same wallet
+  // mechanism, one argument further into the writer. It is added, never
+  // substituted: every assertion above stays about Bloom.
+  assert.ok(panel.includes('{tr("eventsCardFrozen")}'), "the Frozen Fortune card must be rendered");
+  assert.ok(panel.includes('onClick={() => tool("frozen")}'), "the second button must queue its own feature");
+  assert.ok(panel.includes("session.frozen."), "the second card must read its own wallet readout");
 
   // The button may gate on the queue and on `busy` — and on nothing else. The
   // save's own wallet state is a *readout* here (same lesson the Regatta tab
@@ -358,7 +368,12 @@ test("the Events tab is appended, and its Bloom & Buzz card only queues tokens",
     panel.includes("disabled={busy || pendingBloom}"),
     "the button must gate only on busy/pending, never on the wallet reason",
   );
+  assert.ok(
+    panel.includes("disabled={busy || pendingFrozen}"),
+    "the Frozen Fortune button must gate only on busy/pending too",
+  );
   assert.ok(!/disabled=\{[^}]*bloom\.reason/.test(panel), "the wallet reason must never disable the button");
+  assert.ok(!/disabled=\{[^}]*frozen\.reason/.test(panel), "nor the second wallet's reason");
   assert.ok(!panel.includes("regatta"), "the Events panel must not read the Regatta tab's state");
 
   // Only queued work travels: an untouched tab must not add a field to the
@@ -367,9 +382,16 @@ test("the Events tab is appended, and its Bloom & Buzz card only queues tokens",
     tsx.includes("bloomTokens: pendingBloom ? bloomTokens : undefined"),
     "the payload must send the count only when queued",
   );
+  assert.ok(
+    tsx.includes("frozenTokens: pendingFrozen ? bloomTokens : undefined"),
+    "the payload must send the second count only when that card is queued",
+  );
   const clears = tsx.match(/setPendingBloom\(false\);/g) ?? [];
   assert.ok(clears.length >= 2, "the queue must clear after a save and after a reload");
+  const clearsFrozen = tsx.match(/setPendingFrozen\(false\);/g) ?? [];
+  assert.ok(clearsFrozen.length >= 2, "the second queue must clear after a save and after a reload");
   assert.ok(tsx.includes("(pendingBloom ? 1 : 0)"), "the pending badge must count the queued push");
+  assert.ok(tsx.includes("(pendingFrozen ? 1 : 0)"), "the pending badge must count the second one too");
 
   // Every label exists in the master dictionary and its English pair, so the
   // 18 Partial overlays can fall back to something.
@@ -388,6 +410,11 @@ test("the Events tab is appended, and its Bloom & Buzz card only queues tokens",
     "bloomAdd",
     "bloomQueued",
     "toastBloomQueued",
+    "eventsCardFrozen",
+    "frozenHint",
+    "frozenAdd",
+    "frozenQueued",
+    "toastFrozenQueued",
   ]) {
     assert.ok(new RegExp(`^  ${key}:`, "m").test(i18n), `${key} must be translated`);
   }
@@ -402,8 +429,17 @@ test("the Bloom & Buzz push is wired through the same choke point as every other
 
   const server = read("server/studio.server.ts");
   assert.ok(server.includes("addBloomTokens(s.rawXml, want)"), "applySave must run the writer");
+  assert.ok(
+    server.includes('addBloomTokens(s.rawXml, want, "DragonNest")'),
+    "applySave must run the same writer on the second wallet",
+  );
   assert.ok(server.includes("assertBloomSafe(was, now)"), "encodeSave must gate the wallet");
   assert.ok(server.includes("bloom: bloomInfo("), "the snapshot must report the wallet");
+  assert.ok(
+    server.includes('frozen: bloomInfo(s.rawXml ?? "", "DragonNest")'),
+    "the snapshot must report the second wallet too",
+  );
+  assert.ok(server.includes("frozenTokens?: number"), "the payload must declare the second field");
 
   const events = read("server/township/events.server.ts");
   // The wallet lives in <DataStoreCollection> — the block no restore copies —

@@ -242,11 +242,14 @@ function encodeSave(s: Session): string | null {
     // an old injector's fingerprints the save arrived with never block it, but
     // a batch written here must be indistinguishable from game data.
     assertRegattaSafe(was, now);
-    // And the Bloom & Buzz (TrainJourney) wallet: `Amount` and `TokensEarned`
-    // may only move together, and nothing else inside the wallet may move at
-    // all. Its `DataStoreCollection` home is the block no restore copies, so a
-    // wallet that differs from the save as loaded is always something this
-    // session wrote — the same loaded-vs-pushed rule as every gate above it.
+    // And every event wallet the Events tab can write — Bloom & Buzz
+    // (`TrainJourney`) and Frozen Fortune (`DragonNest`): `Amount` and
+    // `TokensEarned` may only move together, and nothing else inside the wallet
+    // may move at all. Their `DataStoreCollection` home is the block no restore
+    // copies, so a wallet that differs from the save as loaded is always
+    // something this session wrote — the same loaded-vs-pushed rule as every
+    // gate above it. One call covers both wallets because one batch may queue
+    // both cards; each is diffed against its own loaded-vs-pushed pair.
     assertBloomSafe(was, now);
   }
   // v1.15 client behavior: after Load/Decode and edits, the payload sent to
@@ -421,6 +424,11 @@ export type SavePayload = {
   /** Bloom & Buzz (TrainJourney) tokens this push adds. Clamped to
    *  [1, BLOOM_TOKENS_MAX] on the server, never trusted from the client. */
   bloomTokens?: number;
+  /** Frozen Fortune (DragonNest) tokens this push adds — a separate field, not
+   *  a mode of `bloomTokens`, so the Bloom payload keeps exactly the shape it
+   *  has always had and the two cards can be queued in one batch. Same clamp:
+   *  [1, BLOOM_TOKENS_MAX], never trusted from the client. */
+  frozenTokens?: number;
   season?: boolean;
   unbanMode?: "inicial" | "completo" | "novo";
   decorFragments?: boolean;
@@ -578,6 +586,18 @@ function applySaveEdits(p: SavePayload) {
     );
     s.rawXml = addBloomTokens(s.rawXml, want);
     parts.push(`bloom-${want}`);
+  }
+
+  // Frozen Fortune (DragonNest) tokens — the same writer, one argument further
+  // in, scoped to that event's own wallet, so this line cannot move a single
+  // byte of Bloom's. Same refusal-before-commit rule as above.
+  if (p.frozenTokens) {
+    const want = Math.max(
+      1,
+      Math.min(BLOOM_TOKENS_MAX, Math.floor(Number(p.frozenTokens) || BLOOM_TOKENS_DEFAULT)),
+    );
+    s.rawXml = addBloomTokens(s.rawXml, want, "DragonNest");
+    parts.push(`frozen-${want}`);
   }
 
   if (Object.keys(revealed.stats).length) {
@@ -974,6 +994,9 @@ export function snapshot(s: Session) {
     regattaInfo: inspectRegatta(s.rawXml ?? ""),
     // Bloom & Buzz wallet readout for the Events tab — a report, never a gate.
     bloom: bloomInfo(s.rawXml ?? ""),
+    // Frozen Fortune's readout, from the same function — the tab asks for both
+    // wallets and draws one card each.
+    frozen: bloomInfo(s.rawXml ?? "", "DragonNest"),
     zoo: s.zoo,
     friends: s.friends,
     friendCity: s.friendCity,

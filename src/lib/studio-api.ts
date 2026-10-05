@@ -88,6 +88,10 @@ const saveSchema = z.object({
   // here; the server clamps the value again regardless of what arrives. It is
   // a typo guard, not a rule about how many tokens an event may hold.
   bloomTokens: z.number().int().min(1).max(100000).optional(),
+  // Frozen Fortune (the game's own id is DragonNest) tokens to add. Same bound
+  // and same reasoning as bloomTokens above — one field per card, so the Bloom
+  // payload keeps the shape it was shipped with.
+  frozenTokens: z.number().int().min(1).max(100000).optional(),
   season: z.boolean().optional(),
   unbanMode: z.enum(["inicial", "completo", "novo"]).optional(),
   decorFragments: z.boolean().optional(),

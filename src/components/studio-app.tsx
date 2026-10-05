@@ -1278,6 +1278,12 @@ export function StudioApp() {
   const [regattaTasks, setRegattaTasks] = useState(REGATTA_DEFAULT_TASKS);
   const [pendingSeason, setPendingSeason] = useState(false);
   const [pendingBloom, setPendingBloom] = useState(false);
+  // Frozen Fortune (`DragonNest` in game data) is the same wallet mechanism,
+  // so it gets its own pending flag rather than a mode on Bloom's — one card,
+  // one queue flag, and the Bloom payload keeps the shape it shipped with. The
+  // count below is shared by both cards on purpose: it is labelled "tokens to
+  // add", and whichever cards are queued each receive exactly that many.
+  const [pendingFrozen, setPendingFrozen] = useState(false);
   // How many Bloom & Buzz (TrainJourney) tokens this push *adds* — a delta,
   // exactly like the Regatta count: the wallet keeps what it already holds and
   // gains this many on both Amount and TokensEarned.
@@ -1651,6 +1657,7 @@ export function StudioApp() {
       setPendingRegatta(false);
       setPendingSeason(false);
       setPendingBloom(false);
+      setPendingFrozen(false);
       setPendingUnban(null);
       setPendingDecorFragments(false);
       setPendingDecorClone(false);
@@ -1682,7 +1689,7 @@ export function StudioApp() {
     profileSel.count + avatarSel.count + skinSel.count + itemSel.count + zooSel.count + decorSel.size + stickerSel.size + museumSel.size +
     upgradeFactorySel.count + upgradeTrainSel.count + upgradeIslandSel.count +
     (barnDirty ? 1 : 0) + (pendingRegatta ? 1 : 0) + (pendingSeason ? 1 : 0) + (pendingUnban ? 1 : 0) +
-    (pendingBloom ? 1 : 0) +
+    (pendingBloom ? 1 : 0) + (pendingFrozen ? 1 : 0) +
     (pendingDecorFragments ? 1 : 0) + (pendingDecorClone ? 1 : 0) + (pendingDecorMaxAll ? 1 : 0) +
     (pendingTownClone ? 1 : 0) +
     (pendingUpgradeFactory ? 1 : 0) + (pendingUpgradeTrain ? 1 : 0) + (pendingUpgradeIsland ? 1 : 0);
@@ -1782,6 +1789,7 @@ export function StudioApp() {
         pendingRegatta ||
         pendingSeason ||
         pendingBloom ||
+        pendingFrozen ||
         pendingDecorFragments ||
         pendingDecorClone ||
         pendingTownClone ||
@@ -1831,6 +1839,7 @@ export function StudioApp() {
           regattaTasks: pendingRegatta ? regattaTasks : undefined,
           season: pendingSeason,
           bloomTokens: pendingBloom ? bloomTokens : undefined,
+          frozenTokens: pendingFrozen ? bloomTokens : undefined,
           unbanMode: pendingUnban ?? undefined,
           decorFragments: pendingDecorFragments,
           decorClone: pendingDecorClone,
@@ -1873,6 +1882,7 @@ export function StudioApp() {
       setPendingRegatta(false);
       setPendingSeason(false);
       setPendingBloom(false);
+      setPendingFrozen(false);
       if (unbanStage) setCopyStage((c) => Math.max(c, unbanStage));
       setPendingUnban(null);
       setPendingDecorFragments(false);
@@ -1887,7 +1897,7 @@ export function StudioApp() {
     } finally {
       setBusy(false);
     }
-  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, zooSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, regattaTasks, pendingSeason, pendingBloom, bloomTokens, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingTownClone, pendingDecorMaxAll, parseDecorQty, tr, device, upgradeFactorySel, upgradeTrainSel, upgradeIslandSel, upgradeTargetLevel]);
+  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, zooSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, regattaTasks, pendingSeason, pendingBloom, pendingFrozen, bloomTokens, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingTownClone, pendingDecorMaxAll, parseDecorQty, tr, device, upgradeFactorySel, upgradeTrainSel, upgradeIslandSel, upgradeTargetLevel]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1924,13 +1934,16 @@ export function StudioApp() {
       )
     : "no_active_regatta";
 
-  const tool = (kind: "regatta" | "season" | "bloom") => {
+  const tool = (kind: "regatta" | "season" | "bloom" | "frozen") => {
     if (kind === "regatta") {
       setPendingRegatta(true);
       toast.success(tr("toastRegattaQueued"));
     } else if (kind === "bloom") {
       setPendingBloom(true);
       toast.success(tr("toastBloomQueued"));
+    } else if (kind === "frozen") {
+      setPendingFrozen(true);
+      toast.success(tr("toastFrozenQueued"));
     } else {
       setPendingSeason(true);
       toast.success(tr("toastSeasonQueued"));
@@ -2216,7 +2229,7 @@ export function StudioApp() {
     zoo: zooSel.count,
     upgrades: upgradeFactorySel.count + upgradeTrainSel.count + upgradeIslandSel.count,
     newgame: freshPhase === "idle" ? 0 : 1,
-    events: pendingBloom ? bloomTokens : 0,
+    events: (pendingBloom ? bloomTokens : 0) + (pendingFrozen ? bloomTokens : 0),
   };
 
   const barnTotal = Object.values(barnItems).reduce((n, v) => n + (Number(v) || 0), 0);
@@ -3078,6 +3091,35 @@ export function StudioApp() {
                     </section>
 
                     <section className="panel">
+                      <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-cyan uppercase">
+                        <GameIcon name="events" className="size-4" />
+                        {tr("eventsCardFrozen")}
+                      </h3>
+                      <div className="flex flex-wrap gap-2">
+                        <span
+                          className={cn(
+                            "state-badge rounded-full px-2.5 py-1 text-xs font-medium",
+                            session.frozen.reason === "ok" ? "state-badge--ready" : "bg-input text-muted",
+                          )}
+                        >
+                          <GameIcon
+                            name={session.frozen.reason === "ok" ? "success" : "events"}
+                            className="size-3.5"
+                          />
+                          {tr(BLOOM_REASON_KEY[session.frozen.reason])}
+                        </span>
+                        <span className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums">
+                          {tr("eventsTokens")} {session.frozen.amount} →{" "}
+                          {session.frozen.amount + (pendingFrozen ? bloomTokens : 0)}
+                        </span>
+                        <span className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums">
+                          {tr("eventsEarned")} {session.frozen.earned + (pendingFrozen ? bloomTokens : 0)}
+                        </span>
+                      </div>
+                      <p className="mt-3 text-xs text-muted">{tr("frozenHint")}</p>
+                    </section>
+
+                    <section className="panel">
                       <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-amber uppercase">
                         <GameIcon name="events" className="size-4" />
                         {tr("eventsCount")}
@@ -3107,6 +3149,21 @@ export function StudioApp() {
                         </Button>
                         {pendingBloom ? (
                           <Button size="sm" variant="ghost" onClick={() => setPendingBloom(false)}>
+                            {tr("clear")}
+                          </Button>
+                        ) : null}
+                        <Button
+                          size="sm"
+                          className="tool-action"
+                          variant="purple"
+                          disabled={busy || pendingFrozen}
+                          onClick={() => tool("frozen")}
+                        >
+                          <GameIcon name="events" className="size-4" />
+                          {pendingFrozen ? tr("frozenQueued") : tr("frozenAdd")}
+                        </Button>
+                        {pendingFrozen ? (
+                          <Button size="sm" variant="ghost" onClick={() => setPendingFrozen(false)}>
                             {tr("clear")}
                           </Button>
                         ) : null}

@@ -1,5 +1,15 @@
 /**
- * Bloom & Buzz event tokens.
+ * Event token wallets: Bloom & Buzz (`TrainJourney`) and Frozen Fortune
+ * (`DragonNest`).
+ *
+ * Every function below takes the wallet's event id as an optional last
+ * argument defaulting to `TrainJourney`, so the Bloom & Buzz path is the same
+ * bytes, the same messages and the same gate keys it has always had, and the
+ * Frozen Fortune card is one argument away rather than a second copy of the
+ * writer. Names stay `bloom*` for the same reason the regatta helpers keep
+ * theirs: they are this module's public API and the tests are their guard rail.
+ *
+ * ## Bloom & Buzz
  *
  * The game never calls it "Bloom & Buzz" in data — its own id is
  * **`TrainJourney`**, proven four ways against the APK: `VariablesContext.bin`
@@ -33,7 +43,8 @@
  *       </DataElem> …
  *
  * That field order is the same in every one of the 25 saves carrying the
- * block (40 valued wallets across all events in the corpus).
+ * block, and the wallet as a whole in 44 valued wallets across the corpus —
+ * 25 Bloom, 16 Frozen Fortune, 3 Magic Cauldron.
  *
  * Why **both** numbers move by the same Δ:
  *
@@ -50,13 +61,43 @@
  *   until a plinko spin is actually recorded, which is why the relation is the
  *   reliable one and that field is not used as a ledger here.
  *
+ * ## Frozen Fortune (`DragonNest`) — the same wallet, measured not guessed
+ *
+ * The APK has exactly **three** `currencyProvider` wallets in 170 MB of
+ * decoded config (`trainJourney`, `dragonNest`, `magicCauldron`); City Cascade's
+ * `cityCascadeBalancesConfig` has none, so it has no balance to write. Of those
+ * three, DragonNest is the one whose evidence is in front of us:
+ *
+ * - its config is wired like Bloom's — the same `behaviourVarsContextProvider`
+ *   ids `3456437961` / `3407070177`, the same `balanceId` + `TokensBalanceId`
+ *   pair — and its saves declare `DN_BalancesConfig_4/5/6` exactly where
+ *   Bloom's declare `TJ_BalancesConfig_7`;
+ * - **16 real wallets** on disk carry `Amount` + `TokensEarned`, and all 16
+ *   satisfy `Amount <= TokensEarned` with `InitialValueSet="true"`, the same
+ *   two rules the 25 Bloom wallets satisfy (41/41 across both events);
+ * - field order is not fixed: 41 valued wallets split `35` with
+ *   `LastTransferTransactionId` and `6` without, which is why `fieldSpan`
+ *   reads a field by name instead of by position;
+ * - exactly **one** `<DataElem name="DragonNest" type="dataStore">` exists per
+ *   save and it is inside `GameFeatures` on 58/58 files, so naming the owner
+ *   is enough to scope the write — no fallback to "some other wallet" is ever
+ *   taken (a save may hold all three at once).
+ *
+ * Its empty state is the reason this feature refuses instead of writing:
+ * **42 of 58 saves hold `<DataElem name="CurrencyProvider" type="dataStore"/>`
+ * with no numbers in it at all** — the event has been scheduled on that
+ * account but not opened. The block the game writes is there, the wallet's
+ * values are not, so the refusal tells the user to open the event in game once
+ * rather than inventing the two integers the game has not created yet.
+ *
  * Deliberately never touched: `InitialValueSet`, `LastTransferTransactionId`,
  * `balanceVersion` (21 per save, always in component `ptr` dataStores and
  * never inside a `CurrencyProvider`), `LayerLaunchCurrencyTransfer`, and every
- * *other* event's wallet — a save may hold up to three (`TrainJourney`,
- * `DragonNest`, `MagicCauldron`) and only ours may move. A whole-document
- * replace of `name="Amount"` would hit all three, which is why every write here
- * is scoped to the span of `TrainJourney > CurrencyProvider` first.
+ * wallet the caller did *not* name — a save may hold up to three
+ * (`TrainJourney`, `DragonNest`, `MagicCauldron`) and only the one being
+ * edited may move. A whole-document replace of `name="Amount"` would hit all
+ * three, which is why every write here is scoped to the span of
+ * `<event> > CurrencyProvider` first.
  *
  * Honest limit: `lib/` is empty in the shipped APK (the engine is a JNI `.so`
  * we do not have), so which of the two numbers the on-screen bead count reads
@@ -73,7 +114,45 @@ import { BLOOM_TOKENS_DEFAULT, BLOOM_TOKENS_MAX } from "../../events";
 // (which clamps as you type) and this writer can never drift apart.
 export { BLOOM_TOKENS_DEFAULT, BLOOM_TOKENS_MAX };
 
-const OWNER = "TrainJourney";
+/**
+ * The wallets this module reads and writes, in the order the gate checks them.
+ *
+ * `TrainJourney` first is not cosmetic: `assertBloomSafe` reports the first
+ * wallet it refuses, and every existing assertion in the Bloom tests expects
+ * Bloom's own message when both wallets are present in one fixture.
+ *
+ * `MagicCauldron` is deliberately absent — it is the third `currencyProvider`
+ * in the APK, but it appears in no save of this account's (3 of 58 files, all
+ * A/B-test friend cities), so there is nothing here to measure it against.
+ */
+export const EVENT_WALLETS = ["TrainJourney", "DragonNest"] as const;
+export type EventWalletId = (typeof EVENT_WALLETS)[number];
+
+/** How a wallet is named in a refusal: the card's own name for every message,
+ *  and its full form (name + the game's id) for the one refusal that has always
+ *  carried it — `Save chưa có ví token Bloom & Buzz (TrainJourney)`. Splitting
+ *  the two keeps Bloom's wording byte-identical to what shipped. */
+const WALLET_NAME: Record<EventWalletId, string> = {
+  TrainJourney: "Bloom & Buzz",
+  DragonNest: "Frozen Fortune",
+};
+
+const WALLET_FULL: Record<EventWalletId, string> = {
+  TrainJourney: "Bloom & Buzz (TrainJourney)",
+  DragonNest: "Frozen Fortune (DragonNest)",
+};
+
+/**
+ * Gate keys are namespaced per wallet. Two wallets are diffed side by side by
+ * one loaded-vs-pushed comparison, so a key shared between them would let a
+ * problem this tool created in one wallet be masked by the same problem the
+ * save arrived with in the other.
+ */
+const KEY_PREFIX: Record<EventWalletId, string> = {
+  TrainJourney: "bloom",
+  DragonNest: "frozen",
+};
+
 const CURRENCY = "CurrencyProvider";
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -107,15 +186,17 @@ function namedOpenIndex(doc: string, name: string, type: string | null, from = 0
 }
 
 /**
- * Span of `TrainJourney > CurrencyProvider`, or null when the save carries no
+ * Span of `<event> > CurrencyProvider`, or null when the save carries no
  * wallet at all (the 27 saves in the corpus with a `TrainJourneyDrop` analytics
- * block but no event store — the event has never been opened on that account).
+ * block but no event store — the event has never been opened on that account;
+ * for Frozen Fortune it is 42 of 58 saves holding an empty
+ * `<DataElem name="CurrencyProvider" type="dataStore"/>`).
  *
  * It never falls back to *some other* `CurrencyProvider`: a save may hold three
- * and only ours may be edited.
+ * and only the one named here may be edited.
  */
-export function bloomWalletSpan(xml: string): { start: number; end: number } | null {
-  const owner = namedOpenIndex(xml, OWNER, "dataStore");
+export function bloomWalletSpan(xml: string, event: EventWalletId = "TrainJourney"): { start: number; end: number } | null {
+  const owner = namedOpenIndex(xml, event, "dataStore");
   if (owner < 0) return null;
   const block = elementRange(xml, owner);
   if (!block) return null;
@@ -159,13 +240,15 @@ function fields(w: string) {
  * numbers are readable — a save that has never opened the event reports
  * `no_wallet` so the tab can say so *before* anything is queued, instead of
  * failing at push. It is a readout, never a gate: nothing here blocks a push.
+ *
+ * `event` picks which wallet is reported; the Events tab asks for both.
  */
 export type BloomReason = "ok" | "no_wallet" | "incomplete" | "invalid";
 
 export type BloomInfo = { present: boolean; complete: boolean; amount: number; earned: number; reason: BloomReason };
 
-export function bloomInfo(xml: string): BloomInfo {
-  const span = bloomWalletSpan(xml);
+export function bloomInfo(xml: string, event: EventWalletId = "TrainJourney"): BloomInfo {
+  const span = bloomWalletSpan(xml, event);
   if (!span) return { present: false, complete: false, amount: 0, earned: 0, reason: "no_wallet" };
   const f = fields(xml.slice(span.start, span.end));
   const complete = f.amountInt !== null && f.earnedInt !== null;
@@ -181,34 +264,38 @@ function fieldCount(w: string, name: string) {
 /**
  * Raise both wallet numbers by `want`.
  *
- * Only the two `value="…"` runs inside `TrainJourney > CurrencyProvider` are
+ * Only the two `value="…"` runs inside `<event> > CurrencyProvider` are
  * rewritten; every other byte of the document — including the other event
  * wallets, `InitialValueSet`, `LastTransferTransactionId` and the whole
  * `DataStoreCollection` around them — is left exactly as it was. The rewrite
  * runs from the later field backwards so the earlier field's offsets stay
  * valid without recomputing them.
  */
-export function addBloomTokens(xml: string, want: number): string {
+export function addBloomTokens(xml: string, want: number, event: EventWalletId = "TrainJourney"): string {
   const n = Math.floor(Number(want));
   if (!Number.isFinite(n) || n < 1) throw new Error("Số token không hợp lệ");
 
-  const span = bloomWalletSpan(xml);
+  const name = WALLET_NAME[event];
+  const span = bloomWalletSpan(xml, event);
   if (!span) {
     throw new Error(
-      "Save chưa có ví token Bloom & Buzz (TrainJourney) — hãy mở sự kiện trong game một lần rồi thử lại. " +
+      `Save chưa có ví token ${WALLET_FULL[event]} — hãy mở sự kiện trong game một lần rồi thử lại. ` +
         "Công cụ không tự sinh ví mới vì sẽ thiếu cả StateMachine của sự kiện.",
     );
   }
   const before = xml.slice(span.start, span.end);
   if (fieldCount(before, CURRENCY) !== 1) {
-    throw new Error("Ví token Bloom & Buzz bị lồng sai — không sửa để tránh hỏng save");
+    throw new Error(`Ví token ${name} bị lồng sai — không sửa để tránh hỏng save`);
   }
   const f = fields(before);
   if (!f.amount || !f.earned) {
-    throw new Error("Ví token Bloom & Buzz thiếu Amount hoặc TokensEarned — không thể sửa an toàn");
+    // Bloom's refusal text ships verbatim — what to do about an unopened event
+    // is said once, in the Frozen Fortune card's own hint, rather than being
+    // bolted onto a message another feature already reads.
+    throw new Error(`Ví token ${name} thiếu Amount hoặc TokensEarned — không thể sửa an toàn`);
   }
   if (f.amountInt === null || f.earnedInt === null || f.amountInt < 0 || f.earnedInt < 0) {
-    throw new Error("Ví token Bloom & Buzz chứa số không hợp lệ — không sửa để tránh hỏng save");
+    throw new Error(`Ví token ${name} chứa số không hợp lệ — không sửa để tránh hỏng save`);
   }
 
   const nextAmount = f.amountInt + n;
@@ -255,30 +342,31 @@ function stripWalletValues(w: string): string {
  * What the Events tab reports about a save, as *keys* so the push gate can
  * diff the save as it arrived against the save about to leave.
  */
-export function bloomProblems(doc: string): string[] {
+export function bloomProblems(doc: string, event: EventWalletId = "TrainJourney"): string[] {
   const keys: string[] = [];
-  const span = bloomWalletSpan(doc);
+  const p = KEY_PREFIX[event];
+  const span = bloomWalletSpan(doc, event);
   if (!span) return keys; // no event store — nothing to check, nothing to break
   const w = doc.slice(span.start, span.end);
   if (fieldCount(w, CURRENCY) !== 1) {
-    keys.push("bloom-wallet-nested");
+    keys.push(`${p}-wallet-nested`);
     return keys;
   }
   const f = fields(w);
   if (!f.amount || !f.earned) {
-    keys.push("bloom-wallet-incomplete");
+    keys.push(`${p}-wallet-incomplete`);
     return keys;
   }
   if (f.amountInt === null || f.earnedInt === null) {
-    keys.push("bloom-wallet-value-invalid");
+    keys.push(`${p}-wallet-value-invalid`);
     return keys;
   }
-  if (f.amountInt < 0 || f.earnedInt < 0) keys.push("bloom-wallet-value-negative");
-  // Measured 40/40 valued wallets in the corpus: the balance never exceeds
-  // what the account has ever earned. A write that breaks it is the shape a
-  // server reads for free — but a save that arrived this way keeps the key on
-  // both sides and stays pushable.
-  if (f.amountInt > f.earnedInt) keys.push("bloom-balance-over-earned");
+  if (f.amountInt < 0 || f.earnedInt < 0) keys.push(`${p}-wallet-value-negative`);
+  // Measured 41/41 valued wallets across both events in the corpus: the
+  // balance never exceeds what the account has ever earned. A write that
+  // breaks it is the shape a server reads for free — but a save that arrived
+  // this way keeps the key on both sides and stays pushable.
+  if (f.amountInt > f.earnedInt) keys.push(`${p}-balance-over-earned`);
   return keys;
 }
 
@@ -287,8 +375,8 @@ export function bloomProblems(doc: string): string[] {
  * the pair as read. `complete` is false when either number is unreadable —
  * the numeric comparisons below only run on a wallet both sides could read.
  */
-function walletText(doc: string): { text: string; amount: number; earned: number; complete: boolean } | null {
-  const span = bloomWalletSpan(doc);
+function walletText(doc: string, event: EventWalletId = "TrainJourney"): { text: string; amount: number; earned: number; complete: boolean } | null {
+  const span = bloomWalletSpan(doc, event);
   if (!span) return null;
   const w = doc.slice(span.start, span.end);
   const f = fields(w);
@@ -301,30 +389,39 @@ function walletText(doc: string): { text: string; amount: number; earned: number
  * shape, progression and regatta gates so every path that ends in a push is
  * covered without the Events tab having to remember.
  *
- * Same loaded-vs-pushed rule as the others: a save that arrived with an odd
- * wallet keeps its key on both sides and stays pushable; only a split this
- * tool created is refused. Because no restore copies `<DataStoreCollection>`,
- * and nothing else in the tool writes these fields, a wallet that moves at all
- * is something this session did.
+ * It runs once per wallet in `EVENT_WALLETS`, because one batch may queue both
+ * cards and each wallet must be diffed against its own loaded-vs-pushed pair —
+ * keys are namespaced per wallet (`bloom-*` / `frozen-*`) so the two diffs can
+ * never mask one another. Same loaded-vs-pushed rule as the others: a save that
+ * arrived with an odd wallet keeps its key on both sides and stays pushable;
+ * only a split this tool created is refused. Because no restore copies
+ * `<DataStoreCollection>`, and nothing else in the tool writes these fields, a
+ * wallet that moves at all is something this session did.
  */
 export function assertBloomSafe(loaded: string, pushed: string) {
-  const before = walletText(loaded);
-  const after = walletText(pushed);
+  for (const event of EVENT_WALLETS) assertWalletSafe(loaded, pushed, event);
+}
+
+/** `assertBloomSafe` for one wallet. `TrainJourney` is checked first. */
+function assertWalletSafe(loaded: string, pushed: string, event: EventWalletId) {
+  const name = WALLET_NAME[event];
+  const before = walletText(loaded, event);
+  const after = walletText(pushed, event);
   if (!before && !after) return;
-  if (before && !after) throw new Error("Không đẩy file lên máy: ví token Bloom & Buzz biến mất sau khi sửa");
+  if (before && !after) throw new Error(`Không đẩy file lên máy: ví token ${name} biến mất sau khi sửa`);
   if (!before && after) {
     throw new Error(
-      "Không đẩy file lên máy: ví token Bloom & Buzz tự sinh ra dù save gốc không có — " +
+      `Không đẩy file lên máy: ví token ${name} tự sinh ra dù save gốc không có — ` +
         "sự kiện phải được mở trong game trước.",
     );
   }
 
-  const wasKeys = bloomProblems(loaded);
-  const nowKeys = bloomProblems(pushed);
+  const wasKeys = bloomProblems(loaded, event);
+  const nowKeys = bloomProblems(pushed, event);
   const broken = nowKeys.filter((k) => !wasKeys.includes(k));
   if (broken.length) {
     throw new Error(
-      `Không đẩy file lên máy: ví token Bloom & Buzz hỏng sau khi sửa (${broken.join(", ")}). ` +
+      `Không đẩy file lên máy: ví token ${name} hỏng sau khi sửa (${broken.join(", ")}). ` +
         "Bất kỳ số liệu nào lệch trong ví này cũng là điều mọi save thật đều không có, " +
         "nên server Playrix có thể coi save của bạn là gian lận.",
     );
@@ -332,7 +429,7 @@ export function assertBloomSafe(loaded: string, pushed: string) {
 
   if (before!.text !== after!.text) {
     throw new Error(
-      "Không đẩy file lên máy: ví token Bloom & Buzz thay đổi ngoài hai số lượng token " +
+      `Không đẩy file lên máy: ví token ${name} thay đổi ngoài hai số lượng token ` +
         "(InitialValueSet / LastTransferTransactionId / thứ tự trường).",
     );
   }

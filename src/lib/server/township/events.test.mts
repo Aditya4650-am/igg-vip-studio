@@ -7,6 +7,7 @@ import {
   bloomInfo,
   bloomProblems,
   bloomWalletSpan,
+  EVENT_WALLETS,
   BLOOM_TOKENS_DEFAULT,
   BLOOM_TOKENS_MAX,
 } from "./events.server.ts";
@@ -216,4 +217,225 @@ test("bloom: the push gate key set is exactly the measured rules", () => {
     `<DataElem name="CurrencyProvider" type="dataStore">` +
     `<DataElem name="Amount" type="int" value="7"/></DataElem>`;
   assert.deepEqual(bloomProblems(save(broken)), ["bloom-wallet-incomplete"]);
+});
+
+/* ------------------------------------------------------------------ *
+ * Frozen Fortune (`DragonNest`) — the second wallet the tab can write.
+ *
+ * Its evidence, so these tests are not read as a guess: the APK carries
+ * exactly three `currencyProvider` wallets (TrainJourney, DragonNest,
+ * MagicCauldron) and this is the one with real saves behind it — 16 valued
+ * wallets, all satisfying `Amount <= TokensEarned`, all `InitialValueSet=true`,
+ * all inside `GameFeatures` (58/58 files, one DragonNest store per save). The
+ * fixtures below keep both wallets in one document on purpose: scoping is the
+ * whole point of a second argument.
+ * ------------------------------------------------------------------ */
+
+/** Real saves put DragonNest *inside* GameFeatures; Bloom's fixture above puts
+ *  it beside GameFeatures, so both placements are covered. */
+const frozenSave = (dnInner: string, tjInner = wallet(7000, 7000)) =>
+  `<root><Global>` +
+  `<Var name="cityId" v="TESTCITY01"/>` +
+  `<DataStoreCollection>` +
+  `<DataElem name="GameFeatures" type="dataStore">` +
+  `<DataElem name="TrainJourney" type="dataStore">${tjInner}</DataElem>` +
+  `<DataElem name="DragonNest" type="dataStore">${dnInner}</DataElem>` +
+  `</DataElem>` +
+  `</DataStoreCollection>` +
+  `</Global><GameInfoPatcher/></root>`;
+
+/** The other field order real wallets use — 6 of the 41 valued wallets in the
+ *  corpus carry no `LastTransferTransactionId` at all, and most DragonNest ones
+ *  are of that shape. The writer reads a field by name, never by position. */
+const walletNoTx = (amount: number, earned: number) =>
+  `<DataElem name="CurrencyProvider" type="dataStore">` +
+  `<DataElem name="Amount" type="int" value="${amount}"/>` +
+  `<DataElem name="InitialValueSet" type="bool" value="true"/>` +
+  `<DataElem name="TokensEarned" type="int" value="${earned}"/>` +
+  `</DataElem>`;
+
+test("frozen: the wallet list is exactly the measured set, Bloom first", () => {
+  // `MagicCauldron` is the third `currencyProvider` in the APK but appears in
+  // no save of this account's (3 of 58, all A/B-test friend cities), so it is
+  // deliberately absent — a wallet nothing here can be measured against is a
+  // wallet nothing here should promise to write.
+  assert.deepEqual(EVENT_WALLETS, ["TrainJourney", "DragonNest"]);
+});
+
+test("frozen: raises both numbers in the DragonNest wallet and leaves Bloom's alone", () => {
+  const f = frozenSave(wallet(252, 252));
+  const out = addBloomTokens(f, 48, "DragonNest");
+  wellFormed(out);
+
+  assert.deepEqual(bloomInfo(out, "DragonNest"), {
+    present: true,
+    complete: true,
+    amount: 300,
+    earned: 300,
+    reason: "ok",
+  });
+
+  // Byte-for-byte proof of the same kind the Bloom test uses: undoing the two
+  // new values must reproduce the input, which also proves Bloom's `7000`
+  // pair never moved — one `name="Amount"` replace would have hit both.
+  assert.equal(out.split('value="300"').join('value="252"'), f, "only the two token values may differ");
+  assert.deepEqual(bloomInfo(out), { present: true, complete: true, amount: 7000, earned: 7000, reason: "ok" });
+
+  // And the reverse direction: writing Bloom must not move Frozen Fortune.
+  const back = addBloomTokens(f, 50);
+  assert.deepEqual(bloomInfo(back, "DragonNest"), {
+    present: true,
+    complete: true,
+    amount: 252,
+    earned: 252,
+    reason: "ok",
+  });
+});
+
+test("frozen: the spent difference is preserved, in either field order", () => {
+  for (const maker of [wallet, walletNoTx]) {
+    const f = frozenSave(maker(8, 1414));
+    const out = addBloomTokens(f, 100, "DragonNest");
+    assert.deepEqual(
+      bloomInfo(out, "DragonNest"),
+      { present: true, complete: true, amount: 108, earned: 1514, reason: "ok" },
+      "the pair must move together whatever order the fields are written in",
+    );
+    assert.equal(1514 - 108, 1414 - 8, "the difference a server can reconcile must not move");
+    assert.equal(bloomInfo(out).amount, 7000, "Bloom's wallet stays out of it");
+  }
+});
+
+test("frozen: an unopened event refuses instead of inventing a wallet", () => {
+  // The empty shape is the common one: 42 of 58 saves hold
+  // `<DataElem name="CurrencyProvider" type="dataStore"/>` with no numbers in
+  // it — the event was scheduled on that account but never opened. The block
+  // is there, the values are not, so the two integers must not be made up.
+  const unopened = frozenSave(`<DataElem name="CurrencyProvider" type="dataStore"/>`);
+  assert.equal(bloomInfo(unopened, "DragonNest").reason, "incomplete");
+  assert.throws(() => addBloomTokens(unopened, 10, "DragonNest"), /thiếu Amount hoặc TokensEarned/);
+  // The refusal names the card the user pressed, not Bloom's.
+  assert.throws(() => addBloomTokens(unopened, 10, "DragonNest"), /Ví token Frozen Fortune thiếu Amount/);
+
+  // And a save with no DragonNest store at all answers the way Bloom's does.
+  const noDn =
+    `<root><Global><DataStoreCollection>` +
+    `<DataElem name="GameFeatures" type="dataStore">` +
+    `<DataElem name="TrainJourney" type="dataStore">${wallet(7, 7)}</DataElem>` +
+    `</DataElem></DataStoreCollection></Global></root>`;
+  assert.equal(bloomInfo(noDn, "DragonNest").reason, "no_wallet");
+  assert.throws(() => addBloomTokens(noDn, 10, "DragonNest"), /chưa có ví token Frozen Fortune/);
+  // Writing Bloom on that same save is unaffected by the missing second wallet.
+  assert.doesNotThrow(() => addBloomTokens(noDn, 10));
+});
+
+test("frozen gate: a correct edit passes, and each wallet reports its own keys", () => {
+  const f = frozenSave(wallet(252, 252));
+  assert.deepEqual(bloomProblems(f, "DragonNest"), []);
+  assert.doesNotThrow(() => assertBloomSafe(f, addBloomTokens(f, 50, "DragonNest")));
+
+  // Amount raised on its own → refused on the second wallet's own rule. The
+  // wallet must be a *spent* one (108 of 1514 earned) exactly like Bloom's
+  // test: on a full wallet the raise would also push Amount past Earned and
+  // the key rule would fire first.
+  const spent = frozenSave(wallet(8, 1414));
+  const good = addBloomTokens(spent, 100, "DragonNest");
+  const tampered = good.replace('value="108"', 'value="200"');
+  assert.throws(() => assertBloomSafe(spent, tampered), /cùng tăng một lượng/);
+
+  // A balance above what the account ever earned → the `frozen-` key, never
+  // Bloom's prefix, so a message can be matched to the card that caused it.
+  const over = addBloomTokens(frozenSave(wallet(252, 252)), 1, "DragonNest").replace('value="253"', 'value="900"');
+  assert.deepEqual(bloomProblems(over, "DragonNest"), ["frozen-balance-over-earned"]);
+  assert.deepEqual(bloomProblems(over), [], "Bloom's wallet is clean and must say so");
+  assert.throws(() => assertBloomSafe(frozenSave(wallet(252, 252)), over), /frozen-balance-over-earned/);
+
+  // A wallet that vanishes, and one that appears from nowhere: same two
+  // refusals, naming this event.
+  assert.throws(() => assertBloomSafe(f, frozenSave("")), /Frozen Fortune.*biến mất sau khi sửa/);
+  assert.throws(() => assertBloomSafe(frozenSave(""), f), /Frozen Fortune.*tự sinh ra dù save gốc không có/);
+});
+
+test("frozen gate: one wallet's oddness can never mask the other's", () => {
+  // The save *arrives* with Bloom's balance over its earned total — a key it
+  // keeps on both sides — while this push breaks Frozen Fortune's instead. If
+  // the two wallets shared a key set, that new problem would be filtered out
+  // as "already there" and the push would leave on the wrong reason.
+  const loaded = frozenSave(wallet(252, 252), wallet(900, 100));
+  assert.deepEqual(bloomProblems(loaded), ["bloom-balance-over-earned"], "arrived odd, on Bloom's side");
+  assert.deepEqual(bloomProblems(loaded, "DragonNest"), [], "and clean on Frozen Fortune's");
+
+  const pushed = addBloomTokens(loaded, 50, "DragonNest").replace('value="302"', 'value="900"');
+  assert.throws(() => assertBloomSafe(loaded, pushed), /frozen-balance-over-earned/);
+
+  // The same pairing the other way round stays green: an odd wallet that did
+  // not move is not a reason to refuse the edit next to it.
+  const raised = addBloomTokens(loaded, 50, "DragonNest");
+  assert.doesNotThrow(() => assertBloomSafe(loaded, raised));
+});
+
+test("frozen gate: a save that arrived odd keeps its own keys and stays pushable", () => {
+  // Deliberately never measured (16/16 valued DragonNest wallets satisfy
+  // Amount <= Earned) — but the rule is a diff, so a file that arrives this
+  // way is not refused for the reason it arrived with.
+  const odd = frozenSave(wallet(900, 100));
+  assert.deepEqual(bloomProblems(odd, "DragonNest"), ["frozen-balance-over-earned"]);
+  assert.doesNotThrow(() => assertBloomSafe(odd, addBloomTokens(odd, 50, "DragonNest")));
+});
+
+const msgOf = (fn: () => unknown) => {
+  try {
+    fn();
+  } catch (e) {
+    return (e as Error).message;
+  }
+  throw new Error("expected a refusal");
+};
+
+test("bloom: every refusal still reads exactly as it shipped", () => {
+  // Frozen Fortune rides this same writer, so the only way to prove Bloom's
+  // own text did not drift with it is to pin the strings character for
+  // character against the commit the Events tab shipped in.
+  assert.equal(
+    msgOf(() => addBloomTokens(save(""), 10)),
+    "Save chưa có ví token Bloom & Buzz (TrainJourney) — hãy mở sự kiện trong game một lần rồi thử lại. " +
+      "Công cụ không tự sinh ví mới vì sẽ thiếu cả StateMachine của sự kiện.",
+  );
+  assert.equal(
+    msgOf(() => addBloomTokens(save(`<DataElem name="CurrencyProvider" type="dataStore"/>`), 10)),
+    "Ví token Bloom & Buzz thiếu Amount hoặc TokensEarned — không thể sửa an toàn",
+  );
+  assert.equal(
+    msgOf(() =>
+      addBloomTokens(
+        save(
+          `<DataElem name="CurrencyProvider" type="dataStore">` +
+            `<DataElem name="CurrencyProvider" type="dataStore">` +
+            `<DataElem name="Amount" type="int" value="1"/>` +
+            `<DataElem name="TokensEarned" type="int" value="1"/>` +
+            `</DataElem></DataElem>`,
+        ),
+        10,
+      ),
+    ),
+    "Ví token Bloom & Buzz bị lồng sai — không sửa để tránh hỏng save",
+  );
+  assert.equal(
+    msgOf(() =>
+      addBloomTokens(
+        save(
+          `<DataElem name="CurrencyProvider" type="dataStore">` +
+            `<DataElem name="Amount" type="int" value="abc"/>` +
+            `<DataElem name="TokensEarned" type="int" value="7"/></DataElem>`,
+        ),
+        10,
+      ),
+    ),
+    "Ví token Bloom & Buzz chứa số không hợp lệ — không sửa để tránh hỏng save",
+  );
+  assert.equal(msgOf(() => addBloomTokens(base, BLOOM_TOKENS_MAX + 1)), `Số token tối đa mỗi lần là ${BLOOM_TOKENS_MAX}`);
+  assert.equal(
+    msgOf(() => assertBloomSafe(base, save(""))),
+    "Không đẩy file lên máy: ví token Bloom & Buzz biến mất sau khi sửa",
+  );
 });

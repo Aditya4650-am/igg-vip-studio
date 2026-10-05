@@ -2416,3 +2416,76 @@ test("a refused Bloom push rolls the whole batch back", () => {
     "the whole batch must be undone, not just the part that failed",
   );
 });
+
+// The same save carrying **both** event wallets, which is what a real file
+// does — 58/58 saves in the corpus hold a DragonNest store beside Bloom's, so
+// the two cards may be queued into one batch and each must move only its own
+// pair of numbers.
+const FROZEN_WALLET =
+  `<DataStoreCollection><DataElem name="GameFeatures" type="dataStore">` +
+  `<DataElem name="TrainJourney" type="dataStore">` +
+  `<DataElem name="CurrencyProvider" type="dataStore">` +
+  `<DataElem name="Amount" type="int" value="7"/>` +
+  `<DataElem name="InitialValueSet" type="bool" value="true"/>` +
+  `<DataElem name="LastTransferTransactionId" type="string" value=""/>` +
+  `<DataElem name="TokensEarned" type="int" value="7"/>` +
+  `</DataElem></DataElem>` +
+  `<DataElem name="DragonNest" type="dataStore">` +
+  `<DataElem name="CurrencyProvider" type="dataStore">` +
+  `<DataElem name="Amount" type="int" value="252"/>` +
+  `<DataElem name="InitialValueSet" type="bool" value="true"/>` +
+  `<DataElem name="LastTransferTransactionId" type="string" value=""/>` +
+  `<DataElem name="TokensEarned" type="int" value="252"/>` +
+  `</DataElem></DataElem>` +
+  `</DataElem></DataStoreCollection>`;
+const FROZEN_SAVE = ownSave.replace("</Global>", `${FROZEN_WALLET}</Global>`);
+
+function loadFrozen() {
+  return studio.connectLoad(
+    token,
+    "test-device",
+    undefined,
+    undefined,
+    Buffer.from(FROZEN_SAVE).toString("base64"),
+  );
+}
+
+test("the Frozen Fortune push runs beside Bloom and each card moves only its own wallet", () => {
+  const { sessionId } = loadFrozen();
+  // Both cards queued into the same Save & push, exactly as the tab queues them.
+  const pushed = studio.applySave({ token, sessionId, bloomTokens: 3, frozenTokens: 48 });
+  const xml = Buffer.from(pushed.fileB64!, "base64").toString("utf8");
+  balanced(xml);
+
+  const tj = xml.slice(xml.indexOf('<DataElem name="TrainJourney"'), xml.indexOf('<DataElem name="DragonNest"'));
+  const dn = xml.slice(xml.indexOf('<DataElem name="DragonNest"'), xml.indexOf("</DataStoreCollection>"));
+
+  assert.ok(tj.includes('value="10"'), "Bloom's wallet must rise by its own batch (7 + 3)");
+  assert.ok(!tj.includes('value="300"'), "and must not move because of the other card");
+  assert.ok(dn.includes('value="300"'), "Frozen Fortune's wallet must rise by its own batch (252 + 48)");
+  assert.ok(!dn.includes('value="10"'), "and must not move because of the other card");
+  assert.ok(dn.includes('name="InitialValueSet" type="bool" value="true"'), "the untouched field stays");
+
+  // Both readouts travel with the snapshot so each card can show its own state.
+  assert.deepEqual(pushed.bloom, { present: true, complete: true, amount: 10, earned: 10, reason: "ok" });
+  assert.deepEqual(pushed.frozen, { present: true, complete: true, amount: 300, earned: 300, reason: "ok" });
+});
+
+test("a refused Frozen Fortune push rolls the whole batch back", () => {
+  // `ownSave` has no DragonNest store at all, and nothing here may invent one:
+  // the refusal names the card that was pressed, and a restore queued in front
+  // of it must not be left applied behind a reported failure.
+  const snap = townSession(ownSave);
+  studio.attachFriendXml(token, snap.sessionId, friendSave);
+  const before = studio.exportCurrent(token, snap.sessionId).fileB64;
+  assert.throws(
+    () => studio.applySave({ token, sessionId: snap.sessionId, unbanMode: "completo", frozenTokens: 10 }),
+    /chưa có ví token Frozen Fortune/,
+    "a save with no DragonNest wallet must refuse",
+  );
+  assert.equal(
+    studio.exportCurrent(token, snap.sessionId).fileB64,
+    before,
+    "the whole batch must be undone, not just the part that failed",
+  );
+});
