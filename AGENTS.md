@@ -252,13 +252,16 @@ positions); the sidebar *Tools* button was removed, leaving Season there.
 - `inspectRegatta(xml, nTasks)` is the read-only twin, and its
   `RegattaReason` is exactly what the tab shows **before** the user presses
   anything: `no_active_regatta` (no `<Regata>` with a window, or `now` outside
-  it), `no_template`, `window_closed`, `already_full`.
+  it), `no_template`, `already_full`. There is no reason for the count itself:
+  see *Any count from 1 to 100 pushes, no error* below.
 - Refusals **throw** with a Vietnamese message rather than reporting a success
   the game would ignore. There is no code path that invents a `<Regata>`.
-- Timestamps: `hi = min(end, now) - 60`, `lo = start + 0.35 * (hi - start)`,
-  spaced by `gap`. Two floors — `hi - start >= 600` and `hi - lo >= need * 60` —
-  keep them inside the window, strictly in the past, strictly
-  `takeTime < completeTime < realEndTime`, and all distinct.
+- Timestamps: `lo = max(win.start + 2, lastDone + min(minGap, room))`,
+  `hi = max(lo, min(win.end, now - 1))`, `gap = floor((hi - lo) / (need - 1))`,
+  `endTime = min(lo + i * gap, hi)`. They stay inside the window, strictly in
+  the past, strictly `takeTime < completeTime < realEndTime`, non-decreasing in
+  document order, and `lo` never lands a second task on top of the block's own
+  newest completion when the range has room for a day's share after it.
 - `RegataTasksCompleted` is **bumped only when already present**; a save that
   never tracked it gains no fabricated counter.
 - **`<Regata score>` and `scoreUpd` are never written, at all.** They are not
@@ -336,8 +339,8 @@ reported as "the button is not clickable":
 - save holding 5 tasks, user drops the count to 3 → badge says ready, button
   live, and `injectRegata` then throws `already_full`.
 
-`src/lib/regatta.ts` holds `regattaWant` / `regattaBounds` / `regattaReason`
-and the two constants — **pure and browser-safe (no fs, no server imports)**.
+`src/lib/regatta.ts` holds `regattaWant` / `regattaReason` and the two
+constants — **pure and browser-safe (no fs, no server imports)**.
 The server's `inspectRegatta` and the tab's `regattaState` both call it, so the
 badge and the push stay one decision instead of two that drift.
 
@@ -545,32 +548,43 @@ byte-for-byte unchanged):
   suffix, 23/23 measured; `trains_*` -> `trains`, no eventType/target); `need`
   from the save's own `<TakenTask id=… need=…>` / `<Member … taskId=… need=…>`
   else the catalog — **they agree wherever all three exist, and a disagreement
-  skips the id rather than arbitrating**; `num`/`ver` from the `<FreeTask>` row
-  the record is **cut from** (see the offer-list rule below); `anlLimit` from
-  `<Var name="TaskQuota">` (equal to `anlLimit` on 5/5 saves). **No TaskQuota ->
+  skips the id rather than arbitrating** (`measured()` is false when the save
+  states a `need` the catalog contradicts, so such an id is never recorded and
+  never left standing as the one slot that qualifies); `num` from the slot the
+  record is filed under and `ver` from that slot's own generation +1, with the
+  slot's `<FreeTask>` row lifted above it afterwards (see the offer-list rule
+  below); `anlLimit` from `<Var name="TaskQuota">` (equal to `anlLimit` on 5/5
+  saves). **No TaskQuota ->
   no records**, because that would leave out a field every real record has.
-- **The record is taken out of `<FreeTask>`, never added on top of it.**
+- **A record's id never sits on a list the save keeps.**
   Measured on every block in the corpus: a completed id appears in that save's
   `<FreeTask>`, `<TakenTask>` **or** `<Member taskId>` list **zero** times. You
   cannot still be offered a task you have finished, and you cannot finish one a
   clanmate is holding — the earlier version left `bomb_1` sitting on the offer
-  list while also claiming to have completed it. So each consumed row carries
-  its own `num`/`ver` out with it and the slot is immediately **refilled** with
-  the next measured id this save is *not* holding anywhere, at `ver + 1` (what
-  the game does itself when a completed task is replaced). Four invariants then
-  hold at once: `<FreeTask>` keeps its full complement of slots (12 on a real
-  save, 8 on the fixture), no completed id is left on any list, every `ver` is
-  a real generation that only moves forward — **`ver="0"` appears on no real
-  record in the corpus, it is the value a teammate's `<TakenTask>` row is
-  cleared to** — and `(id, num, ver)` never repeats (61 real records, zero
-  repeated triples).
-- **Distinct ids, not repeats.** With `n` slots and a refill pool of
-  `catalog \ pool` (18 ids on the real green week) the batch builds 15 records
-  with 15 different ids, so the clone path's `templates[i % templates.length]`
-  cycling is not used on this path at all (`src.tags[i]`, no wrap). A plan that
-  would run short **refuses** with `no_template` rather than reusing a completed
-  id — `inspectRegatta` applies the same test, so "pressable" still equals
-  "will succeed".
+  list while also claiming to have completed it. So the batch draws only from
+  `REGATTA_TASK` **minus every id on those three lists** (`recordable`), which
+  means the `<FreeTask>` rows keep their own ids untouched: only their `ver`
+  moves, up to one past the newest record filed under that slot, because a
+  slot's live offer always sits above the records in its own slot (148>145,
+  65>55, 58>1, 516>479). Four invariants hold at once: `<FreeTask>` keeps its
+  full complement of slots (12 on a real save, 8 on the fixture), no completed
+  id is left on any list, every `ver` is a real generation that only moves
+  forward — **`ver="0"` appears on no real record in the corpus, it is the
+  value a teammate's `<TakenTask>` row is cleared to** — and `(id, num, ver)`
+  never repeats (61 real records, zero repeated triples).
+- **The batch is as long as the count, not as the pool.** `regattaSyntheticTasks`
+  takes `want` and emits exactly `want` records, cycling `recordable` ids across
+  the slots. There is no ceiling, because a real week repeats ids freely
+  (`with_chips_3` x3, `rocket_1` x3) — what may never repeat inside one slot is
+  the `(id, num, ver)` triple, and the minted `ver` makes that impossible.
+  The previous version stopped where the fresh offers it could put back ran
+  out (**21** on the save behind the report) and then answered `no_template`
+  for the rest while its own badge read "Templates: 21"; the comment above it
+  claimed a refill could not reuse an id without putting it back on the offer
+  list, which confused *the row's id* (never reused) with *a record's id*
+  (reused by every real week). `injectRegata`'s
+  `src.synthetic && src.tags.length < need` guard went with it — it could only
+  fire on a builder that under-delivered, and this one does not.
 - A save whose offer list holds no id with a measured score still refuses with
   `no_template`: nothing is sourceable, and guessing is what produces the
   uniform-135 fingerprint. Guard rail:
@@ -675,51 +689,77 @@ min gap of exactly 5761s and a busiest rolling day of 12 — i.e. the
 conservative half of that envelope, and 6.6x under the fabricator's
 105-in-one-day.
 
-What the quota decides is **how large one push may be**, not the spacing of a
-small one: `injectRegata` spreads the batch evenly over the usable range
-`[lo, hi]` and refuses with `window_closed` unless that range leaves
-`(need - 1) * regattaMinGap(quota)` inside it. Same fixture, same window, only
-`<Var name="TaskQuota">` differing: 46 is `ok` and 47 `window_closed` at quota
-17, 25 is `ok` and 26 `window_closed` at quota 9. `regattaReason` takes the
-same `state.quota`, so the badge and the push stay one decision.
+What the quota decides is **the distance between the block's own newest
+completion and this batch's first**, when the range has that much room left.
+`injectRegata` spreads the batch evenly over the usable range `[lo, hi]`, so
+`regattaMinGap(quota)` is a floor on one gap and nothing else — it is no longer
+a condition the push has to satisfy, and `regattaReason` no longer reads it at
+all. `regattaBounds`, which used to compute `[lo, hi]` and refuse when the pair
+could not leave `regattaMinGap` per task, is **deleted**: it existed to answer
+that refusal, and with the refusal gone it had no caller.
 
-**Those two numbers moved on 2026-10-05 — up, not down.** `regattaBounds` took
-a fifth parameter, `gaps`, and the preferred `lo = win.start + 0.35 * elapsed`
-is now a *preference* rather than a floor: when the batch does not fit in that
-slice, `lo` widens backwards towards `win.start` (never past it, and never
-before `lastDone + minGap`, which is what keeps document order across repeat
-pushes). The same fixture now reads **68 `ok` / 69 `window_closed` at quota 17
-and 36 / 37 at quota 9**, because the batch may use the whole elapsed window
-instead of only the newest 65% of it. Nothing about the *spacing* moved — the
-completions are still `regattaMinGap` apart, still inside the window, still in
-the past. On a real save this is what took a push of 50 from `window_closed` to
-`ok`.
+**The refusal went on 2026-10-05, reported twice in the same session.** Two
+errors, both from the Regatta tab, both reproducible:
 
-**What still refuses, and why it is not a limit.** `window_closed` is the
-game's calendar, not a figure this repo invented: capacity is roughly
-`elapsed_days × daily_quota`, so 100 completions need most of a seven-day week
-to have already run at quota 15. Refusing to date a completion before the week
-opened is the same rule that stops a future timestamp; relaxing it would mean
-writing state the server holds. `no_active_regatta` and `no_template` are the
-same kind — measured on 2026-10-05, *every* save in the corpus answered
+- **20 tasks → `window_closed`** — *"Khoảng thời gian regatta hiện tại chưa đủ
+  để thêm task an toàn."* The user's week had opened **that afternoon**
+  (`start = now - 7 h`), so the usable range held about six tasks at quota 17
+  and refused the rest. The badge above the button was the only thing saying
+  the save was fine.
+- **50 tasks → `no_template`** — *"Save chưa có task regatta thật nào để
+  chép…"* on a save whose badge read **Completed 0/20, Templates: 21**. See
+  *Any count from 1 to 100 pushes* below for that half.
+
+The window refusal was arithmetic about how much of the week had elapsed,
+presented as a rule the game states. What the rule was actually protecting was
+density — *"a day's worth of completions in one pile is the shape that reads as
+a tool"* — and the honest cost of removing it is measurable: on that 7-hour
+window, 100 tasks now land **all on one calendar day** (span ~7 h, min gap
+254 s), whereas the same 100 on a 4-day-old window spreads over the whole
+elapsed range. **Nothing about the record's shape changed** — still ordered,
+still inside the window, still in the past, still `take < complete < real`,
+still no fabricated field — so every gate stays green; what is no longer held
+back is how many of them one day may carry. That is a deliberate trade the
+user asked for three times, and it is the one thing on this tab that is now
+*less* conservative than before.
+
+**What still refuses, and why it is not a limit.** `no_active_regatta` is the
+game's calendar: a week that has closed cannot be dated into, and a save with
+no `<Regata>` block at all (`mGameInfo.current.xml`) has no window to write
+inside. Measured on 2026-10-05, *every* save in the corpus answered
 `no_active_regatta` because that week had closed 7 hours earlier
-(`end=1791187200` vs `now=1791215096`), and `mGameInfo.current.xml` has no
-`<Regata>` block at all.
+(`end=1791187200` vs `now=1791215096`). `no_template` is the same kind — it
+fires only when the offer list holds no id any save in the corpus has ever
+completed, because inventing `need`/`score` for such an id *is* the
+uniform-135 fingerprint. `already_full` is a no-op, not a limit: the save
+already holds as many as was asked for.
 
 No badge prints the quota any more (see *No limits on these two tabs* below);
 the state / current / templates / pool chips remain and now only report.
 
-Guard rails: `xml-edit.test.mts` pins `REGATTA_MAX_PER_DAY === 17`, the
-quota-17/9/30 clamping, both refusals above (badge *and* push) at their new
-68/69 and 36/37 boundaries, the rolling-day bound at quota 9, `regattaMinGap`
-keeping `floor(86400/gap) + 1 <= q` for every quota from 1 to 17, and
-`regatta takes any count the window can hold — the ceiling is a typo guard, not
-a rule` (50/100 taken as typed, 68 still `ok`, 60 really written, no two
-completions closer than `REGATTA_MIN_GAP`, none dated in the future);
-`ui-regressions.test.mts` pins that the button gates only on
-`busy || pendingRegatta`, that no reason paragraph or `regattaHint` /
-`regattaGuards` / `regattaCountHint` line renders, and that `regattaReason` is
-still handed the save's own quota so the badge and the push cannot drift apart.
+Guard rails: `xml-edit.test.mts` pins `REGATTA_MAX_PER_DAY === 17` and the
+quota-17/9/30 clamping, `regattaMinGap` keeping `floor(86400/gap) + 1 <= q`
+for every quota from 1 to 17,
+`regata takes a batch the moment the window opens — a young week refuses
+nothing` (a week opened ten minutes ago takes 20, ordered, in-window, in the
+past, gate green),
+`regata spreads a batch across the span the block has and never refuses one
+for size`, the quota read per save with **100 accepted at both quota 17 and
+quota 9**, `regatta takes any count the window can hold — the ceiling is a
+typo guard, not a rule` (50/100 taken as typed, 60 really written, no two
+completions closer than `REGATTA_MIN_GAP`, none dated in the future), and
+**`regatta takes any count from 1 to 100 with no error, on every save shape the
+tab reaches`** — the guard rail for the whole report: three fixtures (a save
+with a record to clone, a week opened ten minutes ago, and a green week with a
+full offer pool and nothing completed) × every count from 1 to 100, each
+asserting the badge reads `ok`, the exact count is written, the block stays
+ordered, every timestamp sits inside the block's own window and before now, and
+all three pair gates stay green. `ui-regressions.test.mts` pins that the button
+gates only on `busy || pendingRegatta`, that no reason paragraph or
+`regattaHint` / `regattaGuards` / `regattaCountHint` **or `regattaWindow`** line
+renders, that neither `window_closed` nor its label `regattaNoWindow` survives
+in the component, and that the tab prints no quota as a limit
+(`session.regattaInfo.quota` and `regattaDay` must stay absent).
 
 ### No limits on these two tabs (2026-10-05)
 
@@ -762,9 +802,11 @@ is safe — it is only that the tool no longer silently disagrees with the user.
 | zod `.max(73)` | `.max(9999)` | mirrors it, by literal value (that module is bundled for the browser) |
 | input `Math.min(73, raw)` | same clamp, at the new bound | the field took 100 and handed back 73 |
 
-And one real gain: `regattaBounds` gained its `gaps` argument so the batch may
-use the **whole elapsed window** rather than only the newest 65% of it — see
-the daily-quota section above for the new 68/69 and 36/37 boundaries.
+And one real gain, later superseded: `regattaBounds` gained a `gaps` argument
+so the batch could use the **whole elapsed window** rather than only the newest
+65% of it, taking a push of 50 from `window_closed` to `ok`. The refusal itself
+went later the same day and `regattaBounds` was deleted with it — see the
+daily-quota section above, which now carries both halves of that story.
 
 **What was deliberately *not* copied from the zip.** Its `injectRegata(xml, 105,
 135)` hardcodes the batch and: overwrites `RegataTasksCompleted` with 105 (a

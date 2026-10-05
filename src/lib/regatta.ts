@@ -95,8 +95,18 @@ export function regattaMinGap(quota: number = REGATTA_MAX_PER_DAY): number {
 /** Spacing for a save that states no `TaskQuota` of its own. */
 export const REGATTA_MIN_GAP = regattaMinGap();
 
-/** Why a save cannot receive regatta tasks. `ok` means it can. */
-export type RegattaReason = "ok" | "no_active_regatta" | "no_template" | "window_closed" | "already_full";
+/**
+ * Why a save cannot receive regatta tasks. `ok` means it can.
+ *
+ * `window_closed` used to be in this union. It refused a batch when the count
+ * did not fit between the block's own `startTime` and *now* at the save's daily
+ * spacing — which on day one of a week is only a couple of tasks, so a save
+ * whose regatta had opened that afternoon rejected 20 with "the regatta window
+ * is too short". That was arithmetic about how much of the week had passed, not
+ * a rule the game states, and it read as a broken button. The batch now spreads
+ * over whatever span the block still has and never refuses on it.
+ */
+export type RegattaReason = "ok" | "no_active_regatta" | "no_template" | "already_full";
 
 /** The `<Regata>` window: `startTime` / `endTime` read off the block. */
 export interface RegattaWindow {
@@ -107,48 +117,6 @@ export interface RegattaWindow {
 /** The clamp every batch goes through, server and UI alike. */
 export function regattaWant(nTasks: number): number {
   return Math.max(1, Math.min(REGATTA_MAX_TASKS, Math.floor(Number(nTasks) || 0)));
-}
-
-/**
- * The first and last timestamp a batch may use. `hi` sits a minute short of
- * "now" (or of the window's end) so every completion is safely in the past;
- * `lo` covers 35% of the elapsed window; and the pair has to leave the batch
- * `minGap` per task, which is what keeps a day's density inside this save's
- * own `TaskQuota`.
- *
- * `lastDone` is the newest completion **already** sitting in the block. A
- * second push used to compute its range from the window alone, so it re-issued
- * a completion time *lower* than the push before it and the block stopped
- * being ordered — measured at 1 out-of-order record per second push, against
- * 0 in every block of the corpus, where `realEndTime` is non-decreasing in
- * document order on all of them (35/35, 14/14, 104/104). Anchoring `lo` past
- * the last one makes that impossible rather than merely unlikely.
- */
-export function regattaBounds(
-  win: RegattaWindow,
-  now: number,
-  lastDone = 0,
-  minGap: number = REGATTA_MIN_GAP,
-  gaps = 0,
-): { hi: number; lo: number } {
-  const hi = Math.min(win.end, now) - 60;
-  const elapsed = hi - win.start;
-  // Nothing may be dated before the week opened, and nothing before the newest
-  // completion already on record — the second floor is what keeps the block in
-  // document order across repeat pushes.
-  const floorLo = Math.max(win.start, lastDone > 0 ? lastDone + minGap : win.start);
-  let lo = win.start + Math.floor(elapsed * 0.35);
-  if (lo < floorLo) lo = floorLo;
-  // 35% of the elapsed window is a *preference* about where a batch sits, not
-  // a rule. When the requested count does not fit in that slice, widen it
-  // backwards towards the start of the window rather than refusing: the
-  // alternative turned a count the save could plainly hold into "the regatta
-  // has closed", which reads to the user as a broken button. `floorLo` still
-  // holds, so ordering and the window's own start are untouched — if the
-  // caller still finds the range short after this, there is genuinely no room
-  // left and it says so.
-  if (gaps > 0 && hi - lo < gaps * minGap) lo = Math.max(floorLo, hi - gaps * minGap);
-  return { hi, lo };
 }
 
 /**
@@ -175,13 +143,9 @@ export function regattaReason(
   if (!state.templates) return "no_template";
   const want = regattaWant(nTasks);
   if (want <= state.current) return "already_full";
-  // `need - 1` gaps is exactly how `injectRegata` spaces the batch, so this
-  // condition and the one it throws on are the same arithmetic rather than two
-  // approximations of each other. `need` is >= 1 here, so a single task always
-  // fits and a range with no room left at all still refuses.
-  const minGap = regattaMinGap(state.quota);
-  const gaps = want - state.current - 1;
-  const { hi, lo } = regattaBounds(win, now, state.lastDone ?? 0, minGap, gaps);
-  if (hi - win.start < 600 || hi - lo < gaps * minGap) return "window_closed";
+  // No further check. The batch is placed across the span the block has between
+  // its own start and now, so whatever fits in that span is what gets written;
+  // there is no separate "will the count fit at this spacing" question left to
+  // answer, which is why the tab can no longer disagree with the push.
   return "ok";
 }

@@ -135,18 +135,29 @@ test("the regatta button is pressable on sight and never explains a refusal in p
   assert.ok(!tab.includes("REGATTA_WHY_KEY"), "no refusal is spelled out under the button");
   assert.ok(/disabled=\{busy \|\| pendingRegatta\}/.test(tab), "only a push already in flight may disable it");
 
-  // The notes, the guard line and the limit hint are all gone from the tab.
-  for (const gone of ["regattaHint", "regattaGuards", "regattaCountHint"]) {
+  // The notes, the guard line, the limit hint and the window dates are all
+  // gone from the tab. The dates are the one that mattered most: printing
+  // "Regatta window: 5/10/2026 14:30 → 12/10/2026 13:30" over the buttons is
+  // what made a count feel like it was being judged against a calendar, and it
+  // sat directly above the refusal that did the judging.
+  for (const gone of ["regattaHint", "regattaGuards", "regattaCountHint", "regattaWindow"]) {
     assert.ok(!tab.includes(gone), `${gone} must no longer be rendered`);
   }
+
+  // `window_closed` is not a reason any more — the tab must not be handed a
+  // `RegattaReason` it can no longer be given, and must not have a label
+  // mapped for one.
+  assert.ok(!tsx.includes("window_closed"), "the removed refusal must not be reintroduced");
+  assert.ok(!tab.includes("regattaNoWindow"), "nor a label for it");
 });
 
-test("regatta spacing still follows the save's own daily quota, but the tab prints no limit", () => {
+test("the regatta tab prints no limit, and the quota no longer decides anything", () => {
   // The quota is the game's own number — it lives in the save as
-  // `<Var name="TaskQuota">` and it is what spaces one completion from the
-  // next, so a batch never collapses a day's worth of tasks into one pile.
-  // That arithmetic is untouched. What went away is the badge that printed
-  // the quota *as* a limit and the prose around it.
+  // `<Var name="TaskQuota">`, it is what every record's `anlLimit` mirrors,
+  // and it is what the batch takes as the distance between the block's own
+  // newest completion and its first. What went away is the badge that printed
+  // it *as* a limit, the prose around it, and the refusal that used the same
+  // number to turn a count away.
   const tsx = read("../components/studio-app.tsx");
   const tab = tsx.slice(tsx.indexOf('{tab === "regatta" &&'), tsx.indexOf('{tab === "barn" &&'));
   assert.ok(!tab.includes("session.regattaInfo.quota"), "the tab must not print the quota as a limit");

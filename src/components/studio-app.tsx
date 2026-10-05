@@ -158,7 +158,6 @@ const REGATTA_REASON_KEY = {
   ok: "regattaReady",
   no_active_regatta: "regattaNoRegatta",
   no_template: "regattaNoTemplate",
-  window_closed: "regattaNoWindow",
   already_full: "regattaFull",
 } as const;
 
@@ -3122,12 +3121,6 @@ export function StudioApp() {
                           {tr("regattaPool")} {session.regattaInfo.pool}
                         </span>
                       </div>
-                      {session.regattaInfo.window ? (
-                        <p className="mt-3 text-xs text-muted tabular-nums">
-                          {tr("regattaWindow")}: {new Date(session.regattaInfo.window.start * 1000).toLocaleString()} →{" "}
-                          {new Date(session.regattaInfo.window.end * 1000).toLocaleString()}
-                        </p>
-                      ) : null}
                     </section>
 
                     <section className="panel">

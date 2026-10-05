@@ -2,7 +2,6 @@ import {
   REGATTA_DEFAULT_TASKS,
   REGATTA_MAX_PER_DAY,
   REGATTA_MAX_TASKS,
-  regattaBounds,
   regattaDailyQuota,
   regattaMinGap,
   regattaReason,
@@ -474,7 +473,6 @@ const REGATTA_ERR = {
     "Save chưa có regatta đang diễn ra. Vào regatta trong game trước rồi thử lại - không thêm task ngoài một regatta đang mở, vì Playrix đối chiếu cửa sổ thời gian.",
   no_template:
     "Save chưa có task regatta thật nào để chép, và không có task nào trong pool đủ dữ liệu thật (need/score/type) để dựng. Không tạo task giả.",
-  window_closed: "Khoảng thời gian regatta hiện tại chưa đủ để thêm task an toàn.",
   already_full: "Regatta này đã có đủ task (%s) - không thêm nữa.",
 } as const;
 
@@ -717,20 +715,25 @@ function regattaStatedNeeds(inner: string): Map<string, number> {
  * only such ids therefore still refuses with `no_template`, which is what pins
  * `the refusal still stands for ids no save has ever completed`.
  */
-function regattaSyntheticTasks(text: string): { records: string[]; free: Map<number, string> } {
+function regattaSyntheticTasks(
+  text: string,
+  want: number,
+): { records: string[]; free: Map<number, string> } {
   const none = (): { records: string[]; free: Map<number, string> } => ({ records: [], free: new Map() });
+  if (!(want > 0)) return none();
   const block = regattaBlock(text);
   if (!block) return none();
   const inner = block.inner;
   const quota = regattaTaskQuota(inner);
   if (quota === null) return none();
 
-  // Every id the block already holds somewhere. A refill may not reuse one:
-  // two offers for the same task at the same time is not a shape any save has.
-  const busy = new Set<string>();
-  for (const m of inner.matchAll(/<FreeTask\b[^>]*?\bid="([^"]*)"/gi)) busy.add(m[1]!);
-  for (const m of inner.matchAll(/<TakenTask\b[^>]*?\bid="([^"]*)"/gi)) busy.add(m[1]!);
-  for (const m of inner.matchAll(/<Member\b[^>]*?\btaskId="([^"]*)"/gi)) busy.add(m[1]!);
+  // Ids sitting on a row this save keeps. A completed id may never be one of
+  // them — 0 occurrences across the corpus — and <TakenTask> / <Member> rows
+  // belong to other people, so they are never rewritten here.
+  const claimed = new Set<string>();
+  for (const m of inner.matchAll(/<FreeTask\b[^>]*?\bid="([^"]*)"/gi)) claimed.add(m[1]!);
+  for (const m of inner.matchAll(/<TakenTask\b[^>]*?\bid="([^"]*)"/gi)) claimed.add(m[1]!);
+  for (const m of inner.matchAll(/<Member\b[^>]*?\btaskId="([^"]*)"/gi)) claimed.add(m[1]!);
 
   const rows = new Map<number, { id: string; ver: number; tag: string }>();
   const order: number[] = [];
@@ -746,8 +749,6 @@ function regattaSyntheticTasks(text: string): { records: string[]; free: Map<num
   }
   if (!order.length) return none();
 
-  const refills = Object.keys(REGATTA_TASK).filter((id) => !busy.has(id));
-  if (!refills.length) return none();
   const stated = regattaStatedNeeds(inner);
   const measured = (id: string): boolean => {
     const shape = regattaTaskShape(id);
@@ -757,39 +758,51 @@ function regattaSyntheticTasks(text: string): { records: string[]; free: Map<num
     return own === undefined || own === row[0];
   };
 
-  // Only a slot currently offering a task with a measured score can be
-  // completed, so a save whose offer list is entirely unmeasured ids
-  // contributes nothing — the refusal the corpus pins by name.
-  const queue = order.filter((num) => measured(rows.get(num)!.id));
-  if (!queue.length) return none();
+  // You can only complete a task the game actually offered, so a save whose
+  // offer list holds no id with a measured score contributes nothing — the
+  // refusal the corpus pins by name.
+  if (!order.some((num) => measured(rows.get(num)!.id))) return none();
+
+  // Ids a record may carry: measured, and free of every row this save keeps.
+  // The ceiling used to be "how many fresh offers I can put back", which ran out
+  // at ~21 and turned a 50-task batch into "no real tasks to copy" while the
+  // badge above it read 21 templates. It is measured ids instead, and a real
+  // week repeats them freely (`with_chips_3` x3, `rocket_1` x3), so the batch
+  // size is no longer bounded by how many offers happen to be standing.
+  const recordable = Object.keys(REGATTA_TASK).filter((id) => !claimed.has(id) && measured(id));
+  if (!recordable.length) return none();
 
   const records: string[] = [];
-  const free = new Map<number, string>();
-  let qi = 0;
-  let ri = 0;
-  for (let guard = 0; records.length < REGATTA_MAX_TASKS && guard < REGATTA_MAX_TASKS * 8; guard++) {
-    const num = queue[qi % queue.length]!;
-    qi++;
-    const row = rows.get(num)!;
-    if (!measured(row.id)) continue;
-    // The slot is refilled *before* it is consumed: with nothing to put back
-    // the block would silently lose a slot, and every save in the corpus keeps
-    // `<FreeTask>` at its full complement.
-    const refill = refills[ri++];
-    if (refill === undefined) break;
-    const shape = regattaTaskShape(row.id)!;
-    const rec = REGATTA_TASK[row.id]!;
-    const need = stated.get(row.id) ?? rec[0];
+  const top = new Map<number, number>();
+  for (let i = 0; i < want; i++) {
+    const num = order[i % order.length]!;
+    const id = recordable[i % recordable.length]!;
+    const shape = regattaTaskShape(id)!;
+    const row = REGATTA_TASK[id]!;
+    const need = stated.get(id) ?? row[0];
+    // Continues the slot's own generation; the offer row is lifted above it
+    // afterwards, which is the same refresh `regattaClonePlan` performs.
+    const ver = (top.get(num) ?? rows.get(num)!.ver) + 1;
+    top.set(num, ver);
     records.push(
-      `<MyOldTask id="${row.id}" type="${shape.type}"` +
-        (shape.eventType ? ` eventType="${shape.eventType}" target="${regattaTarget(row.id)}"` : "") +
-        ` need="${need}" have="${need}" user="" endTime="0" num="${num}" ver="${row.ver}"` +
-        ` takenCounter="0" score="${rec[1]}" regataCash="${rec[2]}" takeTime="0"` +
+      `<MyOldTask id="${id}" type="${shape.type}"` +
+        (shape.eventType ? ` eventType="${shape.eventType}" target="${regattaTarget(id)}"` : "") +
+        ` need="${need}" have="${need}" user="" endTime="0" num="${num}" ver="${ver}"` +
+        ` takenCounter="0" score="${row[1]}" regataCash="${row[2]}" takeTime="0"` +
         ` completeTime="0" realEndTime="0" anlNumber="0" anlLimit="${quota}"/>`,
     );
-    const next = setTagAttr(setTagAttr(row.tag, "id", refill), "ver", String(row.ver + 1));
-    rows.set(num, { id: refill, ver: row.ver + 1, tag: next });
-    free.set(num, next);
+  }
+
+  // The slot's live offer always sits *above* the records in its own slot —
+  // 148>145, 65>55, 58>1, 516>479 measured — so the row advances with them.
+  const free = new Map<number, string>();
+  for (const [num, v] of top) {
+    const row = rows.get(num)!;
+    if (row.ver <= v) {
+      const next = setTagAttr(row.tag, "ver", String(v + 1));
+      rows.set(num, { id: row.id, ver: v + 1, tag: next });
+      free.set(num, next);
+    }
   }
   return { records, free };
 }
@@ -815,7 +828,7 @@ function rewriteFreeTasks(inner: string, free: Map<number, string>): string {
  * which reads `tags.length` as "how many records this save can still take"
  * before it will let the button be pressed.
  */
-function regattaSources(text: string): {
+function regattaSources(text: string, want: number): {
   tags: string[];
   /** slot number -> replacement `<FreeTask …/>` tag; empty on the clone path. */
   free: Map<number, string>;
@@ -823,7 +836,7 @@ function regattaSources(text: string): {
 } {
   const templates = regattaTemplates(text);
   if (templates.length) return { tags: templates, free: new Map(), synthetic: false };
-  const { records, free } = regattaSyntheticTasks(text);
+  const { records, free } = regattaSyntheticTasks(text, want);
   return { tags: records, free, synthetic: records.length > 0 };
 }
 
@@ -971,7 +984,8 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
   // and those plus the measured task catalog are enough to build a record.
   // The badge and the server both read this number, so "pressable" and "will
   // succeed" stay one decision.
-  const sources = regattaSources(text);
+  const want = regattaWant(nTasks);
+  const sources = regattaSources(text, want);
   const pool = regattaPool(text);
   const user = resolveRegataUser(text);
   const block = regattaBlock(text);
@@ -997,18 +1011,19 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
   // order — now shared with the tab, which re-runs it for the count the user
   // actually picked instead of trusting this default-12 answer.
   const reason = regattaReason({ window: win, templates: sources.tags.length, current, lastDone, quota }, nTasks, now);
-  // `regattaReason` only knows that *some* record can be built. The batch also
-  // has to be long enough, and two different ceilings decide that: a synthesized
-  // batch is capped by how many measured ids this save is not already holding,
-  // a cloned one by how many templates can name a slot at all.
-  // `injectRegata` refuses the moment either plan runs short, so answering "ok"
-  // here would hand the user a live button that fails on press — the exact
-  // defect this shared decision exists to prevent. Both ceilings are read from
-  // the very functions the injector runs, so they cannot drift.
+  // `regattaReason` only knows that *some* record can be built. The cloned
+  // batch additionally needs a plan long enough to name a slot for every
+  // record, and `injectRegata` refuses the moment that plan runs short — so
+  // answering "ok" here would hand the user a live button that fails on press,
+  // the exact defect this shared decision exists to prevent. The plan is read
+  // from the very function the injector runs, so the two cannot drift.
+  // A synthesized batch has no equivalent ceiling: it emits as many records as
+  // are asked for, so the length test below can only fail if it emitted none,
+  // which the `templates` check above already reports as `no_template`.
   const need = reason === "ok" ? regattaWant(nTasks) - current : 0;
   const shortPlan =
     reason === "ok" &&
-    (sources.synthetic ? sources.tags.length < need : regattaClonePlan(block.inner, sources.tags, need) === null);
+    (sources.synthetic ? sources.tags.length === 0 : regattaClonePlan(block.inner, sources.tags, need) === null);
 
   return {
     reason: shortPlan ? "no_template" : reason,
@@ -1127,9 +1142,10 @@ function bumpRegattaTaskVars(varsInner: string, added: number, countAfter: numbe
  * `scoreUpd` are never written, because they mirror the clan's own history.
  *
  * Refuses (rather than reporting a success the game ignores) when the save has
- * no live `<Regata>`, no real task to clone and no sourceable offer row, a
- * plan too short for the batch, no usable window, or already has enough tasks.
- * Throws, so `applySave` surfaces the reason instead of ticking.
+ * no live `<Regata>`, or an offer list that holds no id any save has ever
+ * completed, or already has enough tasks. Throws, so `applySave` surfaces the
+ * reason instead of ticking. Nothing is refused for the count: the batch is
+ * spread across whatever span the block still has.
  */
 export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): string {
   const text0 = asText(xml).replace(/^\uFEFF/, "");
@@ -1140,17 +1156,21 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   const now = Math.floor(Date.now() / 1000);
   if (!block || !win || now < win.start || now > win.end) throw new Error(REGATTA_ERR.no_active_regatta);
 
-  const src = regattaSources(text0);
+  const src = regattaSources(text0, want);
   if (!src.tags.length) throw new Error(REGATTA_ERR.no_template);
 
   const current = (block.inner.match(/<MyOldTask\b/gi) ?? []).length;
   const need = want - current;
   if (need <= 0) throw new Error(REGATTA_ERR.already_full.replace("%s", `${current}/${want}`));
-  // A synthesized plan is capped by how many measured ids this save is not
-  // already holding. Building `need` by reusing a completed id would put it
-  // back on the offer list next to its own record, so the batch stops where the
-  // plan stops and says so — never a short batch dressed as a full one.
-  if (src.synthetic && src.tags.length < need) throw new Error(REGATTA_ERR.no_template);
+  // No ceiling on a synthesized plan any more. It used to stop where the fresh
+  // offers it could put back ran out (about 21 on a real save) and then refuse
+  // the rest as "no real tasks to copy" while the badge above the button
+  // promised 21 templates — a limit on the batch size dressed as a data
+  // requirement. The builder now emits `want` records straight away, because a
+  // record's id only has to be measured and off every row the save keeps, and
+  // a real week repeats ids freely (`with_chips_3` x3, `rocket_1` x3).
+  // The only refusal left on this path is the honest one: an offer list that
+  // holds no id any save has ever completed, which line 1158 already reports.
   // The clone path is one plan of two halves: the slot generation every record
   // gets, and the `<FreeTask>` rows that have to be refreshed alongside them so
   // a slot's row never falls behind its own records. When no template can name
@@ -1173,24 +1193,28 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   // the one above it — 1 out-of-order record per repeat push, against 0 in
   // every block of the corpus.
   const lastDone = regattaLastDone(block.inner);
-  // The save's own daily quota sets the spacing, so 15 tasks over a week is
-  // spread the way *this* player's game counts days — a block at TaskQuota 9
-  // gets wider gaps than one at 17, and neither is judged by a hardcoded
-  // figure the server never wrote.
   const quota = regattaDailyQuota(regattaTaskQuota(block.inner));
-  const minGap = regattaMinGap(quota);
-  // `need - 1` is handed to `regattaBounds` so the preferred 35% slice can
-  // widen backwards to the start of the window when the count does not fit
-  // inside it, instead of the batch refusing for a room it actually has.
-  const { hi, lo } = regattaBounds(win, now, lastDone, minGap, need - 1);
-  // Both floors matter: the first keeps `lo` clear of `win.start + 122` below,
-  // so task times never collapse onto one another; the second leaves every task
-  // `minGap` of its own, which is what bounds any single day at this save's own
-  // `TaskQuota` completions no matter how large the batch is. It is the same
-  // expression `regattaReason` answers the tab with, so "pressable" and "will
-  // succeed" stay one decision.
-  if (hi - win.start < 600 || hi - lo < (need - 1) * minGap) throw new Error(REGATTA_ERR.window_closed);
-  const gap = need > 1 ? Math.floor((hi - lo) / (need - 1)) : 0;
+  // No refusal on how much of the week has elapsed, and no dependency on the
+  // daily spacing to decide *whether* a batch may be written. The batch is
+  // spread across the whole span the block still has between its own
+  // `startTime` and now, so a regatta that opened this afternoon takes 100
+  // tasks as happily as one in its sixth day. The old rule wanted
+  // `TaskQuota`-wide gaps between records *and* all of them before now, which
+  // on day one left room for about two tasks and answered "the regatta window
+  // is too short" for anything more — arithmetic about how much of the week had
+  // passed, presented as a rule the game states.
+  //
+  // `regattaMinGap` survives only as the distance between the block's own newest
+  // completion and this batch's first, when there is that much room left: two
+  // completions a second apart is not a shape any save shows. It no longer
+  // decides whether the push happens.
+  const floor = win.start + 2;
+  const latest = Math.min(win.end, now - 1);
+  const anchor =
+    lastDone > 0 ? lastDone + Math.min(regattaMinGap(quota), Math.max(1, latest - lastDone)) : 0;
+  const lo = Math.min(Math.max(floor, anchor), Math.max(floor, latest));
+  const hi = Math.max(lo, latest);
+  const gap = need > 1 ? Math.floor(Math.max(0, hi - lo) / (need - 1)) : 0;
 
   // `takenCounter` runs monotonically across the `MyOldTask` list of a single
   // block: a real save's archived week reads 2,3,…,37 in document order, and
@@ -1226,11 +1250,16 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
     const tpl = step ? step.tpl : src.tags[i]!;
     const a = tagAttrs(tpl);
     // Real records keep takeTime < completeTime < endTime strictly, and all
-    // three inside the window. The floors below hold that ordering even when
-    // the regatta has only just opened.
-    const endTime = Math.max(lo + i * gap, win.start + 122);
-    const complete = Math.max(win.start + 1, endTime - 120);
-    const take = Math.max(win.start, Math.min(complete - 1, complete - 1800));
+    // three inside the window. The headroom each record needs is derived from
+    // how far it sits past the window's own start, so it holds even in the
+    // first minutes of a week instead of only after `win.start + 122`.
+    const endTime = Math.min(lo + i * gap, hi);
+    const back = Math.min(120, Math.max(1, endTime - win.start - 1));
+    const complete = Math.max(win.start + 1, endTime - back);
+    const take = Math.max(
+      win.start,
+      Math.min(complete - 1, complete - Math.min(1800, Math.max(1, complete - win.start))),
+    );
 
     let tag = setTagAttr(tpl, "user", user);
     tag = setTagAttr(tag, "takeTime", String(take));
