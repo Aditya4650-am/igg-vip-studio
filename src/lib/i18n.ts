@@ -375,6 +375,22 @@ const vi = {
   regattaWhyFull: "Tuần này đã có {count} task. Muốn thêm thì tăng số trong ô lên lớn hơn {count} - tool không bao giờ đẩy một tuần vượt {max} task.",
   regattaWhyWindow:
     "Nút bị tắt vì tuần regatta chưa chạy đủ lâu để đặt thời gian an toàn cho chừng đó task - mỗi ngày trong tuần chỉ nhận được tối đa {day} task theo quota của chính save. Quay lại sau trong tuần, hoặc giảm số xuống.",
+
+  // ---- Events tab (Bloom & Buzz, game id TrainJourney) ----
+  tabEvents: "Sự kiện",
+  eventsHint:
+    "Thêm token Bloom & Buzz (mã trong game là TrainJourney) vào đúng ví của save này. Chỉ hai con số trong ví thay đổi - Amount và TokensEarned cùng tăng một lượng, nên phần đã tiêu không đổi - và công cụ không bao giờ đọc ví của tài khoản khác.",
+  eventsCard: "Bloom & Buzz",
+  eventsTokens: "Token:",
+  eventsEarned: "Đã kiếm:",
+  eventsCount: "Số token cần thêm",
+  bloomReady: "Ví token sẵn sàng",
+  bloomNoWallet: "Save chưa mở sự kiện này",
+  bloomIncomplete: "Ví token thiếu số liệu",
+  bloomInvalid: "Ví token chứa số không hợp lệ",
+  bloomAdd: "Thêm vào Lưu & đẩy",
+  bloomQueued: "✓ Đã xếp hàng",
+  toastBloomQueued: "Bloom & Buzz đã chọn - bấm Lưu & đẩy để áp dụng",
 };
 
 const en: typeof vi = {
@@ -729,6 +745,22 @@ const en: typeof vi = {
   regattaWhyFull: "This week already has {count} tasks. Raise the number above {count} to add more - the tool never pushes a week past {max}.",
   regattaWhyWindow:
     "Disabled: the week has not run long enough to place that many tasks safely - a day can hold at most {day}, this save's own quota. Come back later in the week, or lower the number.",
+
+  // ---- Events tab (Bloom & Buzz, game id TrainJourney) ----
+  tabEvents: "Events",
+  eventsHint:
+    "Adds Bloom & Buzz tokens (TrainJourney in game data) to this save's own wallet. Only two numbers move - Amount and TokensEarned rise by the same amount, so the spent difference is unchanged - and no other account's wallet is ever read.",
+  eventsCard: "Bloom & Buzz",
+  eventsTokens: "Tokens:",
+  eventsEarned: "Earned:",
+  eventsCount: "Tokens to add",
+  bloomReady: "Token wallet ready",
+  bloomNoWallet: "This save has not opened the event",
+  bloomIncomplete: "Wallet is missing a value",
+  bloomInvalid: "Wallet holds an invalid number",
+  bloomAdd: "Add to Save & push",
+  bloomQueued: "✓ Queued",
+  toastBloomQueued: "Bloom & Buzz queued - press Save & push to apply",
 };
 
 function overlay(p: Partial<typeof en>): typeof en {

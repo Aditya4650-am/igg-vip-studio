@@ -13,6 +13,7 @@ import { assertRegattaSafe, injectAvatars, injectItems, injectProfile, injectReg
 import { grantArtifacts } from "./township/museum.server";
 import { assertCardCollectionsSafe } from "./township/cards.server";
 import { assertProgressionsSafe, assertSaveShapeSafe, stripUnknownAvatars } from "./township/save-shape.server";
+import { addBloomTokens, assertBloomSafe, bloomInfo, BLOOM_TOKENS_DEFAULT, BLOOM_TOKENS_MAX } from "./township/events.server";
 import { completeZoo, discoverZoo, type ZooPaddock } from "./township/zoo.server";
 import {
   backupFreshStartState,
@@ -241,6 +242,12 @@ function encodeSave(s: Session): string | null {
     // an old injector's fingerprints the save arrived with never block it, but
     // a batch written here must be indistinguishable from game data.
     assertRegattaSafe(was, now);
+    // And the Bloom & Buzz (TrainJourney) wallet: `Amount` and `TokensEarned`
+    // may only move together, and nothing else inside the wallet may move at
+    // all. Its `DataStoreCollection` home is the block no restore copies, so a
+    // wallet that differs from the save as loaded is always something this
+    // session wrote — the same loaded-vs-pushed rule as every gate above it.
+    assertBloomSafe(was, now);
   }
   // v1.15 client behavior: after Load/Decode and edits, the payload sent to
   // the desktop is the decoded XML itself. The desktop writes those bytes
@@ -411,6 +418,9 @@ export type SavePayload = {
   /** How many completed tasks the Regatta tab should reach. Clamped to
    *  [1, REGATTA_MAX_TASKS] on the server, never trusted from the client. */
   regattaTasks?: number;
+  /** Bloom & Buzz (TrainJourney) tokens this push adds. Clamped to
+   *  [1, BLOOM_TOKENS_MAX] on the server, never trusted from the client. */
+  bloomTokens?: number;
   season?: boolean;
   unbanMode?: "inicial" | "completo" | "novo";
   decorFragments?: boolean;
@@ -557,6 +567,17 @@ function applySaveEdits(p: SavePayload) {
     s.rawXml = injectSeason(s.rawXml, "1", "1002");
     s.season = { premium: true, score: 1002 };
     parts.push("season-pass");
+  }
+  // Bloom & Buzz tokens. A refusal here ("save chưa có ví token") throws before
+  // anything else in this batch is committed — `applySave` restores the whole
+  // edit set — so a queued restore or clone is never left half applied.
+  if (p.bloomTokens) {
+    const want = Math.max(
+      1,
+      Math.min(BLOOM_TOKENS_MAX, Math.floor(Number(p.bloomTokens) || BLOOM_TOKENS_DEFAULT)),
+    );
+    s.rawXml = addBloomTokens(s.rawXml, want);
+    parts.push(`bloom-${want}`);
   }
 
   if (Object.keys(revealed.stats).length) {
@@ -951,6 +972,8 @@ export function snapshot(s: Session) {
     season: s.season,
     regatta: s.regatta,
     regattaInfo: inspectRegatta(s.rawXml ?? ""),
+    // Bloom & Buzz wallet readout for the Events tab — a report, never a gate.
+    bloom: bloomInfo(s.rawXml ?? ""),
     zoo: s.zoo,
     friends: s.friends,
     friendCity: s.friendCity,

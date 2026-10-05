@@ -15,6 +15,7 @@ import { AVATAR_MAX, avatarEmoji, avatarGroupId, avatarIconPath, avatarsInRange,
 import { MUSEUM_IDS, artifactEmoji, artifactIconPath, museumLabel } from "@/lib/museum";
 import { iconForBarn, iconForDecorLabel, iconForGem, iconForGroup, iconForItemLabel, iconForProfileLabel, iconForSkin, iconForStat, iconForSticker, iconForUpgradeLabel, iconForZoo } from "@/lib/game-icon-map";
 import { REGATTA_MAX_TASKS, REGATTA_DEFAULT_TASKS, regattaReason, type RegattaReason } from "@/lib/regatta";
+import { BLOOM_TOKENS_DEFAULT, BLOOM_TOKENS_MAX } from "@/lib/events";
 import {
   connectLoad,
   fetchCity,
@@ -35,7 +36,7 @@ import {
   restoreFreshStart,
 } from "@/lib/studio-api";
 
-type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "regatta" | "barn" | "museum" | "zoo" | "upgrades" | "newgame";
+type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "regatta" | "barn" | "museum" | "zoo" | "upgrades" | "newgame" | "events";
 type SessionSnap = Awaited<ReturnType<typeof connectLoad>>;
 type Catalogs = Awaited<ReturnType<typeof getCatalogs>>;
 type UnbanMode = "inicial" | "completo" | "novo";
@@ -113,7 +114,9 @@ function downloadText(name: string, text: string) {
 
 // "regatta" sits at index 8, the first overflow slot, so the eight primary
 // tabs keep their exact positions and only the second row gains a member.
-const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "regatta", "barn", "museum", "zoo", "upgrades", "newgame"];
+// "events" is appended last for the same reason: it adds a slot to the second
+// row without moving any tab that already exists.
+const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "regatta", "barn", "museum", "zoo", "upgrades", "newgame", "events"];
 // Premium tab bar: 8 primary slots + a "More" overflow for the rest, so
 // labels never compress or wrap. Derived from TABS — one source of truth.
 const PRIMARY_TABS: Tab[] = TABS.slice(0, 8);
@@ -133,6 +136,7 @@ const TAB_KEY: Record<Tab, keyof Dict> = {
   zoo: "tabZoo",
   upgrades: "tabUpgrades",
   newgame: "tabNewGame",
+  events: "tabEvents",
 };
 const TAB_EMOJI: Record<Tab, string> = {
   data: "📊",
@@ -149,6 +153,7 @@ const TAB_EMOJI: Record<Tab, string> = {
   zoo: "🐾",
   upgrades: "⚙️",
   newgame: "🎮",
+  events: "🐝",
 };
 
 /** Why the Regatta tab will (or will not) accept a task batch. Mirrors
@@ -158,6 +163,17 @@ const REGATTA_REASON_KEY = {
   ok: "regattaReady",
   no_active_regatta: "regattaNoRegatta",
   no_template: "regattaNoTemplate",
+} as const;
+
+/** Why the Events tab will (or will not) accept a token batch. Mirrors
+ *  `BloomReason` in events.server.ts, so the badge answers for the save the
+ *  user is looking at before anything is queued. It reports, it never gates —
+ *  the button below stays pressable whatever the save says. */
+const BLOOM_REASON_KEY = {
+  ok: "bloomReady",
+  no_wallet: "bloomNoWallet",
+  incomplete: "bloomIncomplete",
+  invalid: "bloomInvalid",
 } as const;
 
 function groupIcon(id: string): GameIconName {
@@ -876,7 +892,8 @@ type GameIconName =
   | "warning"
   | "success"
   | "control"
-  | "search";
+  | "search"
+  | "events";
 
 /**
  * Small, original game-management glyphs. These are intentionally drawn in
@@ -971,6 +988,17 @@ function GameIcon({ name, className, ...props }: { name: GameIconName; className
       break;
     case "search":
       content = <><circle cx="10.8" cy="10.8" r="6.3" /><path d="m15.5 15.5 5 5" /></>;
+      break;
+    case "events":
+      // A bloom, for the Bloom & Buzz card: centre plus four petals, drawn in
+      // the same single-stroke language as the rest of the registry.
+      content = <>
+        <circle cx="12" cy="12" r="2.4" />
+        <ellipse cx="12" cy="7.4" rx="2.1" ry="3" />
+        <ellipse cx="12" cy="16.6" rx="2.1" ry="3" />
+        <ellipse cx="7.4" cy="12" rx="3" ry="2.1" />
+        <ellipse cx="16.6" cy="12" rx="3" ry="2.1" />
+      </>;
       break;
   }
   return (
@@ -1249,6 +1277,11 @@ export function StudioApp() {
   // onto one or two days.
   const [regattaTasks, setRegattaTasks] = useState(REGATTA_DEFAULT_TASKS);
   const [pendingSeason, setPendingSeason] = useState(false);
+  const [pendingBloom, setPendingBloom] = useState(false);
+  // How many Bloom & Buzz (TrainJourney) tokens this push *adds* — a delta,
+  // exactly like the Regatta count: the wallet keeps what it already holds and
+  // gains this many on both Amount and TokensEarned.
+  const [bloomTokens, setBloomTokens] = useState(BLOOM_TOKENS_DEFAULT);
   const [pendingUnban, setPendingUnban] = useState<UnbanMode | null>(null);
   const [pendingDecorFragments, setPendingDecorFragments] = useState(false);
   const [pendingDecorClone, setPendingDecorClone] = useState(false);
@@ -1617,6 +1650,7 @@ export function StudioApp() {
       setMuseumSel(new Set());
       setPendingRegatta(false);
       setPendingSeason(false);
+      setPendingBloom(false);
       setPendingUnban(null);
       setPendingDecorFragments(false);
       setPendingDecorClone(false);
@@ -1648,6 +1682,7 @@ export function StudioApp() {
     profileSel.count + avatarSel.count + skinSel.count + itemSel.count + zooSel.count + decorSel.size + stickerSel.size + museumSel.size +
     upgradeFactorySel.count + upgradeTrainSel.count + upgradeIslandSel.count +
     (barnDirty ? 1 : 0) + (pendingRegatta ? 1 : 0) + (pendingSeason ? 1 : 0) + (pendingUnban ? 1 : 0) +
+    (pendingBloom ? 1 : 0) +
     (pendingDecorFragments ? 1 : 0) + (pendingDecorClone ? 1 : 0) + (pendingDecorMaxAll ? 1 : 0) +
     (pendingTownClone ? 1 : 0) +
     (pendingUpgradeFactory ? 1 : 0) + (pendingUpgradeTrain ? 1 : 0) + (pendingUpgradeIsland ? 1 : 0);
@@ -1746,6 +1781,7 @@ export function StudioApp() {
         Object.keys(changedBarn).length > 0 ||
         pendingRegatta ||
         pendingSeason ||
+        pendingBloom ||
         pendingDecorFragments ||
         pendingDecorClone ||
         pendingTownClone ||
@@ -1794,6 +1830,7 @@ export function StudioApp() {
           regatta: pendingRegatta,
           regattaTasks: pendingRegatta ? regattaTasks : undefined,
           season: pendingSeason,
+          bloomTokens: pendingBloom ? bloomTokens : undefined,
           unbanMode: pendingUnban ?? undefined,
           decorFragments: pendingDecorFragments,
           decorClone: pendingDecorClone,
@@ -1835,6 +1872,7 @@ export function StudioApp() {
       upgradeIslandSel.clear();
       setPendingRegatta(false);
       setPendingSeason(false);
+      setPendingBloom(false);
       if (unbanStage) setCopyStage((c) => Math.max(c, unbanStage));
       setPendingUnban(null);
       setPendingDecorFragments(false);
@@ -1849,7 +1887,7 @@ export function StudioApp() {
     } finally {
       setBusy(false);
     }
-  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, zooSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, regattaTasks, pendingSeason, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingTownClone, pendingDecorMaxAll, parseDecorQty, tr, device, upgradeFactorySel, upgradeTrainSel, upgradeIslandSel, upgradeTargetLevel]);
+  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, zooSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, regattaTasks, pendingSeason, pendingBloom, bloomTokens, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingTownClone, pendingDecorMaxAll, parseDecorQty, tr, device, upgradeFactorySel, upgradeTrainSel, upgradeIslandSel, upgradeTargetLevel]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1886,10 +1924,13 @@ export function StudioApp() {
       )
     : "no_active_regatta";
 
-  const tool = (kind: "regatta" | "season") => {
+  const tool = (kind: "regatta" | "season" | "bloom") => {
     if (kind === "regatta") {
       setPendingRegatta(true);
       toast.success(tr("toastRegattaQueued"));
+    } else if (kind === "bloom") {
+      setPendingBloom(true);
+      toast.success(tr("toastBloomQueued"));
     } else {
       setPendingSeason(true);
       toast.success(tr("toastSeasonQueued"));
@@ -2175,6 +2216,7 @@ export function StudioApp() {
     zoo: zooSel.count,
     upgrades: upgradeFactorySel.count + upgradeTrainSel.count + upgradeIslandSel.count,
     newgame: freshPhase === "idle" ? 0 : 1,
+    events: pendingBloom ? bloomTokens : 0,
   };
 
   const barnTotal = Object.values(barnItems).reduce((n, v) => n + (Number(v) || 0), 0);
@@ -3000,6 +3042,76 @@ export function StudioApp() {
                         ))}
                       </section>
                     </div>
+                  </div>
+                )}
+
+                {tab === "events" && (
+                  <div className="space-y-3">
+                    <p className="text-sm text-muted">{tr("eventsHint")}</p>
+
+                    <section className="panel">
+                      <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-cyan uppercase">
+                        <GameIcon name="events" className="size-4" />
+                        {tr("eventsCard")}
+                      </h3>
+                      <div className="flex flex-wrap gap-2">
+                        <span
+                          className={cn(
+                            "state-badge rounded-full px-2.5 py-1 text-xs font-medium",
+                            session.bloom.reason === "ok" ? "state-badge--ready" : "bg-input text-muted",
+                          )}
+                        >
+                          <GameIcon
+                            name={session.bloom.reason === "ok" ? "success" : "events"}
+                            className="size-3.5"
+                          />
+                          {tr(BLOOM_REASON_KEY[session.bloom.reason])}
+                        </span>
+                        <span className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums">
+                          {tr("eventsTokens")} {session.bloom.amount} →{" "}
+                          {session.bloom.amount + (pendingBloom ? bloomTokens : 0)}
+                        </span>
+                        <span className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums">
+                          {tr("eventsEarned")} {session.bloom.earned + (pendingBloom ? bloomTokens : 0)}
+                        </span>
+                      </div>
+                    </section>
+
+                    <section className="panel">
+                      <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-amber uppercase">
+                        <GameIcon name="events" className="size-4" />
+                        {tr("eventsCount")}
+                      </h3>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <input
+                          className="field field-qty"
+                          inputMode="numeric"
+                          aria-label={tr("eventsCount")}
+                          value={bloomTokens}
+                          onChange={(e) => {
+                            const raw = Number(e.target.value.replace(/[^\d]/g, ""));
+                            setBloomTokens(raw > 0 ? Math.min(BLOOM_TOKENS_MAX, raw) : BLOOM_TOKENS_DEFAULT);
+                          }}
+                        />
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          className="tool-action"
+                          variant="purple"
+                          disabled={busy || pendingBloom}
+                          onClick={() => tool("bloom")}
+                        >
+                          <GameIcon name="events" className="size-4" />
+                          {pendingBloom ? tr("bloomQueued") : tr("bloomAdd")}
+                        </Button>
+                        {pendingBloom ? (
+                          <Button size="sm" variant="ghost" onClick={() => setPendingBloom(false)}>
+                            {tr("clear")}
+                          </Button>
+                        ) : null}
+                      </div>
+                    </section>
                   </div>
                 )}
 

@@ -2348,3 +2348,71 @@ test("a refused regatta does not leave a half-applied restore behind", () => {
     "the whole batch must be undone, not just the part that failed",
   );
 });
+
+// Bloom & Buzz (`TrainJourney` in game data) keeps its wallet inside
+// <DataStoreCollection>, so a session-level test needs a save that actually
+// carries one — the same bytes as every valued wallet in the corpus.
+const BLOOM_WALLET =
+  `<DataStoreCollection><DataElem name="GameFeatures" type="dataStore">` +
+  `<DataElem name="TrainJourney" type="dataStore">` +
+  `<DataElem name="CurrencyProvider" type="dataStore">` +
+  `<DataElem name="Amount" type="int" value="7"/>` +
+  `<DataElem name="InitialValueSet" type="bool" value="true"/>` +
+  `<DataElem name="LastTransferTransactionId" type="string" value=""/>` +
+  `<DataElem name="TokensEarned" type="int" value="7"/>` +
+  `</DataElem></DataElem></DataElem></DataStoreCollection>`;
+const BLOOM_SAVE = ownSave.replace("</Global>", `${BLOOM_WALLET}</Global>`);
+
+function loadBloom() {
+  return studio.connectLoad(
+    token,
+    "test-device",
+    undefined,
+    undefined,
+    Buffer.from(BLOOM_SAVE).toString("base64"),
+  );
+}
+
+test("the Bloom & Buzz push runs through applySave and moves only the wallet pair", () => {
+  const { sessionId } = loadBloom();
+  const pushed = studio.applySave({ token, sessionId, bloomTokens: 50 });
+  const xml = Buffer.from(pushed.fileB64!, "base64").toString("utf8");
+  balanced(xml);
+  assert.match(xml, /name="Amount" type="int" value="57"/, "the balance must rise by the batch");
+  assert.match(xml, /name="TokensEarned" type="int" value="57"/, "the earned total must rise with it");
+  assert.match(xml, /name="LastTransferTransactionId" type="string" value=""/, "the transfer id must not move");
+  assert.ok(
+    xml.includes('<Var name="residents" v="500" t="i"/>'),
+    "nothing outside the wallet may move — the rest of the save is byte-identical",
+  );
+  // The snapshot reports the wallet so the tab can show it before anything is
+  // queued; it is a readout, not a gate.
+  assert.deepEqual(pushed.bloom, {
+    present: true,
+    complete: true,
+    amount: 57,
+    earned: 57,
+    reason: "ok",
+  });
+});
+
+test("a refused Bloom push rolls the whole batch back", () => {
+  // `ownSave` carries no event store — 27 of the 52 saves in the corpus look
+  // like that — so the writer refuses rather than inventing a wallet with no
+  // StateMachine behind it. The restore queued in front of it has already
+  // rewritten rawXml by then, and the user is told the batch failed: keeping
+  // it would apply the same restore a second time on the next push.
+  const snap = townSession(ownSave);
+  studio.attachFriendXml(token, snap.sessionId, friendSave);
+  const before = studio.exportCurrent(token, snap.sessionId).fileB64;
+  assert.throws(
+    () => studio.applySave({ token, sessionId: snap.sessionId, unbanMode: "completo", bloomTokens: 10 }),
+    /chưa có ví token/,
+    "a save with no Bloom & Buzz wallet must refuse",
+  );
+  assert.equal(
+    studio.exportCurrent(token, snap.sessionId).fileB64,
+    before,
+    "the whole batch must be undone, not just the part that failed",
+  );
+});

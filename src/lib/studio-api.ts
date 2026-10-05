@@ -82,6 +82,12 @@ const saveSchema = z.object({
   // here; the server clamps the value again regardless of what arrives. The
   // number is a typo guard, not a rule about how many tasks a week may hold.
   regattaTasks: z.number().int().min(1).max(9999).optional(),
+  // Bloom & Buzz (the game's own id is TrainJourney) tokens to add. The bound
+  // mirrors BLOOM_TOKENS_MAX in src/lib/server/township/events.server.ts —
+  // this module is bundled for the browser, so the constant cannot be imported
+  // here; the server clamps the value again regardless of what arrives. It is
+  // a typo guard, not a rule about how many tokens an event may hold.
+  bloomTokens: z.number().int().min(1).max(100000).optional(),
   season: z.boolean().optional(),
   unbanMode: z.enum(["inicial", "completo", "novo"]).optional(),
   decorFragments: z.boolean().optional(),

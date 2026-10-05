@@ -330,3 +330,101 @@ test("the new-account tab resets device identity before injecting", () => {
     assert.ok(new RegExp(`\\b${key}:`).test(i18n), `${key} must exist in the dictionary`);
   }
 });
+
+test("the Events tab is appended, and its Bloom & Buzz card only queues tokens", () => {
+  // Bloom & Buzz is the game's own `TrainJourney` event. The tab has to be
+  // *appended* to TABS: inserting it would shift every later tab's slot, which
+  // is exactly the "other features stay untouched" line the request draws.
+  const tsx = read("../components/studio-app.tsx");
+
+  assert.ok(
+    tsx.includes('"newgame", "events"]'),
+    "events must be the last entry of TABS so no existing tab moves",
+  );
+  assert.ok(/^type Tab = [^\n]*"events";/m.test(tsx), "the Tab union must carry events");
+  assert.ok(/events: "tabEvents"/.test(tsx), "TAB_KEY must label the tab");
+  assert.ok(/events: "🐝"/.test(tsx), "TAB_EMOJI must carry the tab");
+  assert.ok(/events: pendingBloom \? bloomTokens : 0/.test(tsx), "the tab must show what is queued");
+
+  const panel = tsx.slice(tsx.indexOf('{tab === "events" &&'), tsx.indexOf('{tab === "newgame" &&'));
+  assert.ok(panel.includes('{tr("eventsCard")}'), "the Bloom & Buzz card must be rendered");
+  assert.ok(panel.includes('onClick={() => tool("bloom")}'), "the button must queue the feature");
+
+  // The button may gate on the queue and on `busy` — and on nothing else. The
+  // save's own wallet state is a *readout* here (same lesson the Regatta tab
+  // learned: gating on a computed reason greys the button for a save that
+  // would have accepted the push).
+  assert.ok(
+    panel.includes("disabled={busy || pendingBloom}"),
+    "the button must gate only on busy/pending, never on the wallet reason",
+  );
+  assert.ok(!/disabled=\{[^}]*bloom\.reason/.test(panel), "the wallet reason must never disable the button");
+  assert.ok(!panel.includes("regatta"), "the Events panel must not read the Regatta tab's state");
+
+  // Only queued work travels: an untouched tab must not add a field to the
+  // payload, and the queue must clear on save and on reload.
+  assert.ok(
+    tsx.includes("bloomTokens: pendingBloom ? bloomTokens : undefined"),
+    "the payload must send the count only when queued",
+  );
+  const clears = tsx.match(/setPendingBloom\(false\);/g) ?? [];
+  assert.ok(clears.length >= 2, "the queue must clear after a save and after a reload");
+  assert.ok(tsx.includes("(pendingBloom ? 1 : 0)"), "the pending badge must count the queued push");
+
+  // Every label exists in the master dictionary and its English pair, so the
+  // 18 Partial overlays can fall back to something.
+  const i18n = read("i18n.ts");
+  for (const key of [
+    "tabEvents",
+    "eventsHint",
+    "eventsCard",
+    "eventsTokens",
+    "eventsEarned",
+    "eventsCount",
+    "bloomReady",
+    "bloomNoWallet",
+    "bloomIncomplete",
+    "bloomInvalid",
+    "bloomAdd",
+    "bloomQueued",
+    "toastBloomQueued",
+  ]) {
+    assert.ok(new RegExp(`^  ${key}:`, "m").test(i18n), `${key} must be translated`);
+  }
+});
+
+test("the Bloom & Buzz push is wired through the same choke point as every other edit", () => {
+  const api = read("studio-api.ts");
+  assert.ok(
+    api.includes("bloomTokens: z.number().int().min(1).max(100000).optional()"),
+    "the payload bound must be declared (the server clamps again regardless)",
+  );
+
+  const server = read("server/studio.server.ts");
+  assert.ok(server.includes("addBloomTokens(s.rawXml, want)"), "applySave must run the writer");
+  assert.ok(server.includes("assertBloomSafe(was, now)"), "encodeSave must gate the wallet");
+  assert.ok(server.includes("bloom: bloomInfo("), "the snapshot must report the wallet");
+
+  const events = read("server/township/events.server.ts");
+  // The wallet lives in <DataStoreCollection> — the block no restore copies —
+  // and only the two token numbers may move. The other fields inside the
+  // wallet may be *named* in the module's notes and in a refusal message, but
+  // no line of code may ever match their XML: writing one of them is what
+  // would leave a wallet disagreeing with itself in a field a server reads for
+  // free. (The byte-identity proof that only the pair moves lives in
+  // events.test.mts — `out.split(new).join(old) === base`.)
+  const codeLines = events
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("*") && !l.startsWith("//") && !l.startsWith("/*"));
+  const code = codeLines.join("\n");
+  for (const field of [
+    "InitialValueSet",
+    "LastTransferTransactionId",
+    "balanceVersion",
+    "LayerLaunchCurrencyTransfer",
+  ]) {
+    assert.ok(!code.includes(`name="${field}"`), `${field} must never be matched by code`);
+  }
+  assert.ok(events.includes("stripWalletValues"), "the writer must self-check that only the pair moved");
+});
