@@ -1304,6 +1304,67 @@ and re-exported rather than redefined, and the in-place cap note.
 proves 150 goes through and 151 does not, with the refusal leaving the save
 byte-identical.
 
+### Live send: the Cards tab, back and actually delivering (2026-10-06)
+
+Asked as *"add a card feature to my main tool, 100% working — 10 cards of one
+group each for all 151 cards, every card its own clickable button, no random
+send: when I tick cards, those cards are sent"*, for the tool's own clients —
+each user connects their own device, the tab reads **their** LocalInfo, and
+sends to **their** friend list.
+
+**The negative result above was right about the tools on disk and wrong about
+the game.** Delivery exists, it just isn't a symbol in any file: it is the
+game's own framed transport — `POST
+https://township.playrix.com/api?method=SendBox&cityId=<sender>` inside the
+TS-AES frame (`ts_township_core.py`), box `box_type=collections_send_card`,
+body keys `cityId/to_cityId/box`. The 2026-10-01 sweep could never have found
+it: the method name lives *inside* the encrypted frame, not in a URL or a
+`SendCard` string anywhere. Proven live before the tab existed — a Java port
+of the codec passed 44/44 vectors, framed `SendBox` returned `200
+{"result":{}}`, and the boxes landed in the recipient's inbox (their
+`CheckCity` box count moved).
+
+New files, all additive; the only touched pre-existing files are the registry
+lines in `studio-app.tsx` and the `cards*` i18n keys:
+
+- `scripts/township/api_call.py` — generic framed caller spawned per request
+  (stdin JSON → stdout JSON), same spawn pattern as `fetch_city.py`.
+- `src/lib/server/township/cardsend.server.ts` — `loadCardInfo` (decodes
+  LocalInfo → cityId / `<AWS … token>` / bver / fver + friends + identity via
+  `CheckCity` + the `card_01..card_151` catalog from `CARD_IDS`), `sendCard`
+  (one box per call), `checkInbox`. Reuses `desban.server.ts`'s decode/parse
+  helpers; `ts_township_core.py` and `cards.server.ts` are read, never
+  written.
+- `src/lib/card-api.ts` — `createServerFn` wrappers (`cardsLoadInfo` /
+  `cardsSend` / `cardsCheckInbox`) with `requireToken`, mirroring
+  `studio-api.ts`.
+- `src/components/cards-tab.tsx` + registration in `studio-app.tsx`
+  (`"cards"` inserted before `"newgame"` in `type Tab` and `TABS` so every
+  pinned tab-derivation string stays literally true) + `cards*` keys in
+  `i18n.ts` (`vi` master + `en` only; the 18 `Partial` packs fall back).
+
+**Send semantics, verbatim from the request.** The grid is 10 cards per group
+across the whole catalog (`set_01`…`set_16`, `card_01`…`card_151`) — groups
+of ten because that *is* the server's `set_id`
+(`pad2(floor((n-1)/10)+1)`). Every card is its own button, the label tick
+toggles its whole group, and the loop sends exactly `cardSel` — no random
+pick (an early draft's 🎲 buttons were removed on request). Quantity is per
+(friend × ticked card), presets 1/10/20/30/50 + custom (≤99), default 800 ms
+between calls, with Stop, a progress bar, and a live log driven by real
+per-call results.
+
+**Result classification (probed live):** `{}` = sent, `null` = rejected (a
+recipient id the server won't take), `401` = auth abort, `403` = transient
+rate limit → one retry after 1500 ms. `col_et` is not validated (a stale
+timestamp sends), `from` is fully optional, and 800 ms spacing was clean over
+a 10-shot run while 0 ms spacing failed ~1/10 — hence the delay default.
+
+Guard rails: `npm test` **240/240**, `npm run typecheck` and `npm run build`
+green, eslint reports 0 problems in every new file. End-to-end through the
+project's own module: LocalInfo → identity + friends + 151 cards →
+`card_60` and `card_01` sent (`{"status":"sent","http":200,"retried":0}`) →
+a bogus recipient classified `rejected` → `checkInbox` re-read the account.
+
 ## Save shape gate: the push refuses only what *this edit* broke
 
 `save-shape.server.ts` is the shape half of the push gate, wired into

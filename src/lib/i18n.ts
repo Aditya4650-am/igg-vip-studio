@@ -397,6 +397,39 @@ const vi = {
   frozenAdd: "Thêm vào Lưu & đẩy",
   frozenQueued: "✓ Đã xếp hàng",
   toastFrozenQueued: "Frozen Fortune đã chọn - bấm Lưu & đẩy để áp dụng",
+
+  // ---- Cards tab (gửi thẻ thật qua SendBox; xem cardsend.server.ts) ----
+  tabCards: "Thẻ bài",
+  cardsHint:
+    "Chọn thẻ → chọn bạn → Gửi. Mỗi lượt gửi là một lệnh API thật, nhật ký hiển thị từng kết quả. Số lượng 10/20/30+ vượt giới hạn 3/ngày trong game.",
+  cardsAccount: "Tài khoản",
+  cardsRefresh: "Tải lại LocalInfo",
+  cardsLoading: "Đang tải…",
+  cardsTokenOk: "Token hoạt động",
+  cardsFriends: "Bạn bè",
+  cardsInbox: "Hộp thư",
+  cardsInboxEmpty: "Chưa có hộp nào chờ nhận",
+  cardsLoadFirst: "Bấm Tải lại LocalInfo để lấy token và danh sách bạn bè.",
+  cardsNoDevice: "Chưa có thiết bị - kết nối emulator trước.",
+  cardsNoClient: "Chức năng này cần chạy trong Client (đã kết nối ADB).",
+  cardsNoFriends: "Không có bạn bè nào khớp",
+  cardsAddId: "Thêm ID bạn",
+  cardsAdd: "Thêm",
+  cardsCards: "Thẻ",
+  cardsCardsHint:
+    "Mỗi nhóm gồm đúng 10 thẻ, đủ từ card_01 đến card_151 (16 nhóm). Bấm từng nút thẻ để chọn - đúng các thẻ đã tick mới được gửi, không gửi ngẫu nhiên.",
+  cardsAllSet: "Chọn cả bộ",
+  cardsRandomAll: "chọn tất cả",
+  cardsSendTitle: "Gửi thẻ",
+  cardsQty: "Số lượt mỗi bạn / mỗi thẻ",
+  cardsDelay: "Delay giữa các lần gửi",
+  cardsSend: "Gửi",
+  cardsRunning: "Đang gửi…",
+  cardsStop: "Dừng",
+  cardsStopping: "Đang dừng…",
+  cardsEstimate: "Ước tính",
+  cardsDone: "Hoàn tất",
+  cardsAuthAbort: "Token bị từ chối - dừng gửi, hãy Tải lại LocalInfo",
 };
 
 const en: typeof vi = {
@@ -773,6 +806,39 @@ const en: typeof vi = {
   frozenAdd: "Add to Save & push",
   frozenQueued: "✓ Queued",
   toastFrozenQueued: "Frozen Fortune queued - press Save & push to apply",
+
+  // ---- Cards tab (live SendBox to friends; see cardsend.server.ts) ----
+  tabCards: "Cards",
+  cardsHint:
+    "Tick cards → pick friends → Send. Every send is a real API call and the log shows each result. Quantities 10/20/30+ go beyond the game UI's 3/day.",
+  cardsAccount: "Account",
+  cardsRefresh: "Refresh LocalInfo",
+  cardsLoading: "Loading…",
+  cardsTokenOk: "Token working",
+  cardsFriends: "Friends",
+  cardsInbox: "Inbox",
+  cardsInboxEmpty: "No boxes waiting",
+  cardsLoadFirst: "Press Refresh LocalInfo to load the token and friend list.",
+  cardsNoDevice: "No device - connect the emulator first.",
+  cardsNoClient: "Open this in the Client (ADB connected) to load LocalInfo.",
+  cardsNoFriends: "No friends match",
+  cardsAddId: "Add friend ID",
+  cardsAdd: "Add",
+  cardsCards: "Cards",
+  cardsCardsHint:
+    "Every group holds exactly 10 cards — card_01 through card_151 (16 groups). Tick any card button: only the ticked cards are sent, never a random pick.",
+  cardsAllSet: "All in set",
+  cardsRandomAll: "pick all",
+  cardsSendTitle: "Send cards",
+  cardsQty: "Sends per friend & card",
+  cardsDelay: "Delay between sends",
+  cardsSend: "Send",
+  cardsRunning: "Sending…",
+  cardsStop: "Stop",
+  cardsStopping: "Stopping…",
+  cardsEstimate: "Estimate",
+  cardsDone: "Done",
+  cardsAuthAbort: "Token rejected - sending stopped, Refresh LocalInfo",
 };
 
 function overlay(p: Partial<typeof en>): typeof en {

@@ -3668,3 +3668,17 @@ button.premium-button:active:not(:disabled) {
     0 6px 18px rgba(0, 0, 0, 0.3) !important;
 }
 
+/* Events cards: the two token artworks (public/events/*.png), each already
+   trimmed to its own circular edge, shown at one identical size so the cards
+   sit side by side evenly. The ring frames them against the panel. */
+.event-icon {
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  object-fit: contain;
+  box-shadow:
+    0 0 0 1px rgba(167, 139, 250, 0.35),
+    0 2px 6px rgba(0, 0, 0, 0.35);
+}
+

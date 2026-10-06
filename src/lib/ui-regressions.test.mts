@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -359,6 +359,20 @@ test("the Events tab is appended, and its Bloom & Buzz card only queues tokens",
   assert.ok(panel.includes('{tr("eventsCardFrozen")}'), "the Frozen Fortune card must be rendered");
   assert.ok(panel.includes('onClick={() => tool("frozen")}'), "the second button must queue its own feature");
   assert.ok(panel.includes("session.frozen."), "the second card must read its own wallet readout");
+
+  // Each card carries its own token artwork, trimmed to its own circular
+  // edge, at one identical size — the two icons have to match each other or
+  // the pair reads as two different features rather than one tab.
+  assert.ok(panel.includes('src="/events/bloom.png"'), "the Bloom & Buzz card must show its token artwork");
+  assert.ok(panel.includes('src="/events/frozen.png"'), "the Frozen Fortune card must show its token artwork");
+  const iconTags = panel.match(/className="event-icon"/g) ?? [];
+  assert.ok(iconTags.length === 2, `expected exactly one icon per card, got ${iconTags.length}`);
+  for (const art of ["bloom.png", "frozen.png"]) {
+    assert.ok(existsSync(join(here, "../../public/events", art)), `${art} must ship with the app`);
+  }
+  const eventIconCss = read("../styles.css").match(/\.event-icon\s*\{[^}]*\}/)?.[0] ?? "";
+  assert.ok(/width:\s*2rem/.test(eventIconCss) && /height:\s*2rem/.test(eventIconCss), "the icon box must be square and fixed");
+  assert.ok(/border-radius:\s*50%/.test(eventIconCss), "the icon must be drawn round");
 
   // The button may gate on the queue and on `busy` — and on nothing else. The
   // save's own wallet state is a *readout* here (same lesson the Regatta tab

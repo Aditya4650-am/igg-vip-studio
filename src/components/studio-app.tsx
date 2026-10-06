@@ -8,6 +8,7 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { OwnerHub } from "@/components/owner-hub";
+import { CardsTab } from "@/components/cards-tab";
 import { cn } from "@/lib/utils";
 import { LANGS, isLang, t, type Lang, type Dict } from "@/lib/i18n";
 import { isDeviceId, mintDeviceId, normalizeDeviceId } from "@/lib/device-id";
@@ -36,7 +37,7 @@ import {
   restoreFreshStart,
 } from "@/lib/studio-api";
 
-type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "regatta" | "barn" | "museum" | "zoo" | "upgrades" | "newgame" | "events";
+type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "regatta" | "barn" | "museum" | "zoo" | "upgrades" | "cards" | "newgame" | "events";
 type SessionSnap = Awaited<ReturnType<typeof connectLoad>>;
 type Catalogs = Awaited<ReturnType<typeof getCatalogs>>;
 type UnbanMode = "inicial" | "completo" | "novo";
@@ -116,7 +117,7 @@ function downloadText(name: string, text: string) {
 // tabs keep their exact positions and only the second row gains a member.
 // "events" is appended last for the same reason: it adds a slot to the second
 // row without moving any tab that already exists.
-const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "regatta", "barn", "museum", "zoo", "upgrades", "newgame", "events"];
+const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "regatta", "barn", "museum", "zoo", "upgrades", "cards", "newgame", "events"];
 // Premium tab bar: 8 primary slots + a "More" overflow for the rest, so
 // labels never compress or wrap. Derived from TABS — one source of truth.
 const PRIMARY_TABS: Tab[] = TABS.slice(0, 8);
@@ -135,6 +136,7 @@ const TAB_KEY: Record<Tab, keyof Dict> = {
   museum: "tabMuseum",
   zoo: "tabZoo",
   upgrades: "tabUpgrades",
+  cards: "tabCards",
   newgame: "tabNewGame",
   events: "tabEvents",
 };
@@ -152,6 +154,7 @@ const TAB_EMOJI: Record<Tab, string> = {
   museum: "🏛️",
   zoo: "🐾",
   upgrades: "⚙️",
+  cards: "🎴",
   newgame: "🎮",
   events: "🐝",
 };
@@ -2228,6 +2231,7 @@ export function StudioApp() {
     museum: museumSel.size,
     zoo: zooSel.count,
     upgrades: upgradeFactorySel.count + upgradeTrainSel.count + upgradeIslandSel.count,
+    cards: 0,
     newgame: freshPhase === "idle" ? 0 : 1,
     events: (pendingBloom ? bloomTokens : 0) + (pendingFrozen ? bloomTokens : 0),
   };
@@ -3064,7 +3068,7 @@ export function StudioApp() {
 
                     <section className="panel">
                       <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-cyan uppercase">
-                        <GameIcon name="events" className="size-4" />
+                        <img src="/events/bloom.png" alt="" className="event-icon" draggable={false} />
                         {tr("eventsCard")}
                       </h3>
                       <div className="flex flex-wrap gap-2">
@@ -3092,7 +3096,7 @@ export function StudioApp() {
 
                     <section className="panel">
                       <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-cyan uppercase">
-                        <GameIcon name="events" className="size-4" />
+                        <img src="/events/frozen.png" alt="" className="event-icon" draggable={false} />
                         {tr("eventsCardFrozen")}
                       </h3>
                       <div className="flex flex-wrap gap-2">
@@ -3646,6 +3650,10 @@ export function StudioApp() {
                       toast.success(`${tr("unbanQueued")} · ${mode}`);
                     }}
                   />
+                )}
+
+                {tab === "cards" && (
+                  <CardsTab token={token} sessionId={session.sessionId} device={device} tr={tr} />
                 )}
               </div>
             )}
