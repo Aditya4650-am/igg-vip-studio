@@ -741,18 +741,51 @@ export function CardsTab({
   }, [acct, manual, q]);
 
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-muted">{tr("cardsHint")}</p>
-
-      {/* ── account ─────────────────────────────────────────────── */}
-      <section className="panel">
-        <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-cyan uppercase">
-          🎴 {tr("cardsAccount")}
-        </h3>
-        {acct ? (
+    <div className="space-y-4">
+      {/* ── hero: identity, live status, refresh / inbox ────────── */}
+      <section className="panel relative overflow-hidden">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -top-24 -right-24 size-64 rounded-full bg-purple/20 blur-3xl"
+        />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -bottom-28 -left-16 size-56 rounded-full bg-cyan/10 blur-3xl"
+        />
+        <div className="relative flex flex-wrap items-start gap-4">
+          <div className="grid size-14 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-purple to-cyan text-2xl shadow-[0_10px_30px_rgba(124,58,237,0.4)]">
+            🎴
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="kicker text-[10px]">{tr("cardsSendTitle")}</p>
+            <h3 className="mt-0.5 text-base font-bold tracking-tight">
+              {tr("cardsCards")} · SendBox
+            </h3>
+            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted">{tr("cardsHint")}</p>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
+            {acct ? (
+              <span
+                className={cn(
+                  "state-badge inline-flex items-center gap-1.5 border px-2.5 py-1 text-xs font-medium",
+                  acct.checkError ? "border-amber/40 bg-amber/10 text-amber" : "state-badge--ready",
+                )}
+              >
+                {acct.checkError ? `⚠ ${acct.checkError}` : `✓ ${tr("cardsTokenOk")}`}
+              </span>
+            ) : null}
+            <Button size="sm" variant="ghost" disabled={loading} onClick={refresh}>
+              {loading ? tr("cardsLoading") : tr("cardsRefresh")}
+            </Button>
+            <Button size="sm" variant="purple" disabled={loading || inboxBusy} onClick={checkInbox}>
+              {inboxBusy ? "…" : tr("cardsInbox")}
+            </Button>
+          </div>
+        </div>
+        {acct ? (
+          <div className="relative mt-4 flex flex-wrap items-center gap-2 border-t border-white/5 pt-3">
             <span
-              className="flex size-8 items-center justify-center rounded-full text-sm font-bold text-white"
+              className="flex size-9 items-center justify-center rounded-full text-sm font-bold text-white ring-2 ring-white/10"
               style={{ background: avatarColor(acct.cityId) }}
             >
               {(acct.name || "?").slice(0, 1).toUpperCase()}
@@ -764,249 +797,328 @@ export function CardsTab({
             <span className="state-badge rounded-full bg-input px-2.5 py-1 font-mono text-xs text-muted">
               {acct.cityId}
             </span>
-            <span
-              className={cn(
-                "state-badge rounded-full px-2.5 py-1 text-xs font-medium",
-                acct.checkError ? "bg-amber-deep/30 text-amber" : "state-badge--ready",
-              )}
-            >
-              {acct.checkError ? `⚠ ${acct.checkError}` : `✓ ${tr("cardsTokenOk")}`}
-            </span>
             <span className="state-badge rounded-full bg-input px-2.5 py-1 text-xs text-muted tabular-nums">
               {tr("cardsFriends")}: {acct.friends.length}
             </span>
-            <div className="ml-auto flex gap-2">
-              <Button size="sm" variant="ghost" disabled={loading} onClick={refresh}>
-                {loading ? tr("cardsLoading") : tr("cardsRefresh")}
-              </Button>
-              <Button
-                size="sm"
-                variant="purple"
-                disabled={loading || inboxBusy}
-                onClick={checkInbox}
-              >
-                {inboxBusy ? "…" : tr("cardsInbox")}
-              </Button>
-            </div>
           </div>
         ) : (
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="relative mt-4 flex flex-wrap items-center gap-3 border-t border-white/5 pt-3">
             <p className="text-xs text-muted">{tr("cardsLoadFirst")}</p>
             <Button size="sm" variant="purple" disabled={loading} onClick={refresh}>
               {loading ? tr("cardsLoading") : tr("cardsRefresh")}
             </Button>
           </div>
         )}
+        {err ? <p className="relative mt-2 text-xs text-amber">⚠ {err}</p> : null}
         {inbox ? (
-          <div className="mt-3 rounded-md bg-input/60 p-2.5 text-xs">
-            <div className="mb-1.5 flex flex-wrap items-center gap-2">
-              <span className="font-semibold">{tr("cardsInbox")}</span>
-              <span className="state-badge rounded-full bg-card px-2 py-0.5 text-muted tabular-nums">
+          <div className="relative mt-3 rounded-xl border border-white/5 bg-black/30 p-3">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="kicker text-[10px]">{tr("cardsInbox")}</span>
+              <span className="state-badge rounded-full bg-purple/15 px-2 py-0.5 text-[11px] text-purple tabular-nums">
                 {inbox.boxes.length}
               </span>
-              {inbox.error ? <span className="text-amber">⚠ {inbox.error}</span> : null}
+              {inbox.error ? <span className="text-xs text-amber">⚠ {inbox.error}</span> : null}
             </div>
             {inbox.boxes.length === 0 && !inbox.error ? (
-              <p className="text-muted">{tr("cardsInboxEmpty")}</p>
+              <p className="text-xs text-muted">{tr("cardsInboxEmpty")}</p>
             ) : (
-              <ul className="max-h-40 space-y-1 overflow-y-auto">
+              <ul className="max-h-40 space-y-0.5 overflow-y-auto">
                 {inbox.boxes.map((b, i) => (
-                  <li key={i} className="flex items-center gap-2 text-muted">
-                    <span className="text-sm">{b.type.includes("card") ? "🎴" : "🎁"}</span>
-                    <span className="font-mono">{b.card ?? b.type}</span>
+                  <li
+                    key={i}
+                    className="flex items-center gap-2 rounded-lg px-1.5 py-1 text-xs text-muted transition-colors hover:bg-white/5"
+                  >
+                    <span>{b.type.includes("card") ? "🎴" : "🎁"}</span>
+                    <span className="rounded bg-input px-1.5 py-0.5 font-mono text-[11px] text-fg">
+                      {b.card ?? b.type}
+                    </span>
                     {b.from ? <span>← {b.from}</span> : null}
-                    {b.time ? <span className="tabular-nums opacity-60">{b.time}</span> : null}
+                    {b.from ? null : <span className="flex-1" />}
+                    {b.time ? (
+                      <span className="ml-auto tabular-nums opacity-70">{b.time}</span>
+                    ) : null}
                   </li>
                 ))}
               </ul>
             )}
           </div>
         ) : null}
-        {err ? <p className="mt-2 text-xs text-amber">⚠ {err}</p> : null}
       </section>
 
-      {/* ── friends ─────────────────────────────────────────────── */}
-      <section className="panel">
-        <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-cyan uppercase">
-          👥 {tr("cardsFriends")}
-          <span className="ml-1 font-mono normal-case opacity-70">({friendSel.size})</span>
-        </h3>
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <input
-            className="field min-w-40 flex-1"
-            placeholder={tr("search")}
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setFriendSel(new Set(visibleFriends.map((f) => f.key)))}
-          >
-            {tr("selectAll")}
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setFriendSel(new Set())}>
-            {tr("clear")}
-          </Button>
+      {/* ── live numbers: exactly what this push will do ────────── */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="stat-card flex items-center gap-3 rounded-xl border p-3.5" data-tone="1">
+          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white/5 text-lg shadow-hairline">
+            👥
+          </span>
+          <div className="min-w-0">
+            <p className="text-lg font-bold leading-none tabular-nums">
+              {friendSel.size}
+              <span className="text-xs font-medium text-muted">/{acct?.friends.length ?? 0}</span>
+            </p>
+            <p className="stat-title mt-1.5 truncate text-[10px]">{tr("cardsFriends")}</p>
+          </div>
         </div>
-        <div className="mb-2 flex gap-2">
-          <input
-            className="field flex-1 font-mono"
-            placeholder={`${tr("cardsAddId")} — e.g. 5dv7F9pDuO`}
-            value={manualId}
-            onChange={(e) => setManualId(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") addManual();
-            }}
-          />
-          <Button size="sm" variant="tool" onClick={addManual}>
-            {tr("cardsAdd")}
-          </Button>
+        <div className="stat-card flex items-center gap-3 rounded-xl border p-3.5" data-tone="2">
+          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white/5 text-lg shadow-hairline">
+            🃏
+          </span>
+          <div className="min-w-0">
+            <p className="text-lg font-bold leading-none tabular-nums">
+              {cardSel.size}
+              <span className="text-xs font-medium text-muted">/{acct?.cardIds.length ?? 0}</span>
+            </p>
+            <p className="stat-title mt-1.5 truncate text-[10px]">{tr("cardsCards")}</p>
+          </div>
         </div>
-        {visibleFriends.length === 0 ? (
-          <p className="py-2 text-xs text-muted">
-            {acct ? tr("cardsNoFriends") : tr("cardsLoadFirst")}
-          </p>
-        ) : (
-          <ul className="max-h-56 space-y-1 overflow-y-auto pr-1">
-            {visibleFriends.map((f) => {
-              const on = friendSel.has(f.key);
-              return (
-                <li key={f.key}>
-                  <button
-                    type="button"
-                    onClick={() => toggleFriend(f.key)}
-                    className={cn(
-                      "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors",
-                      on ? "bg-purple/15 shadow-purple" : "hover:bg-card",
-                    )}
-                  >
-                    <span
-                      className="flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
-                      style={{ background: avatarColor(f.id) }}
-                    >
-                      {f.name.slice(0, 1).toUpperCase()}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-sm">{f.name}</span>
-                    <span className="text-xs text-muted tabular-nums">lvl {f.level || "?"}</span>
-                    <span className="font-mono text-xs text-muted">{f.id}</span>
-                    <span
+        <div className="stat-card flex items-center gap-3 rounded-xl border p-3.5" data-tone="3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white/5 text-lg shadow-hairline">
+            ✈️
+          </span>
+          <div className="min-w-0">
+            <p className="text-lg font-bold leading-none tabular-nums">
+              {total}
+              <span className="text-xs font-medium text-muted">~{estSec}s</span>
+            </p>
+            <p className="stat-title mt-1.5 truncate text-[10px]">{tr("cardsEstimate")}</p>
+          </div>
+        </div>
+        <div className="stat-card flex items-center gap-3 rounded-xl border p-3.5" data-tone="4">
+          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white/5 text-lg shadow-hairline">
+            🔁
+          </span>
+          <div className="min-w-0">
+            <p className="text-lg font-bold leading-none tabular-nums">{qty}×</p>
+            <p className="stat-title mt-1.5 truncate text-[10px]">{tr("cardsQty")}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* ── friends + catalog, side by side on wide screens ──────── */}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <section className="panel flex flex-col">
+          <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-cyan uppercase">
+            👥 {tr("cardsFriends")}
+            <span className="state-badge ml-auto rounded-full bg-purple/15 px-2 py-0.5 text-[11px] text-purple tabular-nums">
+              {friendSel.size}
+            </span>
+          </h3>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <input
+              className="field min-w-40 flex-1"
+              placeholder={tr("search")}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setFriendSel(new Set(visibleFriends.map((f) => f.key)))}
+            >
+              {tr("selectAll")}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setFriendSel(new Set())}>
+              {tr("clear")}
+            </Button>
+          </div>
+          <div className="mb-2 flex gap-2">
+            <input
+              className="field flex-1 font-mono"
+              placeholder={`${tr("cardsAddId")} — e.g. 5dv7F9pDuO`}
+              value={manualId}
+              onChange={(e) => setManualId(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") addManual();
+              }}
+            />
+            <Button size="sm" variant="tool" onClick={addManual}>
+              {tr("cardsAdd")}
+            </Button>
+          </div>
+          {visibleFriends.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-white/10 py-7 text-center">
+              <span className="empty-state-icon text-2xl">👥</span>
+              <p className="text-xs text-muted">
+                {acct ? tr("cardsNoFriends") : tr("cardsLoadFirst")}
+              </p>
+            </div>
+          ) : (
+            <ul className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
+              {visibleFriends.map((f) => {
+                const on = friendSel.has(f.key);
+                return (
+                  <li key={f.key}>
+                    <button
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => toggleFriend(f.key)}
                       className={cn(
-                        "flex size-4 items-center justify-center rounded text-[10px] font-bold",
-                        on ? "bg-purple text-white" : "bg-input text-transparent",
+                        "flex w-full items-center gap-2.5 rounded-xl border px-2.5 py-2 text-left transition-all duration-150 ease-smooth",
+                        on
+                          ? "border-purple/55 bg-gradient-to-r from-purple/20 to-purple/5 shadow-[0_0_0_1px_rgba(124,58,237,0.25),0_0_16px_rgba(124,58,237,0.1)]"
+                          : "border-white/5 bg-white/[0.02] hover:-translate-y-px hover:border-cyan/30 hover:bg-input",
                       )}
                     >
-                      ✓
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      {/* ── cards ───────────────────────────────────────────────── */}
-      <section className="panel">
-        <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-cyan uppercase">
-          🃏 {tr("cardsCards")}
-          <span className="ml-1 font-mono normal-case opacity-70">({cardSel.size})</span>
-        </h3>
-        <p className="mb-2 text-xs text-muted">{tr("cardsCardsHint")}</p>
-        {/* All groups at once — 10 cards per group, every card its own button.
-            Ticking is the only selection mechanic: the send loop reads cardSel
-            and nothing else, so exactly the ticked cards go out. */}
-        <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
-          {cardGroups.map(([s, ids]) => {
-            const allOn = ids.every((id) => cardSel.has(id));
-            const onCount = ids.filter((id) => cardSel.has(id)).length;
-            return (
-              <div key={s} className="rounded-md bg-input/40 p-2">
-                <div className="mb-1.5 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setCardSel((prev) => {
-                        const next = new Set(prev);
-                        for (const id of ids) {
-                          if (allOn) next.delete(id);
-                          else next.add(id);
-                        }
-                        return next;
-                      })
-                    }
-                    title={`${tr("cardsAllSet")} — set_${String(s).padStart(2, "0")}`}
-                    className={cn(
-                      "rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold transition-colors",
-                      allOn
-                        ? "bg-amber/20 text-amber shadow-amber-ring"
-                        : "bg-card text-muted hover:text-fg",
-                    )}
-                  >
-                    set_{String(s).padStart(2, "0")}
-                  </button>
-                  <span className="text-[10px] text-muted tabular-nums">
-                    {onCount}/{ids.length}
-                  </span>
-                </div>
-                <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-10">
-                  {ids.map((id) => {
-                    const on = cardSel.has(id);
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => toggleCard(id)}
-                        title={id}
+                      <span
+                        className="flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white ring-2 ring-white/10"
+                        style={{ background: avatarColor(f.id) }}
+                      >
+                        {f.name.slice(0, 1).toUpperCase()}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{f.name}</span>
+                      <span className="shrink-0 text-xs text-muted tabular-nums">
+                        lvl {f.level || "?"}
+                      </span>
+                      <span className="hidden shrink-0 font-mono text-xs text-muted sm:inline">
+                        {f.id}
+                      </span>
+                      <span
                         className={cn(
-                          "rounded-md py-1.5 font-mono text-xs font-semibold transition-colors",
+                          "grid size-4 shrink-0 place-items-center rounded text-[10px] font-bold",
                           on
-                            ? "bg-amber/20 text-amber shadow-amber-ring"
-                            : "bg-card text-muted hover:text-fg",
+                            ? "bg-purple text-white shadow-[0_0_8px_rgba(124,58,237,0.5)]"
+                            : "bg-input text-transparent",
                         )}
                       >
-                        {id.split("_")[1]}
-                      </button>
-                    );
-                  })}
+                        ✓
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
+        {/* ── cards ───────────────────────────────────────────────── */}
+        <section className="panel flex flex-col">
+          <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-cyan uppercase">
+            🃏 {tr("cardsCards")}
+            <span className="state-badge ml-auto rounded-full bg-amber/15 px-2 py-0.5 text-[11px] text-amber tabular-nums">
+              {cardSel.size}
+            </span>
+          </h3>
+          <p className="mb-2 text-xs text-muted">{tr("cardsCardsHint")}</p>
+          {/* All groups at once — 10 cards per group, every card its own button.
+              Ticking is the only selection mechanic: the send loop reads cardSel
+              and nothing else, so exactly the ticked cards go out. */}
+          <div className="max-h-[26rem] space-y-2.5 overflow-y-auto pr-1">
+            {cardGroups.map(([s, ids]) => {
+              const allOn = ids.every((id) => cardSel.has(id));
+              const onCount = ids.filter((id) => cardSel.has(id)).length;
+              const pct = ids.length ? Math.round((onCount / ids.length) * 100) : 0;
+              return (
+                <div
+                  key={s}
+                  className="stat-card rounded-xl border p-2.5"
+                  data-tone={String(((s - 1) % 7) + 1)}
+                >
+                  <div className="mb-2 flex items-center gap-2">
+                    <button
+                      type="button"
+                      aria-pressed={allOn}
+                      onClick={() =>
+                        setCardSel((prev) => {
+                          const next = new Set(prev);
+                          for (const id of ids) {
+                            if (allOn) next.delete(id);
+                            else next.add(id);
+                          }
+                          return next;
+                        })
+                      }
+                      title={`${tr("cardsAllSet")} — set_${String(s).padStart(2, "0")}`}
+                      className={cn(
+                        "rounded-lg border px-2 py-1 font-mono text-[11px] font-bold transition-all duration-150 ease-smooth",
+                        allOn
+                          ? "border-amber/50 bg-amber/15 text-amber shadow-amber-ring"
+                          : "border-white/10 bg-black/30 text-muted hover:border-purple/40 hover:text-fg",
+                      )}
+                    >
+                      set_{String(s).padStart(2, "0")}
+                    </button>
+                    <span className="text-[10px] font-semibold text-muted tabular-nums">
+                      {onCount}/{ids.length}
+                    </span>
+                    <div className="ml-auto h-1 w-16 overflow-hidden rounded-full bg-black/50">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-purple to-cyan transition-[width] duration-200"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-10">
+                    {ids.map((id) => {
+                      const on = cardSel.has(id);
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          aria-pressed={on}
+                          onClick={() => toggleCard(id)}
+                          title={id}
+                          className={cn(
+                            "relative rounded-lg border py-2 font-mono text-xs font-semibold tabular-nums transition-all duration-150 ease-smooth",
+                            on
+                              ? "border-purple/60 bg-gradient-to-b from-purple/30 to-purple/10 text-amber shadow-[0_0_0_1px_rgba(167,139,250,0.3),0_0_14px_rgba(167,139,250,0.2)]"
+                              : "border-white/5 bg-black/25 text-muted hover:-translate-y-px hover:border-cyan/40 hover:bg-cyan/5 hover:text-fg",
+                          )}
+                        >
+                          {id.split("_")[1]}
+                          {on ? (
+                            <span className="absolute top-1 right-1 size-1.5 rounded-full bg-amber shadow-[0_0_6px_#f59e0b]" />
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setCardSel(new Set(acct?.cardIds ?? []))}
-          >
-            {tr("selectAll")}
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setCardSel(new Set())}>
-            {tr("clear")}
-          </Button>
-        </div>
-      </section>
+              );
+            })}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setCardSel(new Set(acct?.cardIds ?? []))}
+            >
+              {tr("selectAll")}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setCardSel(new Set())}>
+              {tr("clear")}
+            </Button>
+            <span className="ml-auto text-[11px] text-muted tabular-nums">
+              {cardSel.size}/{acct?.cardIds.length ?? 0}
+            </span>
+          </div>
+        </section>
+      </div>
 
       {/* ── send ────────────────────────────────────────────────── */}
       <section className="panel">
         <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-cyan uppercase">
           ✈️ {tr("cardsSendTitle")}
+          {running ? (
+            <span className="state-badge ml-auto animate-pulse rounded-full bg-cyan/15 px-2.5 py-1 text-[11px] text-cyan">
+              {stop ? `🛑 ${tr("cardsStopping")}` : `● ${tr("cardsRunning")}`}
+            </span>
+          ) : null}
         </h3>
-        <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+        <div className="flex flex-wrap items-end gap-x-5 gap-y-3">
           <div>
-            <label className="mb-1 block text-xs text-muted">{tr("cardsQty")}</label>
+            <label className="kicker mb-1.5 block">{tr("cardsQty")}</label>
             <div className="flex items-center gap-1.5">
               {QTY_PRESETS.map((n) => (
                 <button
                   key={n}
                   type="button"
+                  aria-pressed={qty === n}
                   onClick={() => setQty(n)}
                   className={cn(
-                    "rounded-md px-2.5 py-1.5 text-xs font-semibold tabular-nums transition-colors",
+                    "rounded-lg border px-2.5 py-1.5 text-xs font-semibold tabular-nums transition-all duration-150 ease-smooth",
                     qty === n
-                      ? "bg-purple/25 text-purple shadow-purple"
-                      : "bg-input text-muted hover:text-fg",
+                      ? "border-purple/55 bg-purple/25 text-purple shadow-purple"
+                      : "border-white/5 bg-input text-muted hover:-translate-y-px hover:border-purple/30 hover:text-fg",
                   )}
                 >
                   {n}
@@ -1025,7 +1137,7 @@ export function CardsTab({
             </div>
           </div>
           <div>
-            <label className="mb-1 block text-xs text-muted">{tr("cardsDelay")}</label>
+            <label className="kicker mb-1.5 block">{tr("cardsDelay")}</label>
             <div className="flex items-center gap-1.5">
               <input
                 className="field field-qty w-20 text-center"
@@ -1040,7 +1152,10 @@ export function CardsTab({
               <span className="text-xs text-muted">ms</span>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <span className="state-badge self-end rounded-full bg-input px-3 py-1.5 text-xs font-medium text-muted tabular-nums">
+            {tr("cardsEstimate")}: {total} · ~{estSec}s
+          </span>
+          <div className="ml-auto flex items-center gap-2">
             <Button
               variant="success"
               disabled={running || loading || total === 0 || !acct}
@@ -1059,14 +1174,11 @@ export function CardsTab({
               {stop ? tr("cardsStopping") : tr("cardsStop")}
             </Button>
           </div>
-          <span className="text-xs text-muted tabular-nums">
-            {tr("cardsEstimate")}: {total} · ~{estSec}s
-          </span>
         </div>
 
         {progress.total > 0 ? (
-          <div className="mt-3">
-            <div className="mb-1.5 flex flex-wrap gap-2 text-xs tabular-nums">
+          <div className="mt-4 rounded-xl border border-white/5 bg-black/25 p-3">
+            <div className="mb-2 flex flex-wrap items-center gap-2 text-xs tabular-nums">
               <span className="state-badge rounded-full bg-input px-2 py-0.5 text-muted">
                 {progress.done}/{progress.total}
               </span>
@@ -1085,7 +1197,7 @@ export function CardsTab({
                 </span>
               ) : null}
               {running && progress.phase === "confirming" ? (
-                <span className="state-badge rounded-full bg-cyan/15 px-2 py-0.5 text-cyan">
+                <span className="state-badge animate-pulse rounded-full bg-cyan/15 px-2 py-0.5 text-cyan">
                   🔍 {tr("cardsConfirming")}
                 </span>
               ) : null}
@@ -1104,10 +1216,13 @@ export function CardsTab({
                   ⏳ {progress.awaiting}
                 </span>
               ) : null}
+              <span className="ml-auto text-xs font-bold text-cyan tabular-nums">
+                {progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%
+              </span>
             </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-input">
+            <div className="h-2.5 overflow-hidden rounded-full bg-black/50 shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)]">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-purple to-cyan transition-[width] duration-200"
+                className="h-full rounded-full bg-gradient-to-r from-purple to-cyan transition-[width] duration-200 shadow-[0_0_10px_rgba(56,189,248,0.35)]"
                 style={{
                   width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%`,
                 }}
@@ -1151,23 +1266,35 @@ export function CardsTab({
         ) : null}
 
         {log.length > 0 ? (
-          <div className="mt-3 max-h-52 space-y-0.5 overflow-y-auto rounded-md bg-card/70 p-2 font-mono text-[11px] leading-relaxed">
-            {log
-              .slice()
-              .reverse()
-              .map((l) => (
-                <div
-                  key={l.id}
-                  className={cn(
-                    l.kind === "ok" && "text-ok",
-                    l.kind === "bad" && "text-danger",
-                    l.kind === "warn" && "text-amber",
-                    l.kind === "info" && "text-muted",
-                  )}
-                >
-                  {l.text}
-                </div>
-              ))}
+          <div className="mt-3 overflow-hidden rounded-xl border border-white/5 bg-[#0a0f1c]">
+            <div className="max-h-52 space-y-1 overflow-y-auto p-3 font-mono text-[11px] leading-relaxed">
+              {log
+                .slice()
+                .reverse()
+                .map((l) => (
+                  <div key={l.id} className="flex items-start gap-2">
+                    <span
+                      className={cn(
+                        "mt-1 size-1.5 shrink-0 rounded-full",
+                        l.kind === "ok" && "bg-ok shadow-[0_0_6px_rgba(52,211,153,0.7)]",
+                        l.kind === "bad" && "bg-danger shadow-[0_0_6px_rgba(244,63,94,0.7)]",
+                        l.kind === "warn" && "bg-amber shadow-[0_0_6px_rgba(245,158,11,0.7)]",
+                        l.kind === "info" && "bg-muted/60",
+                      )}
+                    />
+                    <span
+                      className={cn(
+                        l.kind === "ok" && "text-ok",
+                        l.kind === "bad" && "text-danger",
+                        l.kind === "warn" && "text-amber",
+                        l.kind === "info" && "text-muted",
+                      )}
+                    >
+                      {l.text}
+                    </span>
+                  </div>
+                ))}
+            </div>
           </div>
         ) : null}
       </section>
