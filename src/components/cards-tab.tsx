@@ -64,21 +64,21 @@ const LOG_MAX = 200;
 
 /**
  * Wave pacing, all measured against the proven 100-box cap: read cadence
- * while waiting for a receiver to collect, how long a run waits before it
- * defers the rest instead of risking the cap, and how long the final
- * confirmation polls before it reports "awaiting collection".
+ * while the run silently holds for inbox headroom (backing off to a minute
+ * on a long hold), and how long the final confirmation polls before it
+ * reports "awaiting collection".
  */
-const WAIT_POLL_STEPS = [6_000, 6_000, 6_000, 6_000, 6_000, 12_000, 12_000, 12_000, 20_000];
-const WAIT_DEADLINE_MS = 10 * 60_000;
-const WAIT_HEARTBEAT_MS = 45_000;
+const WAIT_POLL_STEPS = [
+  6_000, 6_000, 6_000, 6_000, 6_000, 12_000, 12_000, 12_000, 20_000, 30_000, 30_000, 60_000,
+];
 const CONFIRM_POLL_MS = 8_000;
 const CONFIRM_WAIT_MS = 3 * 60_000;
 const CONFIRM_ATTEMPTS = 2;
 const MAX_READ_FAILS = 8;
 const READ_RETRY_DELAY_MS = 700;
 
-type Phase = "sending" | "waiting" | "confirming";
-type WaveResult = "done" | "stop" | "defer";
+type Phase = "sending" | "confirming";
+type WaveResult = "done" | "stop";
 /** What one friend's run knows about their save at any moment. */
 type RunState = {
   /** Latest parsed snapshot, null while their save has never been readable. */
@@ -87,7 +87,7 @@ type RunState = {
   unmerged: number;
   /** Their save moved during this run — they are online and collecting. */
   activity: boolean;
-  /** Consecutive failed reads; reaching MAX_READ_FAILS stops the waiting. */
+  /** Consecutive failed reads; MAX_READ_FAILS gates one warn per streak. */
   readFails: number;
 };
 
@@ -150,7 +150,6 @@ export function CardsTab({
     resent: 0,
     confirmed: 0,
     awaiting: 0,
-    deferred: 0,
     phase: "sending" as Phase,
   });
   /** Wall-clock verdict of the last finished run — drives the completion
@@ -165,7 +164,6 @@ export function CardsTab({
     resent: number;
     confirmed: number;
     awaiting: number;
-    deferred: number;
     total: number;
     seconds: number;
   }>(null);
@@ -278,8 +276,7 @@ export function CardsTab({
   const total = selectedFriends.length * selectedCards.length * qty;
   const estSec = Math.ceil((total * (delayMs + 450)) / 1000);
   /** Sent everything, but collection/confirmation is still pending on the receiver. */
-  const finishedPaused = !!finished && finished.ok && finished.awaiting + finished.deferred > 0;
-  const finishedGood = !!finished && finished.ok && !finishedPaused;
+  const finishedGood = !!finished && finished.ok;
 
   const startSend = async () => {
     if (!acct || running || total === 0) return;
@@ -296,7 +293,6 @@ export function CardsTab({
       resent: 0,
       confirmed: 0,
       awaiting: 0,
-      deferred: 0,
       phase: "sending",
     });
     setFinished(null);
@@ -318,7 +314,6 @@ export function CardsTab({
     let resent = 0;
     let confirmed = 0;
     let awaiting = 0;
-    let deferred = 0;
     let done = 0;
     let abort = false;
 
@@ -333,7 +328,6 @@ export function CardsTab({
         resent,
         confirmed,
         awaiting,
-        deferred,
         phase,
       });
 
@@ -384,10 +378,10 @@ export function CardsTab({
 
     /**
      * Send `queue` (card numbers, numeric order) in cap-aware waves: never
-     * push the estimated footprint past INBOX_SAFE, and while there is no
-     * headroom, poll the friend's save until their game has collected.
-     * "defer" means the receiver did not collect in time — the rest is held
-     * back rather than risked against the 100-box prune.
+     * push the estimated footprint past INBOX_SAFE. While there is no
+     * headroom the run holds silently — no notice, no deadline, no pause —
+     * polling the friend's save in the background and resuming by itself
+     * the moment their game has collected enough room.
      */
     const sendWaves = async (
       f: { name: string },
@@ -398,34 +392,17 @@ export function CardsTab({
       kind: "plan" | "resend",
     ): Promise<WaveResult> => {
       let qi = 0;
-      const deferRest = (): WaveResult => {
-        const left = queue.length - qi;
-        if (left > 0) {
-          pushLog("warn", `${f.name}: ⏸ ${left} · ${tr("cardsPaused")} — ${tr("cardsWaitHint")}`);
-          if (kind === "plan") {
-            deferred += left;
-            runTotal -= left;
-          }
-        }
-        return "defer";
-      };
 
       while (qi < queue.length) {
         if (stopRef.current) return "stop";
         const room = INBOX_SAFE - estimateBoxes(st.snap, st.unmerged, Date.now());
 
         if (room <= 0) {
-          flush("waiting");
-          pushLog(
-            "info",
-            `${tr("cardsWaiting")} — ${f.name} · ${queue.length - qi} left · ${tr("cardsWaitHint")}`,
-          );
-          if (st.readFails >= MAX_READ_FAILS) return deferRest();
-          const waitStart = Date.now();
-          let heart = waitStart;
+          // Silent hold: poll until their save shows headroom, however long
+          // that takes. Nothing is logged per wait — one warn per failing
+          // read streak only — and the run never gives up or pauses.
           let step = 0;
-          let resumed = false;
-          while (Date.now() - waitStart < WAIT_DEADLINE_MS) {
+          for (;;) {
             if (stopRef.current) return "stop";
             await sleep(WAIT_POLL_STEPS[Math.min(step, WAIT_POLL_STEPS.length - 1)]);
             step++;
@@ -436,34 +413,12 @@ export function CardsTab({
               st.snap = r.snap;
               syncHistory(hist, r.snap);
               st.unmerged = unmergedOf(hist, r.snap);
-              if (Date.now() - heart >= WAIT_HEARTBEAT_MS) {
-                heart = Date.now();
-                pushLog(
-                  "info",
-                  `${tr("cardsWaiting")} — ${f.name} · ${r.snap.pendingTotal + st.unmerged}/${INBOX_SAFE} · ${tr("cardsWaitHint")}`,
-                );
-              }
-              if (INBOX_SAFE - estimateBoxes(st.snap, st.unmerged, Date.now()) > 0) {
-                resumed = true;
-                break;
-              }
-            } else if (++st.readFails >= MAX_READ_FAILS) {
+              if (INBOX_SAFE - estimateBoxes(st.snap, st.unmerged, Date.now()) > 0) break;
+            } else if (++st.readFails === MAX_READ_FAILS) {
               pushLog("warn", `${tr("cardsVerifyFail")} — ${f.name}: ${r.error}`);
-              break;
             }
           }
-          if (stopRef.current) return "stop";
-          if (resumed) {
-            flush("sending");
-            continue;
-          }
-          if (st.readFails >= MAX_READ_FAILS) {
-            // Unreadable save: fall through with the reserve estimate instead
-            // of hanging — the cap still has the reserve plus real headroom.
-            flush("sending");
-            continue;
-          }
-          return deferRest();
+          continue;
         }
 
         const batch = Math.min(room, queue.length - qi);
@@ -578,7 +533,7 @@ export function CardsTab({
       }
 
       flush("confirming");
-      pushLog("info", `${tr("cardsConfirming")} — ${f.name} · ${tr("cardsWaitHint")}`);
+      pushLog("info", `${tr("cardsConfirming")} — ${f.name}`);
 
       const timesByCard = (h: Map<number, number[]>) => {
         const out: Record<number, readonly number[]> = {};
@@ -687,22 +642,20 @@ export function CardsTab({
         for (let i = 0; i < (plan.get(n) ?? 0); i++) queue.push(n);
       }
 
-      // Cards held back by a defer were never sent — the confirm tally counts
-      // only what actually left, so deferred never doubles as "awaiting".
-      const deferredBefore = deferred;
+      // Sync the badge to the adjusted totals before the first send — a run
+      // that has to hold straight away would otherwise show the pre-skip
+      // total until it eventually sends or finishes.
+      flush("sending");
       const wave = queue.length > 0 ? await sendWaves(f, cityId, queue, hist, st, "plan") : "done";
       if (wave === "stop" || stopRef.current) {
         abort = true;
         break;
       }
 
-      // ── confirm: prove the cards landed, resend only what is provably gone
-      const heldBack = deferred - deferredBefore;
-      const verdictTotal = expectedTotal - heldBack;
-      // Everything was held back — nothing left to prove this run.
-      if (verdictTotal > 0) {
-        await confirmFriend(f, cityId, hist, st, expected, verdictTotal, wave === "done");
-      }
+      // ── confirm: prove the cards landed, resend only what is provably gone.
+      // The wave only ever ends "done" here (stop breaks above), so confirm
+      // may always take its fresh read and poll for proof.
+      await confirmFriend(f, cityId, hist, st, expected, expectedTotal, true);
       if (stopRef.current) {
         abort = true;
         break;
@@ -712,13 +665,12 @@ export function CardsTab({
     flush("sending");
     pushLog(
       abort && stopRef.current ? "warn" : errors > 0 ? "warn" : "ok",
-      `${tr("cardsDone")}: ✓ ${sent} · ✗ ${rejected} · ⚠ ${errors}${retried ? ` · ⟳ ${retried}` : ""}${resent ? ` · +⟳ ${resent}` : ""} · ✓✓ ${confirmed} · ⏳ ${awaiting}${deferred ? ` · ⏸ ${deferred}` : ""}`,
+      `${tr("cardsDone")}: ✓ ${sent} · ✗ ${rejected} · ⚠ ${errors}${retried ? ` · ⟳ ${retried}` : ""}${resent ? ` · +⟳ ${resent}` : ""} · ✓✓ ${confirmed} · ⏳ ${awaiting}`,
     );
 
     // The professional sign-off: a wall-clock verdict for the banner, and a
     // toast so the finish is noticed even when the log scrolled away.
     const seconds = Math.max(1, Math.round((Date.now() - t0) / 1000));
-    const pending = awaiting + deferred;
     const ok = !abort && sent === runTotal && rejected === 0 && errors === 0;
     setFinished({
       ok,
@@ -730,15 +682,15 @@ export function CardsTab({
       resent,
       confirmed,
       awaiting,
-      deferred,
       total: runTotal,
       seconds,
     });
-    const desc = `${sent}/${runTotal} ✓ · ${rejected} ✗ · ${errors} ⚠${retried ? ` · ⟳${retried}` : ""}${resent ? ` · +⟳${resent}` : ""} · ✓✓${confirmed}${awaiting ? ` · ⏳${awaiting}` : ""}${deferred ? ` · ⏸${deferred}` : ""} · ${seconds}s`;
-    if (ok && pending === 0) {
+    const desc = `${sent}/${runTotal} ✓ · ${rejected} ✗ · ${errors} ⚠${retried ? ` · ⟳${retried}` : ""}${resent ? ` · +⟳${resent}` : ""} · ✓✓${confirmed}${awaiting ? ` · ⏳${awaiting}` : ""} · ${seconds}s`;
+    // A finished run is a success whenever every planned card went out —
+    // receipts still in flight (⏳) are reported in the counts, never as a
+    // pause or a warning.
+    if (ok) {
       toast.success(tr("cardsComplete"), { description: desc });
-    } else if (ok) {
-      toast(tr("cardsPaused"), { description: desc });
     } else {
       toast(abort ? tr("cardsStopped") : tr("cardsComplete"), { description: desc });
     }
@@ -1132,11 +1084,6 @@ export function CardsTab({
                   ⟳ {progress.retried}
                 </span>
               ) : null}
-              {running && progress.phase === "waiting" ? (
-                <span className="state-badge rounded-full bg-amber-deep/30 px-2 py-0.5 text-amber">
-                  ⏳ {tr("cardsWaiting")}
-                </span>
-              ) : null}
               {running && progress.phase === "confirming" ? (
                 <span className="state-badge rounded-full bg-cyan/15 px-2 py-0.5 text-cyan">
                   🔍 {tr("cardsConfirming")}
@@ -1157,11 +1104,6 @@ export function CardsTab({
                   ⏳ {progress.awaiting}
                 </span>
               ) : null}
-              {progress.deferred > 0 ? (
-                <span className="state-badge rounded-full bg-amber-deep/30 px-2 py-0.5 text-amber">
-                  ⏸ {progress.deferred}
-                </span>
-              ) : null}
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-input">
               <div
@@ -1171,15 +1113,12 @@ export function CardsTab({
                 }}
               />
             </div>
-            {running && progress.phase === "waiting" ? (
-              <p className="mt-1.5 text-xs text-amber">{tr("cardsWaitHint")}</p>
-            ) : null}
           </div>
         ) : null}
 
         {/* Completion banner — the run's verdict at a glance once the loop
-            ends (confirmed, paused for collection, stopped, or auth-aborted).
-            Never shows mid-run. */}
+            ends (every card sent — receipts confirmed or still arriving —
+            or the run stopped). Never shows mid-run. */}
         {!running && finished ? (
           <div
             className={cn(
@@ -1187,28 +1126,18 @@ export function CardsTab({
               finishedGood ? "border-ok/50 bg-ok/10" : "border-amber/50 bg-amber/10",
             )}
           >
-            <span className="text-2xl">
-              {finished.stopped ? "⏹️" : finishedPaused ? "⏸️" : "🎉"}
-            </span>
+            <span className="text-2xl">{finished.stopped ? "⏹️" : "🎉"}</span>
             <div className="min-w-0">
               <p className="text-sm font-semibold">
-                {finished.stopped
-                  ? tr("cardsStopped")
-                  : finishedPaused
-                    ? tr("cardsPaused")
-                    : tr("cardsComplete")}
+                {finished.stopped ? tr("cardsStopped") : tr("cardsComplete")}
               </p>
               <p className="text-xs tabular-nums text-muted">
                 {finished.sent}/{finished.total} ✓ · {finished.rejected} ✗ · {finished.errors} ⚠
                 {finished.retried ? ` · ⟳ ${finished.retried}` : ""}
                 {finished.resent ? ` · +⟳ ${finished.resent}` : ""}
                 {finished.confirmed ? ` · ✓✓ ${finished.confirmed}` : ""}
-                {finished.awaiting ? ` · ⏳ ${finished.awaiting}` : ""}
-                {finished.deferred ? ` · ⏸ ${finished.deferred}` : ""} · {finished.seconds}s
+                {finished.awaiting ? ` · ⏳ ${finished.awaiting}` : ""} · {finished.seconds}s
               </p>
-              {finishedPaused ? (
-                <p className="mt-0.5 text-xs text-muted">{tr("cardsWaitHint")}</p>
-              ) : null}
             </div>
             <span
               className={cn(
