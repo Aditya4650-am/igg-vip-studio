@@ -312,11 +312,15 @@ export const RAW_PROFILE: RawGroup[] = [
       },
       {
         "id": "gold",
-        "label": "Style 6"
+        "label": "Gold"
       },
       {
         "id": "bubble",
         "label": "Bubble"
+      },
+      {
+        "id": "train",
+        "label": "Train"
       }
     ]
   },
