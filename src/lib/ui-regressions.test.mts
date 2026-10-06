@@ -331,7 +331,7 @@ test("the new-account tab resets device identity before injecting", () => {
   }
 });
 
-test("the Events tab is appended, and its Bloom & Buzz card only queues tokens", () => {
+test("the Events tab is appended, and each event card queues and pushes its own tokens", () => {
   // Bloom & Buzz is the game's own `TrainJourney` event. The tab has to be
   // *appended* to TABS: inserting it would shift every later tab's slot, which
   // is exactly the "other features stay untouched" line the request draws.
@@ -345,8 +345,8 @@ test("the Events tab is appended, and its Bloom & Buzz card only queues tokens",
   assert.ok(/events: "tabEvents"/.test(tsx), "TAB_KEY must label the tab");
   assert.ok(/events: "🐝"/.test(tsx), "TAB_EMOJI must carry the tab");
   assert.ok(
-    tsx.includes("pendingBloom ? bloomTokens : 0") && tsx.includes("pendingFrozen ? bloomTokens : 0"),
-    "the tab must show what is queued — both cards, since either may be queued in one batch",
+    tsx.includes("pendingBloom ? bloomTokens : 0") && tsx.includes("pendingFrozen ? frozenTokens : 0"),
+    "the tab must show what is queued — each card from its own count",
   );
 
   const panel = tsx.slice(tsx.indexOf('{tab === "events" &&'), tsx.indexOf('{tab === "newgame" &&'));
@@ -359,6 +359,27 @@ test("the Events tab is appended, and its Bloom & Buzz card only queues tokens",
   assert.ok(panel.includes('{tr("eventsCardFrozen")}'), "the Frozen Fortune card must be rendered");
   assert.ok(panel.includes('onClick={() => tool("frozen")}'), "the second button must queue its own feature");
   assert.ok(panel.includes("session.frozen."), "the second card must read its own wallet readout");
+
+  // Two separate cards — exactly two panels, no shared third card that holds
+  // both events' controls. Each card owns its count input, its queue button
+  // and its own Save & push (which goes through the same choke point as the
+  // sidebar button, queueing implicitly when the queue flag is still clear).
+  const panelTags = panel.match(/<section className="panel">/g) ?? [];
+  assert.ok(panelTags.length === 2, `the tab must render exactly two cards, got ${panelTags.length}`);
+  assert.ok(
+    panel.includes('aria-label={tr("eventsCount")}') && panel.includes("value={bloomTokens}"),
+    "the Bloom card must own its count input",
+  );
+  assert.ok(
+    panel.includes('aria-label={tr("eventsCountFrozen")}') && panel.includes("value={frozenTokens}"),
+    "the Frozen card must own a separate count input",
+  );
+  const cardPushes = panel.match(/onClick=\{\(\) => void save\(\{/g) ?? [];
+  assert.ok(cardPushes.length === 2, `each card needs its own Save & push, got ${cardPushes.length}`);
+  assert.ok(
+    panel.includes("void save({ bloom: bloomTokens })") && panel.includes("void save({ frozen: frozenTokens })"),
+    "each Save & push must send its own card's count",
+  );
 
   // Each card carries its own token artwork, trimmed to its own circular
   // edge, at one identical size — the two icons have to match each other or
@@ -391,14 +412,16 @@ test("the Events tab is appended, and its Bloom & Buzz card only queues tokens",
   assert.ok(!panel.includes("regatta"), "the Events panel must not read the Regatta tab's state");
 
   // Only queued work travels: an untouched tab must not add a field to the
-  // payload, and the queue must clear on save and on reload.
+  // payload, and the queue must clear on save and on reload. A card's own
+  // Save & push may inject its count directly (`opts`), but when nothing asks
+  // for it, the queued flag decides exactly as before.
   assert.ok(
-    tsx.includes("bloomTokens: pendingBloom ? bloomTokens : undefined"),
-    "the payload must send the count only when queued",
+    tsx.includes("bloomTokens: opts?.bloom ?? (pendingBloom ? bloomTokens : undefined)"),
+    "the payload must send the count only when queued or pushed from that card",
   );
   assert.ok(
-    tsx.includes("frozenTokens: pendingFrozen ? bloomTokens : undefined"),
-    "the payload must send the second count only when that card is queued",
+    tsx.includes("frozenTokens: opts?.frozen ?? (pendingFrozen ? frozenTokens : undefined)"),
+    "the second count must travel from its own queue or its own card's push",
   );
   const clears = tsx.match(/setPendingBloom\(false\);/g) ?? [];
   assert.ok(clears.length >= 2, "the queue must clear after a save and after a reload");
@@ -417,6 +440,7 @@ test("the Events tab is appended, and its Bloom & Buzz card only queues tokens",
     "eventsTokens",
     "eventsEarned",
     "eventsCount",
+    "eventsCountFrozen",
     "bloomReady",
     "bloomNoWallet",
     "bloomIncomplete",

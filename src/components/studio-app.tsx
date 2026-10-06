@@ -1283,14 +1283,17 @@ export function StudioApp() {
   const [pendingBloom, setPendingBloom] = useState(false);
   // Frozen Fortune (`DragonNest` in game data) is the same wallet mechanism,
   // so it gets its own pending flag rather than a mode on Bloom's — one card,
-  // one queue flag, and the Bloom payload keeps the shape it shipped with. The
-  // count below is shared by both cards on purpose: it is labelled "tokens to
-  // add", and whichever cards are queued each receive exactly that many.
+  // one queue flag. Each event card now owns its count too: Bloom's card edits
+  // `bloomTokens`, Frozen Fortune's card edits `frozenTokens`, so queueing one
+  // with 500 and the other with 100 sends exactly those numbers.
   const [pendingFrozen, setPendingFrozen] = useState(false);
   // How many Bloom & Buzz (TrainJourney) tokens this push *adds* — a delta,
   // exactly like the Regatta count: the wallet keeps what it already holds and
   // gains this many on both Amount and TokensEarned.
   const [bloomTokens, setBloomTokens] = useState(BLOOM_TOKENS_DEFAULT);
+  // The same delta for Frozen Fortune's own card — a separate number, never
+  // Bloom's, so the two events can be queued with different amounts at once.
+  const [frozenTokens, setFrozenTokens] = useState(BLOOM_TOKENS_DEFAULT);
   const [pendingUnban, setPendingUnban] = useState<UnbanMode | null>(null);
   const [pendingDecorFragments, setPendingDecorFragments] = useState(false);
   const [pendingDecorClone, setPendingDecorClone] = useState(false);
@@ -1707,7 +1710,11 @@ export function StudioApp() {
     return Number.isFinite(n) && n > 0 ? n : 10;
   }, [decorQty]);
 
-  const save = useCallback(async () => {
+  // `opts` lets an event card's own "Save & push" button queue and push in one
+  // press: `{ bloom: 500 }` means "this push adds 500 Bloom tokens" whether or
+  // not the queue flag was set first. Every other caller passes nothing and
+  // behaves exactly as before — queued state decides the payload.
+  const save = useCallback(async (opts?: { bloom?: number; frozen?: number }) => {
     if (!token || !session) return;
     setBusy(true);
     try {
@@ -1791,6 +1798,8 @@ export function StudioApp() {
         Object.keys(changedBarn).length > 0 ||
         pendingRegatta ||
         pendingSeason ||
+        opts?.bloom !== undefined ||
+        opts?.frozen !== undefined ||
         pendingBloom ||
         pendingFrozen ||
         pendingDecorFragments ||
@@ -1841,8 +1850,8 @@ export function StudioApp() {
           regatta: pendingRegatta,
           regattaTasks: pendingRegatta ? regattaTasks : undefined,
           season: pendingSeason,
-          bloomTokens: pendingBloom ? bloomTokens : undefined,
-          frozenTokens: pendingFrozen ? bloomTokens : undefined,
+          bloomTokens: opts?.bloom ?? (pendingBloom ? bloomTokens : undefined),
+          frozenTokens: opts?.frozen ?? (pendingFrozen ? frozenTokens : undefined),
           unbanMode: pendingUnban ?? undefined,
           decorFragments: pendingDecorFragments,
           decorClone: pendingDecorClone,
@@ -1900,7 +1909,7 @@ export function StudioApp() {
     } finally {
       setBusy(false);
     }
-  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, zooSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, regattaTasks, pendingSeason, pendingBloom, pendingFrozen, bloomTokens, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingTownClone, pendingDecorMaxAll, parseDecorQty, tr, device, upgradeFactorySel, upgradeTrainSel, upgradeIslandSel, upgradeTargetLevel]);
+  }, [token, session, stats, profileSel, avatarSel, skinSel, itemSel, zooSel, decorSel, stickerSel, parseQty, barnUpgrades, barnItems, pendingRegatta, regattaTasks, pendingSeason, pendingBloom, pendingFrozen, bloomTokens, frozenTokens, pendingUnban, pendingDecorFragments, pendingDecorClone, pendingTownClone, pendingDecorMaxAll, parseDecorQty, tr, device, upgradeFactorySel, upgradeTrainSel, upgradeIslandSel, upgradeTargetLevel]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -2233,7 +2242,7 @@ export function StudioApp() {
     upgrades: upgradeFactorySel.count + upgradeTrainSel.count + upgradeIslandSel.count,
     cards: 0,
     newgame: freshPhase === "idle" ? 0 : 1,
-    events: (pendingBloom ? bloomTokens : 0) + (pendingFrozen ? bloomTokens : 0),
+    events: (pendingBloom ? bloomTokens : 0) + (pendingFrozen ? frozenTokens : 0),
   };
 
   const barnTotal = Object.values(barnItems).reduce((n, v) => n + (Number(v) || 0), 0);
@@ -3092,6 +3101,46 @@ export function StudioApp() {
                           {tr("eventsEarned")} {session.bloom.earned + (pendingBloom ? bloomTokens : 0)}
                         </span>
                       </div>
+                      {/* This card owns its count, its queue flag and its own
+                          Save & push — pressing it queues (if not already
+                          queued) and pushes through the same choke point as
+                          the sidebar button, nothing else in the tab shares
+                          this state. */}
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <input
+                          className="field field-qty"
+                          inputMode="numeric"
+                          aria-label={tr("eventsCount")}
+                          value={bloomTokens}
+                          onChange={(e) => {
+                            const raw = Number(e.target.value.replace(/[^\d]/g, ""));
+                            setBloomTokens(raw > 0 ? Math.min(BLOOM_TOKENS_MAX, raw) : BLOOM_TOKENS_DEFAULT);
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          className="tool-action"
+                          variant="purple"
+                          disabled={busy || pendingBloom}
+                          onClick={() => tool("bloom")}
+                        >
+                          <GameIcon name="events" className="size-4" />
+                          {pendingBloom ? tr("bloomQueued") : tr("bloomAdd")}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          disabled={busy}
+                          onClick={() => void save({ bloom: bloomTokens })}
+                        >
+                          💾 {tr("save")}
+                        </Button>
+                        {pendingBloom ? (
+                          <Button size="sm" variant="ghost" onClick={() => setPendingBloom(false)}>
+                            {tr("clear")}
+                          </Button>
+                        ) : null}
+                      </div>
                     </section>
 
                     <section className="panel">
@@ -3114,48 +3163,26 @@ export function StudioApp() {
                         </span>
                         <span className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums">
                           {tr("eventsTokens")} {session.frozen.amount} →{" "}
-                          {session.frozen.amount + (pendingFrozen ? bloomTokens : 0)}
+                          {session.frozen.amount + (pendingFrozen ? frozenTokens : 0)}
                         </span>
                         <span className="state-badge rounded-full bg-input px-2.5 py-1 text-xs font-medium text-muted tabular-nums">
-                          {tr("eventsEarned")} {session.frozen.earned + (pendingFrozen ? bloomTokens : 0)}
+                          {tr("eventsEarned")} {session.frozen.earned + (pendingFrozen ? frozenTokens : 0)}
                         </span>
                       </div>
-                      <p className="mt-3 text-xs text-muted">{tr("frozenHint")}</p>
-                    </section>
-
-                    <section className="panel">
-                      <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-amber uppercase">
-                        <GameIcon name="events" className="size-4" />
-                        {tr("eventsCount")}
-                      </h3>
-                      <div className="flex flex-wrap items-center gap-3">
+                      {/* Frozen Fortune's own count, queue flag and Save & push —
+                          a separate card end to end: queueing Bloom never
+                          touches this number or its buttons. */}
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
                         <input
                           className="field field-qty"
                           inputMode="numeric"
-                          aria-label={tr("eventsCount")}
-                          value={bloomTokens}
+                          aria-label={tr("eventsCountFrozen")}
+                          value={frozenTokens}
                           onChange={(e) => {
                             const raw = Number(e.target.value.replace(/[^\d]/g, ""));
-                            setBloomTokens(raw > 0 ? Math.min(BLOOM_TOKENS_MAX, raw) : BLOOM_TOKENS_DEFAULT);
+                            setFrozenTokens(raw > 0 ? Math.min(BLOOM_TOKENS_MAX, raw) : BLOOM_TOKENS_DEFAULT);
                           }}
                         />
-                      </div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          className="tool-action"
-                          variant="purple"
-                          disabled={busy || pendingBloom}
-                          onClick={() => tool("bloom")}
-                        >
-                          <GameIcon name="events" className="size-4" />
-                          {pendingBloom ? tr("bloomQueued") : tr("bloomAdd")}
-                        </Button>
-                        {pendingBloom ? (
-                          <Button size="sm" variant="ghost" onClick={() => setPendingBloom(false)}>
-                            {tr("clear")}
-                          </Button>
-                        ) : null}
                         <Button
                           size="sm"
                           className="tool-action"
@@ -3166,12 +3193,21 @@ export function StudioApp() {
                           <GameIcon name="events" className="size-4" />
                           {pendingFrozen ? tr("frozenQueued") : tr("frozenAdd")}
                         </Button>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          disabled={busy}
+                          onClick={() => void save({ frozen: frozenTokens })}
+                        >
+                          💾 {tr("save")}
+                        </Button>
                         {pendingFrozen ? (
                           <Button size="sm" variant="ghost" onClick={() => setPendingFrozen(false)}>
                             {tr("clear")}
                           </Button>
                         ) : null}
                       </div>
+                      <p className="mt-3 text-xs text-muted">{tr("frozenHint")}</p>
                     </section>
                   </div>
                 )}
