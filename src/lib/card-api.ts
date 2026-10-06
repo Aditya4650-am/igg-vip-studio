@@ -18,7 +18,12 @@ export const cardsLoadInfo = createServerFn({ method: "POST" })
 
 export const cardsSend = createServerFn({ method: "POST" })
   .validator(
-    z.object({ token: z.string(), sessionId: z.string(), toCityId: z.string(), cardId: z.string() }),
+    z.object({
+      token: z.string(),
+      sessionId: z.string(),
+      toCityId: z.string(),
+      cardId: z.string(),
+    }),
   )
   .handler(async ({ data }) => {
     const { requireToken } = await import("./server/license.server");
@@ -34,4 +39,19 @@ export const cardsCheckInbox = createServerFn({ method: "POST" })
     requireToken(data.token);
     const { checkInbox } = await import("./server/township/cardsend.server");
     return checkInbox(data.token, data.sessionId);
+  });
+
+/**
+ * Read a friend's save for the delivery check: their current box footprint
+ * (the 100-box cap), what they already hold from us, and whether their save
+ * has moved — the three facts the send loop needs to wave sends safely and
+ * to confirm that every card actually arrived.
+ */
+export const cardsFetchState = createServerFn({ method: "POST" })
+  .validator(z.object({ token: z.string(), sessionId: z.string(), cityId: z.string() }))
+  .handler(async ({ data }) => {
+    const { requireToken } = await import("./server/license.server");
+    requireToken(data.token);
+    const { fetchCardState } = await import("./server/township/cardstate.server");
+    return fetchCardState(data.sessionId, data.cityId);
   });

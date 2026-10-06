@@ -432,6 +432,15 @@ const vi = {
   cardsAuthAbort: "Token bị từ chối - dừng gửi, hãy Tải lại LocalInfo",
   cardsComplete: "Gửi thẻ hoàn tất",
   cardsStopped: "Dừng gửi",
+  cardsWaiting: "Đang chờ thu thập",
+  cardsWaitHint: "Bạn kia cần mở Township (hoặc mở lại) và nhận quà — phần còn lại tự gửi tiếp, không mất thẻ nào",
+  cardsConfirming: "Đang xác nhận giao thẻ",
+  cardsConfirmed: "Đã xác nhận đủ thẻ",
+  cardsAwaiting: "Đã giao — chờ mở game nhận (không mất thẻ nào)",
+  cardsResend: "Thiếu thẻ — tự gửi lại",
+  cardsAlready: "đã có sẵn — bỏ qua",
+  cardsVerifyFail: "Không đọc được save của bạn này",
+  cardsPaused: "Tạm dừng — chờ thu thập",
 };
 
 const en: typeof vi = {
@@ -843,6 +852,15 @@ const en: typeof vi = {
   cardsAuthAbort: "Token rejected - sending stopped, Refresh LocalInfo",
   cardsComplete: "Sending complete",
   cardsStopped: "Sending stopped",
+  cardsWaiting: "Waiting for collection",
+  cardsWaitHint: "They need to open (or restart) Township and collect — the rest sends automatically, no cards lost",
+  cardsConfirming: "Confirming delivery",
+  cardsConfirmed: "All cards confirmed",
+  cardsAwaiting: "Delivered — awaiting their next login (no cards lost)",
+  cardsResend: "Missing cards — resending",
+  cardsAlready: "already delivered — skipping",
+  cardsVerifyFail: "Cannot read this friend's save",
+  cardsPaused: "Paused — waiting for collection",
 };
 
 function overlay(p: Partial<typeof en>): typeof en {

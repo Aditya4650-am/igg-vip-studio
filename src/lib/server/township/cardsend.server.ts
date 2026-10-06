@@ -84,6 +84,20 @@ function publicView(a: CardAccount) {
   return rest;
 }
 
+/**
+ * The three fields the delivery check needs from the loaded account: the game
+ * versions for the FetchCity frame and the sender's own cityId, which is what
+ * attributes boxes in a friend's save to *our* sends. The token itself stays
+ * private in this module — FetchCity is read by cityId without one, the same
+ * way the clone features fetch other cities.
+ */
+export function cardSessionMeta(
+  sessionId: string,
+): { bver: string; fver: string; cityId: string } | null {
+  const a = accounts.get(sessionId);
+  return a ? { bver: a.bver, fver: a.fver, cityId: a.cityId } : null;
+}
+
 export type CardAccountView = ReturnType<typeof publicView>;
 export type CardLoadResult = CardAccountView & { cardIds: readonly string[] };
 
@@ -173,7 +187,10 @@ function apiCall(
         }
         // The reply is the last JSON line on stdout; anything before it is
         // interpreter noise and is ignored rather than made into an error.
-        const lines = out.split("\n").map((l) => l.trim()).filter(Boolean);
+        const lines = out
+          .split("\n")
+          .map((l) => l.trim())
+          .filter(Boolean);
         for (let i = lines.length - 1; i >= 0; i--) {
           if (!lines[i]!.startsWith("{")) continue;
           try {
@@ -189,7 +206,9 @@ function apiCall(
             /* keep looking for an earlier JSON line */
           }
         }
-        fail(`Cards: Python lỗi ${code ?? "?"} — ${lines.join(" ").slice(0, 200) || "không có đầu ra"}`);
+        fail(
+          `Cards: Python lỗi ${code ?? "?"} — ${lines.join(" ").slice(0, 200) || "không có đầu ra"}`,
+        );
       });
 
       const req = JSON.stringify({
@@ -265,7 +284,9 @@ export async function loadCardInfo(
   const meta = parseOwnMeta(xml);
   const awsToken = xml.match(/<AWS\b[^>]*\btoken="([^"]+)"/i)?.[1] ?? "";
   if (!awsToken) {
-    throw new Error("LocalInfo không chứa API token — hãy mở Township ít nhất một lần rồi Refresh.");
+    throw new Error(
+      "LocalInfo không chứa API token — hãy mở Township ít nhất một lần rồi Refresh.",
+    );
   }
   if (!meta.cityId) {
     throw new Error("LocalInfo không chứa cityId — kiểm tra lại bản save đang mở.");
@@ -295,7 +316,12 @@ export async function loadCardInfo(
   }
 
   try {
-    const r = await apiCall(acc, "CheckCity", { cityId: acc.cityId, tz: 28800 }, `?cityId=${acc.cityId}`);
+    const r = await apiCall(
+      acc,
+      "CheckCity",
+      { cityId: acc.cityId, tz: 28800 },
+      `?cityId=${acc.cityId}`,
+    );
     if (r.ok && r.resp && typeof r.resp.result === "object" && r.resp.result !== null) {
       const result = r.resp.result as Record<string, unknown>;
       acc.name = typeof result.name === "string" && result.name ? result.name : acc.name;
@@ -384,10 +410,20 @@ export async function sendCard(
       continue;
     }
     if (http === 401) {
-      return { status: "error", http, detail: "Token bị từ chối (401) — làm mới LocalInfo", retried };
+      return {
+        status: "error",
+        http,
+        detail: "Token bị từ chối (401) — làm mới LocalInfo",
+        retried,
+      };
     }
     if (http === 403) {
-      return { status: "error", http, detail: "Bị chặn tạm (403) sau khi thử lại — tăng delay", retried };
+      return {
+        status: "error",
+        http,
+        detail: "Bị chặn tạm (403) sau khi thử lại — tăng delay",
+        retried,
+      };
     }
     return { status: "error", http, detail: err || `HTTP ${http}`, retried };
   }
@@ -414,7 +450,12 @@ export async function checkInbox(
   if (!acc) throw new Error("Cards: chưa nạp LocalInfo — bấm Refresh trước.");
 
   try {
-    const r = await apiCall(acc, "CheckCity", { cityId: acc.cityId, tz: 28800 }, `?cityId=${acc.cityId}`);
+    const r = await apiCall(
+      acc,
+      "CheckCity",
+      { cityId: acc.cityId, tz: 28800 },
+      `?cityId=${acc.cityId}`,
+    );
     if (r.ok && r.resp && typeof r.resp.result === "object" && r.resp.result !== null) {
       const result = r.resp.result as Record<string, unknown>;
       acc.name = typeof result.name === "string" && result.name ? result.name : acc.name;
