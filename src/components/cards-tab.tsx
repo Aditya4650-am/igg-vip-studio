@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { Dict } from "@/lib/i18n";
@@ -87,6 +88,18 @@ export function CardsTab({
   const stopRef = useRef(false);
   const logIdRef = useRef(0);
   const [progress, setProgress] = useState({ done: 0, total: 0, sent: 0, rejected: 0, errors: 0, retried: 0 });
+  /** Wall-clock verdict of the last finished run — drives the completion
+   *  banner and the toast; null while no run has finished yet. */
+  const [finished, setFinished] = useState<null | {
+    ok: boolean;
+    stopped: boolean;
+    sent: number;
+    rejected: number;
+    errors: number;
+    retried: number;
+    total: number;
+    seconds: number;
+  }>(null);
   const [log, setLog] = useState<LogLine[]>([]);
 
   const [inbox, setInbox] = useState<InboxState | null>(null);
@@ -183,7 +196,9 @@ export function CardsTab({
     setStop(false);
     setRunning(true);
     setProgress({ done: 0, total, sent: 0, rejected: 0, errors: 0, retried: 0 });
+    setFinished(null);
     setLog([]);
+    const t0 = Date.now();
     pushLog("info", `${total} sends → ${selectedFriends.length} friend(s) × ${selectedCards.length} card(s) × ${qty} · delay ${delayMs}ms`);
 
     let sent = 0;
@@ -238,6 +253,19 @@ export function CardsTab({
       abort && stopRef.current ? "warn" : errors > 0 ? "warn" : "ok",
       `${tr("cardsDone")}: ✓ ${sent} · ✗ ${rejected} · ⚠ ${errors}${retried ? ` · ⟳ ${retried}` : ""}`,
     );
+
+    // The professional sign-off: a wall-clock verdict for the banner, and a
+    // toast so the finish is noticed even when the log scrolled away.
+    const seconds = Math.max(1, Math.round((Date.now() - t0) / 1000));
+    const ok = !abort && sent === total && rejected === 0 && errors === 0;
+    setFinished({ ok, stopped: abort, sent, rejected, errors, retried, total, seconds });
+    const desc = `${sent}/${total} ✓ · ${rejected} ✗ · ${errors} ⚠${retried ? ` · ⟳ ${retried}` : ""} · ${seconds}s`;
+    if (ok) {
+      toast.success(tr("cardsComplete"), { description: desc });
+    } else {
+      toast(abort ? tr("cardsStopped") : tr("cardsComplete"), { description: desc });
+    }
+
     setRunning(false);
     setStop(false);
   };
@@ -605,6 +633,36 @@ export function CardsTab({
                 style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%` }}
               />
             </div>
+          </div>
+        ) : null}
+
+        {/* Completion banner — the run's verdict at a glance once the loop
+            ends (complete, stopped, or auth-aborted). Never shows mid-run. */}
+        {!running && finished ? (
+          <div
+            className={cn(
+              "mt-3 flex items-center gap-3 rounded-lg border px-3.5 py-3",
+              finished.ok ? "border-ok/50 bg-ok/10" : "border-amber/50 bg-amber/10",
+            )}
+          >
+            <span className="text-2xl">{finished.ok ? "🎉" : "⏹️"}</span>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">
+                {finished.stopped ? tr("cardsStopped") : tr("cardsComplete")}
+              </p>
+              <p className="text-xs tabular-nums text-muted">
+                {finished.sent}/{finished.total} ✓ · {finished.rejected} ✗ · {finished.errors} ⚠
+                {finished.retried ? ` · ⟳ ${finished.retried}` : ""} · {finished.seconds}s
+              </p>
+            </div>
+            <span
+              className={cn(
+                "ml-auto rounded-full px-2.5 py-1 text-xs font-bold tabular-nums",
+                finished.ok ? "bg-ok/20 text-ok" : "bg-amber/20 text-amber",
+              )}
+            >
+              {Math.round((finished.sent / Math.max(1, finished.total)) * 100)}%
+            </span>
           </div>
         ) : null}
 

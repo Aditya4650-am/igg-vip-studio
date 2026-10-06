@@ -430,6 +430,8 @@ const vi = {
   cardsEstimate: "Ước tính",
   cardsDone: "Hoàn tất",
   cardsAuthAbort: "Token bị từ chối - dừng gửi, hãy Tải lại LocalInfo",
+  cardsComplete: "Gửi thẻ hoàn tất",
+  cardsStopped: "Dừng gửi",
 };
 
 const en: typeof vi = {
@@ -839,6 +841,8 @@ const en: typeof vi = {
   cardsEstimate: "Estimate",
   cardsDone: "Done",
   cardsAuthAbort: "Token rejected - sending stopped, Refresh LocalInfo",
+  cardsComplete: "Sending complete",
+  cardsStopped: "Sending stopped",
 };
 
 function overlay(p: Partial<typeof en>): typeof en {
