@@ -551,6 +551,25 @@ export function CardsTab({
         pushLog("ok", `${tr("cardsConfirmed")} — ${f.name}: ${expectedTotal}/${expectedTotal}`);
         return;
       }
+      // One fresh read before deciding: a run that never had to wait has not
+      // looked at their save since before the sends, and this single read is
+      // what turns "probably delivered" into proof — their save absorbing the
+      // boxes is both the confirmation and the sign that they are online.
+      if (allowPoll) {
+        const r = await readState(cityId);
+        if (r.ok) {
+          noteSnapshot(st, st.snap, r.snap);
+          st.snap = r.snap;
+          syncHistory(hist, r.snap);
+          st.unmerged = unmergedOf(hist, r.snap);
+          st.readFails = 0;
+          if (confirmedCount(expected, r.snap.fromUs) >= expectedTotal) {
+            confirmed += expectedTotal;
+            pushLog("ok", `${tr("cardsConfirmed")} — ${f.name}: ${expectedTotal}/${expectedTotal}`);
+            return;
+          }
+        }
+      }
       // Their save never moved during the run: they are offline, so polling
       // would only stall the finish — report and let the next run confirm.
       if (!st.activity || !allowPoll) {
@@ -668,6 +687,9 @@ export function CardsTab({
         for (let i = 0; i < (plan.get(n) ?? 0); i++) queue.push(n);
       }
 
+      // Cards held back by a defer were never sent — the confirm tally counts
+      // only what actually left, so deferred never doubles as "awaiting".
+      const deferredBefore = deferred;
       const wave = queue.length > 0 ? await sendWaves(f, cityId, queue, hist, st, "plan") : "done";
       if (wave === "stop" || stopRef.current) {
         abort = true;
@@ -675,7 +697,12 @@ export function CardsTab({
       }
 
       // ── confirm: prove the cards landed, resend only what is provably gone
-      await confirmFriend(f, cityId, hist, st, expected, expectedTotal, wave === "done");
+      const heldBack = deferred - deferredBefore;
+      const verdictTotal = expectedTotal - heldBack;
+      // Everything was held back — nothing left to prove this run.
+      if (verdictTotal > 0) {
+        await confirmFriend(f, cityId, hist, st, expected, verdictTotal, wave === "done");
+      }
       if (stopRef.current) {
         abort = true;
         break;
