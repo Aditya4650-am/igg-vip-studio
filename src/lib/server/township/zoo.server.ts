@@ -118,7 +118,12 @@ function stringifyAttr(value: unknown): string {
  * (`status !== 3`). A complete member holding fewer pieces than the mapped
  * maximum (duplicate names share one map entry) is left byte-identical:
  * rewriting it would overfill beyond what the game accepted.
- * `rewardCollected`, counts and every other field survive untouched. The
+ * The paddock's `count` is then recounted to the members at status 3 — the
+ * invariant every real save keeps (`count` is the counter
+ * `AnimalPaddock::AddAnimal` maintains and the number the family gift
+ * reads): a stale one would leave the gift locked behind collected
+ * portraits. `rewardCollected`, so the gift stays claimable, and every
+ * other field survive untouched. The
  * attribute must roundtrip byte-identical when nothing changes — otherwise
  * the JSON dialect differs and we refuse rather than risk the document.
  * Returns `changed: 0` for the no-op report.
@@ -132,7 +137,7 @@ export function completeZoo(xml: string, keys: string[]) {
   }
   const span = paddocksSpan(text);
   if (!span) throw new Error("Không đọc được Paddocks trong save — Load lại rồi thử lại");
-  let doc: { list?: { type?: string; members?: Record<string, unknown>[] }[] };
+  let doc: { list?: { type?: string; count?: number; members?: Record<string, unknown>[] }[] };
   try {
     doc = JSON.parse(span.json);
   } catch {
@@ -147,6 +152,7 @@ export function completeZoo(xml: string, keys: string[]) {
   for (const p of doc.list ?? []) {
     const ptype: string = typeof p?.type === "string" ? p.type : "";
     if (!p || !ptype || !Array.isArray(p.members)) continue;
+    let completedHere = 0;
     p.members.forEach((mb: Record<string, unknown>, i: number) => {
       if (!mb || typeof mb !== "object") return;
       if (!wanted.has(`${ptype}:${i}`)) return;
@@ -158,7 +164,13 @@ export function completeZoo(xml: string, keys: string[]) {
         mb["piecesCount"] = req;
       }
       changed += 1;
+      completedHere += 1;
     });
+    // Paddocks we did not complete keep every byte, stale `count` included.
+    if (completedHere) {
+      const collected = p.members.filter((m) => m && m["status"] === 3).length;
+      if (p.count !== collected) p.count = collected;
+    }
   }
   if (!changed) return { xml: text, changed: 0 };
   const next = stringifyAttr(doc);

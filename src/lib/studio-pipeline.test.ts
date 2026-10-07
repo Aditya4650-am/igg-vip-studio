@@ -1039,7 +1039,9 @@ test("cards: a push that never touches cards pays nothing for the card gate", ()
 const zooDoc = {
   list: [
     {
-      balanceRatingVer: 1, type: "paddock_bear", count: 4, rewardCollected: false,
+      // `count` mirrors the status-3 members, the invariant every real save
+      // keeps — the family gift reads it, so a stale one locks the gift.
+      balanceRatingVer: 1, type: "paddock_bear", count: 2, rewardCollected: false,
       members: [
         { name: "Max", status: 0, piecesCount: 5 },
         { name: "Bamby", status: 3, piecesCount: 30 },
@@ -1091,7 +1093,9 @@ test("zoo: completing members sets status and pieces, rewards untouched", () => 
   assert.match(zooMember(out.xml!, "paddock_bear", "Max"), /"status":3/, "Max must complete");
   assert.match(zooMember(out.xml!, "paddock_bear", "Max"), /"piecesCount":30/, "Max must reach its requirement");
   assert.match(zooMember(out.xml!, "paddock_bear", "Zzz"), /"piecesCount":30/, "unknown names fall back to the global max");
-  assert.match(out.xml!, /"rewardCollected":false/, "reward flags must survive untouched");
+  assert.match(out.xml!, /"type":"paddock_bear","count":4/, "the family count must reach its collected count or the gift stays locked");
+  assert.match(out.xml!, /"rewardCollected":false/, "reward flags must survive untouched, the gift stays claimable");
+  assert.match(out.xml!, /"type":"paddock_flamingo","count":4/, "an untouched paddock keeps every byte, stale count included");
   assert.match(zooMember(out.xml!, "paddock_bear", "Bamby"), /"piecesCount":30/, "completed members stay byte-identical");
   assert.match(out.xml!, /"name":"Max","status":3,"piecesCount":10/, "a complete twin keeps its own count, never overfilled");
   balanced(out.xml!);
