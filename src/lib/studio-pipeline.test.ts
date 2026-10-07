@@ -1050,6 +1050,7 @@ const zooDoc = {
       ],
     },
     {
+      // deliberately stale: the count heal must run without a selection too
       balanceRatingVer: 1, type: "paddock_flamingo", count: 4, rewardCollected: true,
       members: [{ name: "Scooby", status: 3, piecesCount: 30 }],
     },
@@ -1095,7 +1096,8 @@ test("zoo: completing members sets status and pieces, rewards untouched", () => 
   assert.match(zooMember(out.xml!, "paddock_bear", "Zzz"), /"piecesCount":30/, "unknown names fall back to the global max");
   assert.match(out.xml!, /"type":"paddock_bear","count":4/, "the family count must reach its collected count or the gift stays locked");
   assert.match(out.xml!, /"rewardCollected":false/, "reward flags must survive untouched, the gift stays claimable");
-  assert.match(out.xml!, /"type":"paddock_flamingo","count":4/, "an untouched paddock keeps every byte, stale count included");
+  assert.match(out.xml!, /"type":"paddock_flamingo","count":1/, "a stale family count heals even where no member was selected");
+  assert.match(out.xml!, /"rewardCollected":true/, "healing the count never touches the claim flag");
   assert.match(zooMember(out.xml!, "paddock_bear", "Bamby"), /"piecesCount":30/, "completed members stay byte-identical");
   assert.match(out.xml!, /"name":"Max","status":3,"piecesCount":10/, "a complete twin keeps its own count, never overfilled");
   balanced(out.xml!);
