@@ -13,6 +13,7 @@ const {
   estimateBoxes,
   deliveryCheck,
   confirmedCount,
+  missingCardNumbers,
 } = await import("./cards-delivery.ts");
 
 /** The proven cap numbers this whole feature is built on. */
@@ -152,4 +153,32 @@ test("deliveryCheck: in-transit sends are never called missing", () => {
 test("confirmedCount clamps to the requested amount", () => {
   assert.equal(confirmedCount({ 1: 2, 2: 3 }, { 1: 5, 2: 1 }), 2 + 1);
   assert.equal(confirmedCount({ 1: 2 }, {}), 0);
+});
+
+test("parseCardSnapshot lists the owned album ids in ascending order", () => {
+  const snap = parseCardSnapshot(SAMPLE_XML, { ourCityId: "SELF01", updAt: 1791255971 });
+  assert.deepEqual(snap.ownedIds, [5, 100]);
+  // a save with no album rows yields an empty plan base, not a crash
+  const empty = parseCardSnapshot(
+    `<box data='{"box_type":"clan_kick_out"}' applied="0" time="9"/>`,
+    {
+      ourCityId: "SELF01",
+      updAt: 1,
+    },
+  );
+  assert.deepEqual(empty.ownedIds, []);
+  assert.equal(empty.albumUnique, 0);
+});
+
+test("missingCardNumbers: album and already-waiting cards are never re-sent", () => {
+  const all = [1, 2, 3, 4, 5, 6, 7];
+  // card 2 is owned, card 4 is already waiting in an inbox → only the rest go out
+  assert.deepEqual(missingCardNumbers(all, [2], [4]), [1, 3, 5, 6, 7]);
+  // overlaps between owned and waiting never duplicate a planned card,
+  // and junk (cardNumber of a non-card id is 0) never leaks into the queue
+  assert.deepEqual(missingCardNumbers([3, 1, 2], [1, 3], [3, 0]), [2]);
+  // a complete album plans nothing — the run exits with "nothing missing"
+  assert.deepEqual(missingCardNumbers(all, all, []), []);
+  // unsorted catalog input still leaves in numeric order (card_11 before card_100)
+  assert.deepEqual(missingCardNumbers([100, 11, 2, 1], [], []), [1, 2, 11, 100]);
 });

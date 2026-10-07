@@ -442,6 +442,20 @@ const vi = {
   cardsAlready: "đã có sẵn — bỏ qua",
   cardsVerifyFail: "Không đọc được save của bạn này",
   cardsPaused: "Tạm dừng — chờ thu thập",
+
+  // ---- Cards tab: thu thập thẻ cho mình (gửi về chính tài khoản qua SendBox) ----
+  cardsSelfTitle: "Thu thập thẻ cho mình",
+  cardsSelfHint:
+    "Phân tích album, tool gửi nốt những thẻ còn thiếu vào chính tài khoản này qua SendBox thật. Mở Township → hộp thư → nhận hết: game tự điền album, tự xong bộ và tự trả thưởng.",
+  cardsSelfAlbum: "Album",
+  cardsSelfMissing: "Còn thiếu",
+  cardsSelfWaiting: "Đang chờ nhận",
+  cardsSelfLive: "Hộp live",
+  cardsSelfAnalyze: "Phân tích",
+  cardsSelfRun: "Thu thập",
+  cardsSelfHold: "Hộp thư đầy — mở Township nhận hết, tool tự gửi tiếp khi có chỗ",
+  cardsSelfResumed: "Đã có chỗ trống — gửi tiếp",
+  cardsSelfNone: "Đã đủ mọi thẻ — không còn thiếu thẻ nào",
 };
 
 const en: typeof vi = {
@@ -863,6 +877,20 @@ const en: typeof vi = {
   cardsAlready: "already delivered — skipping",
   cardsVerifyFail: "Cannot read this friend's save",
   cardsPaused: "Paused — waiting for collection",
+
+  // ---- Cards tab: collect for myself (self-send through SendBox) ----
+  cardsSelfTitle: "Collect for myself",
+  cardsSelfHint:
+    "Analyzes the album, then sends every missing card to this same account through the real SendBox flow. Open Township → inbox → collect all: the game fills the album, completes each set and pays every reward itself.",
+  cardsSelfAlbum: "Album",
+  cardsSelfMissing: "Missing",
+  cardsSelfWaiting: "Waiting",
+  cardsSelfLive: "Live inbox",
+  cardsSelfAnalyze: "Analyze",
+  cardsSelfRun: "Collect",
+  cardsSelfHold: "Inbox full — collect in Township, the run continues by itself",
+  cardsSelfResumed: "Room available — continuing",
+  cardsSelfNone: "Album complete — no cards missing",
 };
 
 function overlay(p: Partial<typeof en>): typeof en {

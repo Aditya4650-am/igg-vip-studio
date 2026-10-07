@@ -440,12 +440,19 @@ export type InboxBox = {
  * Fresh CheckCity for the inbox preview: validates the token again, refreshes
  * the own-name/level, and lists what is waiting to be collected — the same
  * `boxes` array the receiver's game will show, which is how a delivery is
- * verified end to end.
+ * verified end to end. `total` is the uncapped inbox size: `boxes` itself
+ * lists at most 60 entries, while the 100-box cap math needs the real count.
  */
 export async function checkInbox(
   _token: string,
   sessionId: string,
-): Promise<{ name: string; level: number; boxes: InboxBox[]; error: string | null }> {
+): Promise<{
+  name: string;
+  level: number;
+  boxes: InboxBox[];
+  total: number;
+  error: string | null;
+}> {
   const acc = accounts.get(sessionId);
   if (!acc) throw new Error("Cards: chưa nạp LocalInfo — bấm Refresh trước.");
 
@@ -481,18 +488,18 @@ export async function checkInbox(
           /* a box we cannot parse is still counted above */
         }
       }
-      return { name: acc.name, level: acc.level, boxes, error: null };
+      return { name: acc.name, level: acc.level, boxes, total: raws.length, error: null };
     }
     const error =
       r.status === 401
         ? "Token bị từ chối (401) — làm mới LocalInfo"
         : `CheckCity: ${r.error ?? `HTTP ${r.status ?? "?"}`}`;
     acc.checkError = error;
-    return { name: acc.name, level: acc.level, boxes: [], error };
+    return { name: acc.name, level: acc.level, boxes: [], total: 0, error };
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     acc.checkError = error;
-    return { name: acc.name, level: acc.level, boxes: [], error };
+    return { name: acc.name, level: acc.level, boxes: [], total: 0, error };
   }
 }
 

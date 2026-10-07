@@ -77,6 +77,9 @@ export type CardSnapshot = {
   /** Unique cards in the album / total copies, for reporting. */
   albumUnique: number;
   albumCopies: number;
+  /** Every card number the receiver owns, ascending — the collect-for-self
+   *  plan reads it to know exactly which cards are still missing. */
+  ownedIds: number[];
 };
 
 /**
@@ -148,7 +151,25 @@ export function parseCardSnapshot(
     maxBoxTime,
     albumUnique,
     albumCopies,
+    ownedIds: [...seen].sort((a, b) => a - b),
   };
+}
+
+/**
+ * What "collect for myself" still has to send: every catalogued card that is
+ * neither in the album (`owned`) nor already on its way (`waiting` — boxes
+ * pending in the save or sitting live in our own inbox). Ascending numeric
+ * order, so the run always starts at card_01 and an unexpected prune can
+ * never take the high cards out first. Zero/negative junk is dropped.
+ */
+export function missingCardNumbers(
+  all: readonly number[],
+  owned: readonly number[],
+  waiting: readonly number[],
+): number[] {
+  const have = new Set<number>(owned);
+  for (const n of waiting) if (n > 0) have.add(n);
+  return [...new Set(all)].filter((n) => n > 0 && !have.has(n)).sort((a, b) => a - b);
 }
 
 /**

@@ -8,11 +8,13 @@ import type { CardAccountView, SendOutcome } from "@/lib/server/township/cardsen
 import {
   INBOX_BOX_CAP,
   INBOX_SAFE,
+  STALE_BACKLOG_RESERVE,
   cardIdOf,
   cardNumber,
   confirmedCount,
   deliveryCheck,
   estimateBoxes,
+  missingCardNumbers,
   sortCardsNumerically,
   type CardSnapshot,
 } from "@/lib/cards-delivery";
@@ -76,6 +78,16 @@ const CONFIRM_WAIT_MS = 3 * 60_000;
 const CONFIRM_ATTEMPTS = 2;
 const MAX_READ_FAILS = 8;
 const READ_RETRY_DELAY_MS = 700;
+/**
+ * How many boxes one `checkInbox` read can list — must match the server's
+ * `raws.slice(-60)` in `cardsend.server.ts`. Above that count the live list
+ * is a window, so "not visible" stops proving "not delivered" and the verify
+ * pass reports awaiting instead of resending (a resend could duplicate).
+ */
+const INBOX_LIST_MAX = 60;
+
+/** One own-inbox read: the uncapped box count plus the card ids it lists. */
+type LiveRead = { ok: true; total: number; cards: number[] } | { ok: false; error: string };
 
 type Phase = "sending" | "confirming";
 type WaveResult = "done" | "stop";
@@ -171,6 +183,17 @@ export function CardsTab({
 
   const [inbox, setInbox] = useState<InboxState | null>(null);
   const [inboxBusy, setInboxBusy] = useState(false);
+
+  /** The own-album analysis behind the "Collect for myself" panel: what the
+   *  album holds, what is already on its way, and the exact gap left. */
+  const [self, setSelf] = useState<{
+    owned: number;
+    waiting: number;
+    live: number;
+    missing: number[];
+    error: string | null;
+  } | null>(null);
+  const [selfBusy, setSelfBusy] = useState(false);
 
   const pushLog = (kind: LogLine["kind"], text: string) => {
     const line = { id: logIdRef.current++, kind, text };
@@ -717,6 +740,395 @@ export function CardsTab({
     }
   };
 
+  /** Read our own save + our own live inbox and compute the exact gap:
+   *  what the album lacks that is not already waiting to be collected. */
+  const analyzeSelf = async () => {
+    if (!acct || running || selfBusy) return;
+    setSelfBusy(true);
+    try {
+      const [sr, lr] = await Promise.all([
+        cardsFetchState({ data: { token, sessionId, cityId: acct.cityId } }),
+        cardsCheckInbox({ data: { token, sessionId } })
+          .then((r) => ({ ok: true as const, r }))
+          .catch((e) => ({
+            ok: false as const,
+            error: e instanceof Error ? e.message : String(e),
+          })),
+      ]);
+      if (!sr.ok) throw new Error(sr.error);
+      // Waiting = boxes still pending in the save ∪ cards sitting live in the
+      // inbox. Either way the card is on its way: never plan it twice.
+      const waiting = new Set<number>();
+      for (const b of sr.snap.boxes) if (b.card !== null && !b.applied) waiting.add(b.card);
+      if (lr.ok) {
+        for (const b of lr.r.boxes) {
+          const n = cardNumber(b.card ?? "");
+          if (n > 0) waiting.add(n);
+        }
+      }
+      const all = acct.cardIds.map(cardNumber).filter((n) => n > 0);
+      const missing = missingCardNumbers(all, sr.snap.ownedIds, [...waiting]);
+      setSelf({
+        owned: sr.snap.albumUnique,
+        waiting: waiting.size,
+        live: lr.ok ? lr.r.total : 0,
+        missing,
+        error: lr.ok ? null : lr.error,
+      });
+      pushLog(
+        "info",
+        `${tr("cardsSelfAlbum")} ${sr.snap.albumUnique}/${all.length} · ${tr("cardsSelfWaiting")} ${waiting.size} · ${tr("cardsSelfMissing")} ${missing.length}${lr.ok ? "" : ` · ⚠ ${lr.error}`}`,
+      );
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      setSelf({ owned: 0, waiting: 0, live: 0, missing: [], error: m });
+      pushLog("bad", m);
+    } finally {
+      setSelfBusy(false);
+    }
+  };
+
+  /**
+   * Collect for myself: send every missing card to this same account through
+   * the proven SendBox loop — same physics as the friend run (numeric order,
+   * delay ≥800ms, 403 retry, cap-aware waves, a stop button that stops), with
+   * one upgrade: `CheckCity` reads our *own* live inbox, so the cap is
+   * measured rather than guessed and delivery is proven the moment the box
+   * appears there. The game then absorbs the boxes itself — album, counters,
+   * set completions and set rewards all happen in the client, exactly like a
+   * gift from a friend.
+   */
+  const startSelf = async () => {
+    if (!acct || running) return;
+    const cityId = acct.cityId;
+    const all = acct.cardIds.map(cardNumber).filter((n) => n > 0);
+
+    stopRef.current = false;
+    setStop(false);
+    setRunning(true);
+    setProgress({
+      done: 0,
+      total: 0,
+      sent: 0,
+      rejected: 0,
+      errors: 0,
+      retried: 0,
+      resent: 0,
+      confirmed: 0,
+      awaiting: 0,
+      phase: "sending",
+    });
+    setFinished(null);
+    setLog([]);
+    const t0 = Date.now();
+
+    // Tallies the banner reads — every count is an observed outcome, never
+    // an estimate (rejected/error sends are never confirmed or resent).
+    let runTotal = 0;
+    let sent = 0;
+    let rejected = 0;
+    let errors = 0;
+    let retried = 0;
+    let resent = 0;
+    let confirmed = 0;
+    let awaiting = 0;
+    let done = 0;
+    let abort = false;
+    /** Card numbers that answered "sent" this run — what verify reads back. */
+    const sentList: number[] = [];
+
+    const flush = (phase: Phase) =>
+      setProgress({
+        done,
+        total: runTotal,
+        sent,
+        rejected,
+        errors,
+        retried,
+        resent,
+        confirmed,
+        awaiting,
+        phase,
+      });
+
+    const readState = async () => {
+      try {
+        return await cardsFetchState({ data: { token, sessionId, cityId } });
+      } catch (e) {
+        return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
+      }
+    };
+    const readLive = async (): Promise<LiveRead> => {
+      try {
+        const r = await cardsCheckInbox({ data: { token, sessionId } });
+        const cards: number[] = [];
+        for (const b of r.boxes) {
+          const n = cardNumber(b.card ?? "");
+          if (n > 0) cards.push(n);
+        }
+        return { ok: true, total: r.total, cards };
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
+      }
+    };
+    /** The live view as the loop sees it — bumped per send, refreshed per read. */
+    let liveOk = false;
+    let liveTotal = 0;
+    const liveCards = new Set<number>();
+    const applyLive = (r: LiveRead) => {
+      liveOk = r.ok;
+      if (r.ok) {
+        liveTotal = r.total;
+        liveCards.clear();
+        for (const n of r.cards) liveCards.add(n);
+      }
+    };
+
+    // ── baseline: our save (absorbed boxes + album) and our live inbox
+    // (sent but not yet absorbed). The two sets are disjoint, so together
+    // they hold every box that can count toward the 100-box cap; an
+    // unreadable source costs a reserve instead of counting as zero.
+    let snap: CardSnapshot | null = null;
+    for (let i = 0; i < 2 && !snap; i++) {
+      if (i) await sleep(READ_RETRY_DELAY_MS);
+      const r = await readState();
+      if (r.ok) snap = r.snap;
+      else if (i) pushLog("warn", `${tr("cardsVerifyFail")} — ${r.error}`);
+    }
+    for (let i = 0; i < 2 && !liveOk; i++) {
+      if (i) await sleep(READ_RETRY_DELAY_MS);
+      const r = await readLive();
+      applyLive(r);
+      if (!r.ok && i) pushLog("warn", `${tr("cardsInbox")} — ${r.error}`);
+    }
+
+    // ── plan from the fresh reads; the Analyze click is only the fallback
+    // when the save cannot be read at all.
+    let queue: number[];
+    if (snap) {
+      const waiting = new Set<number>();
+      for (const b of snap.boxes) if (b.card !== null && !b.applied) waiting.add(b.card);
+      if (liveOk) for (const n of liveCards) waiting.add(n);
+      queue = missingCardNumbers(all, snap.ownedIds, [...waiting]);
+      const skipped = Math.max(0, (self?.missing.length ?? 0) - queue.length);
+      if (skipped > 0) pushLog("info", `${skipped} ${tr("cardsAlready")}`);
+    } else {
+      queue = [...(self?.missing ?? [])].sort((a, b) => a - b);
+      if (queue.length > 0) pushLog("warn", tr("cardsVerifyFail"));
+    }
+    if (queue.length === 0) {
+      pushLog("ok", tr("cardsSelfNone"));
+      toast.success(tr("cardsSelfNone"));
+      setRunning(false);
+      setStop(false);
+      void analyzeSelf();
+      return;
+    }
+    runTotal = queue.length;
+    flush("sending");
+    pushLog(
+      "info",
+      `${queue.length} → ${cityId} · delay ${delayMs}ms · waves ≤ ${INBOX_SAFE}/${INBOX_BOX_CAP} · ${tr("cardsSelfTitle")}`,
+    );
+
+    /** Save footprint + live footprint — conservatively: an unreadable
+     *  source is a reserve, so the run is never blind-zero. */
+    const footprint = () =>
+      (snap ? snap.pendingTotal : STALE_BACKLOG_RESERVE) +
+      (liveOk ? liveTotal : STALE_BACKLOG_RESERVE);
+
+    // ── cap-aware waves
+    let qi = 0;
+    while (!abort && qi < queue.length) {
+      if (stopRef.current) {
+        abort = true;
+        break;
+      }
+      const room = INBOX_SAFE - footprint();
+
+      if (room <= 0) {
+        // A self hold says what to do — the inbox is ours to empty — then
+        // polls and resumes by itself the moment the game has collected
+        // enough room. One warn per failing read streak, no deadline.
+        pushLog("info", tr("cardsSelfHold"));
+        let resumed = false;
+        let readFails = 0;
+        let liveWarned = false;
+        for (let step = 0; ; step++) {
+          if (stopRef.current) break;
+          await sleep(WAIT_POLL_STEPS[Math.min(step, WAIT_POLL_STEPS.length - 1)]);
+          const [sr, lr] = await Promise.all([readState(), readLive()]);
+          if (sr.ok) {
+            snap = sr.snap;
+            readFails = 0;
+          } else if (++readFails === MAX_READ_FAILS) {
+            pushLog("warn", `${tr("cardsVerifyFail")} — ${sr.error}`);
+          }
+          if (lr.ok || !liveWarned) {
+            applyLive(lr);
+            if (!lr.ok) {
+              liveWarned = true;
+              pushLog("warn", `${tr("cardsInbox")} — ${lr.error}`);
+            }
+          }
+          if (INBOX_SAFE - footprint() > 0) {
+            resumed = true;
+            break;
+          }
+        }
+        if (stopRef.current) {
+          abort = true;
+          break;
+        }
+        if (resumed) pushLog("ok", `✓ ${tr("cardsSelfResumed")}`);
+        continue;
+      }
+
+      const batch = Math.min(room, queue.length - qi);
+      for (let k = 0; k < batch; k++) {
+        if (stopRef.current) {
+          abort = true;
+          break;
+        }
+        const n = queue[qi]!;
+        const cardId = cardIdOf(n);
+        try {
+          const r: SendOutcome = await cardsSend({
+            data: { token, sessionId, toCityId: cityId, cardId },
+          });
+          done++;
+          retried += r.retried;
+          if (r.status === "sent") {
+            sent++;
+            sentList.push(n);
+            // The box is in the live inbox the moment SendBox answers.
+            if (liveOk) liveTotal++;
+            pushLog("ok", `✓ ${cityId} · ${cardId}${r.retried ? ` (retry ×${r.retried})` : ""}`);
+          } else if (r.status === "rejected") {
+            rejected++;
+            pushLog("bad", `✗ ${cardId} — rejected (id không tồn tại)`);
+          } else {
+            errors++;
+            pushLog("bad", `✗ ${cardId} — ${r.detail ?? `HTTP ${r.http ?? "?"}`}`);
+            if (r.http === 401) {
+              abort = true;
+              pushLog("warn", tr("cardsAuthAbort"));
+              break;
+            }
+          }
+        } catch (e) {
+          done++;
+          errors++;
+          const m = e instanceof Error ? e.message : String(e);
+          pushLog("bad", `✗ ${cardId} — ${m.slice(0, 140)}`);
+        }
+        qi++;
+        flush("sending");
+        await sleep(delayMs);
+      }
+    }
+
+    // ── verify: for our own account the live inbox is readable, so delivery
+    // is proven by the box simply being there (the same array the game's
+    // inbox renders) — save absorption is the second, independent source.
+    // Absence only proves "missing" when both reads cover everything; then
+    // and only then does anything get resent, so a resend can never duplicate.
+    if (!abort && sentList.length > 0) {
+      flush("confirming");
+      pushLog("info", `${tr("cardsConfirming")} — ${cityId}`);
+      await sleep(CONFIRM_POLL_MS);
+      for (let attempt = 0; attempt <= CONFIRM_ATTEMPTS && !stopRef.current; attempt++) {
+        const [sr, lr] = await Promise.all([readState(), readLive()]);
+        if (sr.ok) snap = sr.snap;
+        applyLive(lr);
+        const exact = sr.ok && liveOk && liveTotal <= INBOX_LIST_MAX;
+        const missingNow: number[] = [];
+        let have = 0;
+        for (const n of sentList) {
+          if (liveCards.has(n) || (snap && (snap.fromUs[n] ?? 0) > 0)) have++;
+          else if (exact) missingNow.push(n);
+        }
+        confirmed = have;
+        awaiting = sentList.length - have;
+        if (missingNow.length === 0 || attempt === CONFIRM_ATTEMPTS) break;
+        pushLog(
+          "warn",
+          `${missingNow.length} ${tr("cardsResend")} — ${missingNow.slice(0, 6).map(cardIdOf).join(" ")}${missingNow.length > 6 ? " …" : ""}`,
+        );
+        for (const n of missingNow) {
+          if (stopRef.current) break;
+          const cardId = cardIdOf(n);
+          try {
+            const r: SendOutcome = await cardsSend({
+              data: { token, sessionId, toCityId: cityId, cardId },
+            });
+            retried += r.retried;
+            if (r.status === "sent") {
+              resent++;
+              if (liveOk) liveTotal++;
+              pushLog("ok", `⟳ ${cityId} · ${cardId}`);
+            } else if (r.status === "error" && r.http === 401) {
+              abort = true;
+              pushLog("warn", tr("cardsAuthAbort"));
+              break;
+            } else {
+              pushLog("bad", `✗ ${cardId} — ${r.detail ?? `HTTP ${r.http ?? "?"}`}`);
+            }
+          } catch (e) {
+            const m = e instanceof Error ? e.message : String(e);
+            pushLog("bad", `✗ ${cardId} — ${m.slice(0, 140)}`);
+          }
+          flush("confirming");
+          await sleep(delayMs);
+        }
+        if (abort) break;
+        if (attempt < CONFIRM_ATTEMPTS) await sleep(CONFIRM_POLL_MS);
+      }
+      if (confirmed >= sentList.length) {
+        pushLog("ok", `${tr("cardsConfirmed")} — ${sentList.length}/${sentList.length}`);
+      } else {
+        pushLog("info", `${tr("cardsAwaiting")} — ${confirmed}/${sentList.length}`);
+      }
+    }
+
+    flush("sending");
+    pushLog(
+      abort && stopRef.current ? "warn" : errors > 0 ? "warn" : "ok",
+      `${tr("cardsDone")}: ✓ ${sent} · ✗ ${rejected} · ⚠ ${errors}${retried ? ` · ⟳ ${retried}` : ""}${resent ? ` · +⟳ ${resent}` : ""} · ✓✓ ${confirmed} · ⏳ ${awaiting}`,
+    );
+
+    // The wall-clock verdict for the banner and the toast — a run is a
+    // success whenever every planned card went out, receipts included.
+    const seconds = Math.max(1, Math.round((Date.now() - t0) / 1000));
+    const ok = !abort && sent === runTotal && rejected === 0 && errors === 0;
+    setFinished({
+      ok,
+      stopped: abort,
+      sent,
+      rejected,
+      errors,
+      retried,
+      resent,
+      confirmed,
+      awaiting,
+      total: runTotal,
+      seconds,
+    });
+    const desc = `${sent}/${runTotal} ✓ · ${rejected} ✗ · ${errors} ⚠${retried ? ` · ⟳ ${retried}` : ""}${resent ? ` · +⟳ ${resent}` : ""} · ✓✓${confirmed}${awaiting ? ` · ⏳ ${awaiting}` : ""} · ${seconds}s`;
+    if (ok) {
+      toast.success(tr("cardsComplete"), { description: desc });
+    } else {
+      toast(abort ? tr("cardsStopped") : tr("cardsComplete"), { description: desc });
+    }
+
+    setRunning(false);
+    setStop(false);
+    // Re-read the album so the panel shows the world as it is now: the sent
+    // cards sit in the inbox waiting, and after the game collects them the
+    // next Analyze shows them owned.
+    void analyzeSelf();
+  };
+
   /** Every group of exactly 10 cards, set_01 … set_16 — the whole catalog,
    *  all visible at once, each card its own tickable button. */
   const cardGroups = useMemo(() => {
@@ -893,6 +1305,75 @@ export function CardsTab({
           </div>
         </div>
       </div>
+
+      {/* ── collect for myself: close the gap to 151/151 ─────────── */}
+      <section className="panel">
+        <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-cyan uppercase">
+          🎴 {tr("cardsSelfTitle")}
+          {running ? (
+            <span className="state-badge ml-auto animate-pulse rounded-full bg-cyan/15 px-2.5 py-1 text-[11px] text-cyan">
+              {stop ? `🛑 ${tr("cardsStopping")}` : `● ${tr("cardsRunning")}`}
+            </span>
+          ) : null}
+        </h3>
+        <p className="mb-3 max-w-3xl text-xs leading-relaxed text-muted">{tr("cardsSelfHint")}</p>
+
+        {self ? (
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-xs tabular-nums">
+            <span className="state-badge rounded-full bg-purple/15 px-2 py-0.5 text-purple">
+              {tr("cardsSelfAlbum")}: {self.owned}/{acct?.cardIds.length ?? 0}
+            </span>
+            <span className="state-badge rounded-full bg-input px-2 py-0.5 text-muted">
+              {tr("cardsSelfWaiting")}: {self.waiting}
+            </span>
+            <span className="state-badge rounded-full bg-input px-2 py-0.5 text-muted">
+              {tr("cardsSelfLive")}: {self.live}
+            </span>
+            <span className="state-badge rounded-full bg-amber/15 px-2 py-0.5 text-amber">
+              {tr("cardsSelfMissing")}: {self.missing.length}
+            </span>
+            {self.missing.length > 0 ? (
+              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted">
+                {self.missing.map((n) => cardIdOf(n)).join(" ")}
+              </span>
+            ) : (
+              <span className="text-ok">✓ {tr("cardsSelfNone")}</span>
+            )}
+          </div>
+        ) : null}
+        {self?.error ? <p className="mb-3 text-xs text-amber">⚠ {self.error}</p> : null}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="ghost" disabled={!acct || running || selfBusy} onClick={analyzeSelf}>
+            {selfBusy ? "…" : `🔍 ${tr("cardsSelfAnalyze")}`}
+          </Button>
+          <Button
+            variant="success"
+            disabled={!acct || running || !self || self.missing.length === 0}
+            onClick={startSelf}
+          >
+            {running
+              ? tr("cardsRunning")
+              : `🎴 ${tr("cardsSelfRun")} · ${self?.missing.length ?? 0}`}
+          </Button>
+          <Button
+            variant="danger"
+            disabled={!running}
+            onClick={() => {
+              stopRef.current = true;
+              setStop(true);
+            }}
+          >
+            {stop ? tr("cardsStopping") : tr("cardsStop")}
+          </Button>
+          {self && self.missing.length > 0 ? (
+            <span className="state-badge rounded-full bg-input px-3 py-1.5 text-xs font-medium text-muted tabular-nums">
+              {tr("cardsEstimate")}: {self.missing.length} · ~
+              {Math.ceil((self.missing.length * (delayMs + 450)) / 1000)}s
+            </span>
+          ) : null}
+        </div>
+      </section>
 
       {/* ── friends + catalog, side by side on wide screens ──────── */}
       <div className="grid gap-3 lg:grid-cols-2">
