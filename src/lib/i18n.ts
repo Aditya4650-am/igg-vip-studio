@@ -453,9 +453,9 @@ const vi = {
   cardsSelfLive: "Hộp live",
   cardsSelfAnalyze: "Phân tích",
   cardsSelfRun: "Thu thập",
-  cardsSelfHold: "Hộp thư đầy — mở Township nhận hết, tool tự gửi tiếp khi có chỗ",
-  cardsSelfResumed: "Đã có chỗ trống — gửi tiếp",
   cardsSelfNone: "Đã đủ mọi thẻ — không còn thiếu thẻ nào",
+  cardsSelfPopupTitle: "Gửi thẻ thành công!",
+  cardsSelfPopupOk: "OK",
 };
 
 const en: typeof vi = {
@@ -888,9 +888,9 @@ const en: typeof vi = {
   cardsSelfLive: "Live inbox",
   cardsSelfAnalyze: "Analyze",
   cardsSelfRun: "Collect",
-  cardsSelfHold: "Inbox full — collect in Township, the run continues by itself",
-  cardsSelfResumed: "Room available — continuing",
   cardsSelfNone: "Album complete — no cards missing",
+  cardsSelfPopupTitle: "All cards sent!",
+  cardsSelfPopupOk: "OK",
 };
 
 function overlay(p: Partial<typeof en>): typeof en {
