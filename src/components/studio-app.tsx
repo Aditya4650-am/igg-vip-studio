@@ -2611,7 +2611,20 @@ export function StudioApp() {
                         on ? "feature-tab--active text-primary-fg" : "text-muted hover:text-fg",
                       )}
                     >
-                      <span className="feature-tab-emoji" aria-hidden="true">{TAB_EMOJI[id]}</span>
+                      <span className="feature-tab-emoji" aria-hidden="true">
+                        {id === "regatta" ? (
+                          /* The Regatta tab wears the game's own Regatta_Points
+                             artwork (public/events/) instead of a generic emoji. */
+                          <img
+                            src="/events/Regatta_Points.png"
+                            alt=""
+                            className="inline-block h-[1.15rem] w-[1.15rem] align-middle object-contain drop-shadow-sm"
+                            draggable={false}
+                          />
+                        ) : (
+                          TAB_EMOJI[id]
+                        )}
+                      </span>
                       <span className="whitespace-nowrap">{tabLabel}</span>
                       {id !== "profile" && tabCount[id] > 0 ? (
                         <span className={cn("tabular-nums", on ? "text-primary-fg/70" : "text-primary")}>
@@ -3306,7 +3319,12 @@ export function StudioApp() {
                   <div className="space-y-3">
                     <section className="panel">
                       <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-cyan uppercase">
-                        <GameIcon name="regatta" className="size-4" />
+                        <img
+                          src="/events/Regatta_Points.png"
+                          alt=""
+                          className="size-4 shrink-0 object-contain drop-shadow-sm"
+                          draggable={false}
+                        />
                         {tr("regattaState")}
                       </h3>
                       <div className="flex flex-wrap gap-2">
@@ -3337,7 +3355,12 @@ export function StudioApp() {
 
                     <section className="panel">
                       <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-amber uppercase">
-                        <GameIcon name="regatta" className="size-4" />
+                        <img
+                          src="/events/Regatta_Points.png"
+                          alt=""
+                          className="size-4 shrink-0 object-contain drop-shadow-sm"
+                          draggable={false}
+                        />
                         {tr("regattaCount")}
                       </h3>
                       <div className="flex flex-wrap items-center gap-3">
@@ -3360,7 +3383,12 @@ export function StudioApp() {
                           disabled={busy || pendingRegatta}
                           onClick={() => void tool("regatta")}
                         >
-                          <GameIcon name="regatta" className="size-4" />
+                          <img
+                            src="/events/Regatta_Points.png"
+                            alt=""
+                            className="size-4 shrink-0 object-contain drop-shadow-sm"
+                            draggable={false}
+                          />
                           {pendingRegatta ? tr("regattaQueued") : tr("regattaAdd")}
                         </Button>
                         {pendingRegatta ? (
