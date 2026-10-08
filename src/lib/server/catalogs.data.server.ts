@@ -1476,19 +1476,19 @@ export const RAW_ITEMS: RawGroup[] = [
     "items": [
       {
         "id": "o1",
-        "label": "Order Token 1"
+        "label": "Bronze Ore"
       },
       {
         "id": "o2",
-        "label": "Order Token 2"
+        "label": "Gold Ore"
       },
       {
         "id": "o3",
-        "label": "Order Token 3"
+        "label": "Silver Ore"
       },
       {
         "id": "o4",
-        "label": "Order Token 4"
+        "label": "Platinum Ore"
       }
     ]
   },

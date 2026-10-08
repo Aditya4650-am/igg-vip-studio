@@ -126,7 +126,13 @@ export const GAME_ICON_MAP = {
     "Underwater Violet": "/game-icons/Style_Underwater_Violet.png",
     "Gold": "/game-icons/Style_Gold.png",
     "Bubble": "/game-icons/Soap_Bubbles.png",
-    "Train": "/game-icons/Style_Train.png"
+    "Train": "/game-icons/Style_Train.png",
+
+    // Orders group — the 4 ore tokens, artwork supplied to public/events.
+    "Bronze Ore": "/events/Bronze_Ore.webp",
+    "Gold Ore": "/events/Gold_Ore.webp",
+    "Silver Ore": "/events/Silver_Ore.webp",
+    "Platinum Ore": "/events/Platinum_Ore.webp"
   },
   "barn": {
     "aloeLeaves": "/barn-goods/aloeLeaves.webp",
