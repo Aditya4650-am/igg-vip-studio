@@ -1065,7 +1065,7 @@ const Chip = memo(function Chip({
             src={iconSrc}
             alt=""
             className="chip-asset-img"
-            loading="lazy"
+            loading="eager"
             decoding="async"
             draggable={false}
           />
