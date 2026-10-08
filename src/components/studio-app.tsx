@@ -3086,8 +3086,6 @@ export function StudioApp() {
 
                 {tab === "events" && (
                   <div className="space-y-3">
-                    <p className="text-sm text-muted">{tr("eventsHint")}</p>
-
                     <section className="panel">
                       <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-cyan uppercase">
                         <img src="/events/bloom.png" alt="" className="event-icon" draggable={false} />
@@ -3220,7 +3218,6 @@ export function StudioApp() {
                           </Button>
                         ) : null}
                       </div>
-                      <p className="mt-3 text-xs text-muted">{tr("frozenHint")}</p>
                     </section>
                   </div>
                 )}

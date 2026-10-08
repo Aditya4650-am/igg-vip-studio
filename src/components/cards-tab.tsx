@@ -1179,7 +1179,6 @@ export function CardsTab({
             <h3 className="mt-0.5 text-base font-bold tracking-tight">
               {tr("cardsCards")} · SendBox
             </h3>
-            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted">{tr("cardsHint")}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {acct ? (
@@ -1322,7 +1321,6 @@ export function CardsTab({
             </span>
           ) : null}
         </h3>
-        <p className="mb-3 max-w-3xl text-xs leading-relaxed text-muted">{tr("cardsSelfHint")}</p>
 
         {self ? (
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs tabular-nums">
