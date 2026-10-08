@@ -2261,7 +2261,7 @@ export function StudioApp() {
         <div className="login-language absolute top-4 right-4 z-10">
           <LangSwitch lang={lang} onChange={setLangPersist} />
         </div>
-        <div className="login-grid mx-auto min-h-[calc(100dvh-4rem)] w-full max-w-6xl items-center gap-8">
+        <div className="login-grid mx-auto min-h-[calc(100dvh-8.5rem)] w-full max-w-6xl items-center gap-8">
           <section className="login-visual gate-in" aria-label="IGG VIP TOOL">
             <div className="login-brand-lockup">
               <span className="login-brand-mark"><Mark className="size-9" /></span>
@@ -2375,6 +2375,14 @@ export function StudioApp() {
             </div>
           </section>
         </div>
+        <footer className="login-footer gate-in">
+          <span className="login-footer-rule" aria-hidden="true" />
+          <p className="login-footer-credit">
+            {"DESIGNED & DEVELOPED BY "}
+            <span className="login-brand-wordmark">{"ZENITSU & IGG"}</span>
+          </p>
+          <span className="login-footer-rule" aria-hidden="true" />
+        </footer>
       </main>
     );
   }
