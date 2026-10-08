@@ -454,6 +454,11 @@ const vi = {
   cardsSelfAnalyze: "Phân tích",
   cardsSelfRun: "Thu thập",
   cardsSelfNone: "Đã đủ mọi thẻ — không còn thiếu thẻ nào",
+  cardsSelfInbox: "thẻ đang ở trong hộp — mở game thu thập hết",
+  cardsSelfFull: "hộp sắp đầy — thu thập trong game trước khi gửi tiếp",
+  cardsSelfFullRun: "Hộp đã đầy — mở game thu thập hết trước, rồi bấm Thu thập lại",
+  cardsSelfLeft: "thẻ còn lại — thu thập trong game rồi bấm Thu thập lại",
+  cardsSelfPartial: "Đã gửi xong — hộp đầy, còn thẻ chưa gửi",
   cardsSelfPopupTitle: "Gửi thẻ thành công!",
   cardsSelfPopupOk: "OK",
 };
@@ -889,6 +894,11 @@ const en: typeof vi = {
   cardsSelfAnalyze: "Analyze",
   cardsSelfRun: "Collect",
   cardsSelfNone: "Album complete — no cards missing",
+  cardsSelfInbox: "cards waiting in your inbox — open the game and collect all",
+  cardsSelfFull: "inbox nearly full — collect in game before sending more",
+  cardsSelfFullRun: "Inbox is full — open the game and collect everything first, then run Collect again",
+  cardsSelfLeft: "left — collect in game, then run Collect again",
+  cardsSelfPartial: "Sent — inbox full, more cards left",
   cardsSelfPopupTitle: "All cards sent!",
   cardsSelfPopupOk: "OK",
 };

@@ -197,6 +197,7 @@ export function CardsTab({
     owned: number;
     waiting: number;
     live: number;
+    pending: number;
     missing: number[];
     error: string | null;
   } | null>(null);
@@ -779,6 +780,7 @@ export function CardsTab({
         owned: sr.snap.albumUnique,
         waiting: waiting.size,
         live: lr.ok ? lr.r.total : 0,
+        pending: sr.snap.pendingTotal,
         missing,
         error: lr.ok ? null : lr.error,
       });
@@ -790,7 +792,7 @@ export function CardsTab({
       );
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
-      setSelf({ owned: 0, waiting: 0, live: 0, missing: [], error: m });
+      setSelf({ owned: 0, waiting: 0, live: 0, pending: 0, missing: [], error: m });
       pushLog("bad", m);
     } finally {
       setSelfBusy(false);
@@ -801,9 +803,12 @@ export function CardsTab({
    * Collect for myself: send every missing card to this same account through
    * the proven SendBox loop — same physics as the friend run (numeric order,
    * delay ≥800ms, 403 retry, a stop button that stops), with two upgrades of
-   * its own: it runs straight through with no cap-aware hold and no inbox
-   * notice (this inbox is ours — collect whenever, the game absorbs it), and
-   * a fully successful run opens the completion popup. `CheckCity` reads our
+   * its own: it runs straight through with no wave hold and no inbox notice
+   * mid-run, while the plan itself never exceeds the inbox's safe line — the
+   * 101st box in a full inbox evicts the oldest, which would destroy the
+   * cards this run just delivered, so whatever does not fit is named once at
+   * the end (collect in game, run again). A fully successful run opens the
+   * completion popup. `CheckCity` reads our
    * *own* live inbox, so delivery is proven the moment the box appears
    * there. The game then absorbs the boxes itself — album, counters,
    * set completions and set rewards all happen in the client, exactly like a
@@ -848,6 +853,9 @@ export function CardsTab({
     let abort = false;
     /** Card numbers that answered "sent" this run — what verify reads back. */
     const sentList: number[] = [];
+    /** Cards left for a later pass: over the safe line now, or skipped by a
+     *  resend that would have evicted something instead of filling it. */
+    let deferred = 0;
 
     const flush = (phase: Phase) =>
       setProgress({
@@ -928,12 +936,40 @@ export function CardsTab({
       if (queue.length > 0) pushLog("warn", tr("cardsVerifyFail"));
     }
     if (queue.length === 0) {
-      pushLog("ok", tr("cardsSelfNone"));
-      toast.success(tr("cardsSelfNone"));
+      // Nothing left to plan. Say which of the two truths this is: the
+      // album itself is full, or the rest of the cards is already sitting
+      // in the inbox waiting for the game to collect them.
+      const ownedNow = snap ? snap.ownedIds.length : (self?.owned ?? all.length);
+      const gap = Math.max(0, all.length - ownedNow);
+      const line = gap > 0 ? `${gap} ${tr("cardsSelfInbox")}` : tr("cardsSelfNone");
+      pushLog(gap > 0 ? "info" : "ok", line);
+      if (gap > 0) toast(line);
+      else toast.success(tr("cardsSelfNone"));
       setRunning(false);
       setStop(false);
       void analyzeSelf();
       return;
+    }
+
+    // ── prune guard: the inbox holds INBOX_BOX_CAP boxes — the 101st
+    // insert evicts the oldest down to 50, destroying cards this run just
+    // delivered. Only the safe headroom goes out (a slice decided before
+    // the first send, so the loop itself still runs straight through with
+    // no hold and no notice); the remainder is reported once at the end.
+    const usedNow = (snap?.pendingTotal ?? 0) + (liveOk ? liveTotal : 0);
+    const budget = Math.max(0, INBOX_SAFE - usedNow);
+    if (budget === 0) {
+      pushLog("warn", tr("cardsSelfFullRun"));
+      toast(tr("cardsSelfFullRun"));
+      setRunning(false);
+      setStop(false);
+      void analyzeSelf();
+      return;
+    }
+    deferred = Math.max(0, queue.length - budget);
+    if (deferred > 0) {
+      queue = queue.slice(0, budget);
+      pushLog("info", `${deferred} ${tr("cardsSelfLeft")}`);
     }
     runTotal = queue.length;
     flush("sending");
@@ -943,8 +979,8 @@ export function CardsTab({
     );
 
     // ── straight send: every planned card, one after another, no wave cap
-    // and no inbox hold — this inbox is ours, the game absorbs whatever
-    // lands in it. The loop only stops on Stop or an auth failure.
+    // and no inbox hold — the plan above already stops at the safe line,
+    // and this loop only stops on Stop or an auth failure.
     let qi = 0;
     while (!abort && qi < queue.length) {
       if (stopRef.current) {
@@ -1012,7 +1048,17 @@ export function CardsTab({
         if (missingNow.length === 0 || attempt === CONFIRM_ATTEMPTS) break;
         // A provably lost box is resent silently — the final summary line
         // already reports it as "+⟳ N", so no mid-run notice is needed.
-        for (const n of missingNow) {
+        // A resend is an insert like any other: it stops at the safe line
+        // too, or it would evict a card instead of filling the gap.
+        const room = Math.max(
+          0,
+          INBOX_SAFE - ((snap?.pendingTotal ?? 0) + (liveOk ? liveTotal : 0)),
+        );
+        const resendQ = missingNow.slice(0, room);
+        if (resendQ.length < missingNow.length) {
+          deferred += missingNow.length - resendQ.length;
+        }
+        for (const n of resendQ) {
           if (stopRef.current) break;
           const cardId = cardIdOf(n);
           try {
@@ -1048,12 +1094,13 @@ export function CardsTab({
     flush("sending");
     pushLog(
       abort && stopRef.current ? "warn" : errors > 0 ? "warn" : "ok",
-      `${tr("cardsDone")}: ✓ ${sent} · ✗ ${rejected} · ⚠ ${errors}${retried ? ` · ⟳ ${retried}` : ""}${resent ? ` · +⟳ ${resent}` : ""} · ✓✓ ${confirmed} · ⏳ ${awaiting}`,
+      `${tr("cardsDone")}: ✓ ${sent} · ✗ ${rejected} · ⚠ ${errors}${retried ? ` · ⟳ ${retried}` : ""}${resent ? ` · +⟳ ${resent}` : ""} · ✓✓ ${confirmed} · ⏳ ${awaiting}${deferred ? ` · ⏭ ${deferred}` : ""}`,
     );
 
     // The wall-clock verdict for the banner, the toast and the popup — a
     // run is a success whenever every planned card went out, receipts
-    // included; only a success earns the completion dialog.
+    // included; only a success with nothing deferred earns the completion
+    // dialog (a capped pass is honest about the cards still to come).
     const seconds = Math.max(1, Math.round((Date.now() - t0) / 1000));
     const ok = !abort && sent === runTotal && rejected === 0 && errors === 0;
     setFinished({
@@ -1069,10 +1116,13 @@ export function CardsTab({
       total: runTotal,
       seconds,
     });
-    if (ok) setSelfPopup({ sent, total: runTotal, confirmed, seconds });
-    const desc = `${sent}/${runTotal} ✓ · ${rejected} ✗ · ${errors} ⚠${retried ? ` · ⟳ ${retried}` : ""}${resent ? ` · +⟳ ${resent}` : ""} · ✓✓${confirmed}${awaiting ? ` · ⏳ ${awaiting}` : ""} · ${seconds}s`;
-    if (ok) {
+    const allDone = ok && deferred === 0;
+    if (allDone) setSelfPopup({ sent, total: runTotal, confirmed, seconds });
+    const desc = `${sent}/${runTotal} ✓ · ${rejected} ✗ · ${errors} ⚠${retried ? ` · ⟳ ${retried}` : ""}${resent ? ` · +⟳ ${resent}` : ""} · ✓✓${confirmed}${awaiting ? ` · ⏳ ${awaiting}` : ""}${deferred ? ` · ${deferred} ${tr("cardsSelfLeft")}` : ""} · ${seconds}s`;
+    if (allDone) {
       toast.success(tr("cardsComplete"), { description: desc });
+    } else if (ok) {
+      toast(tr("cardsSelfPartial"), { description: desc });
     } else {
       toast(abort ? tr("cardsStopped") : tr("cardsComplete"), { description: desc });
     }
@@ -1292,12 +1342,21 @@ export function CardsTab({
               <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted">
                 {self.missing.map((n) => cardIdOf(n)).join(" ")}
               </span>
+            ) : (acct?.cardIds.length ?? 0) - self.owned > 0 ? (
+              <span className="text-amber">
+                📥 {(acct?.cardIds.length ?? 0) - self.owned} {tr("cardsSelfInbox")}
+              </span>
             ) : (
               <span className="text-ok">✓ {tr("cardsSelfNone")}</span>
             )}
           </div>
         ) : null}
         {self?.error ? <p className="mb-3 text-xs text-amber">⚠ {self.error}</p> : null}
+        {self && self.pending + self.live >= INBOX_SAFE ? (
+          <p className="mb-3 text-xs text-amber">
+            ⚠ {self.pending + self.live}/{INBOX_BOX_CAP} · {tr("cardsSelfFull")}
+          </p>
+        ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="ghost" disabled={!acct || running || selfBusy} onClick={analyzeSelf}>
