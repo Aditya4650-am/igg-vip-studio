@@ -45,7 +45,7 @@ if sys.stderr is None:
 import webview  # pywebview - native WebView2 window
 
 APP_NAME = "IGG VIP Studio"
-APP_VERSION = "1.1.27"
+APP_VERSION = "1.1.28"
 
 # Where the app UI comes from. Override with env IGG_VIP_URL or
 # %APPDATA%\IGG-VIP-Studio\server.txt
@@ -1624,11 +1624,42 @@ class NativeBridge:
             return {"ok": False, "reason": "not-packaged"}
 
         current_exe = Path(sys.executable).resolve()
-        new_exe = current_exe.with_name(f"{current_exe.stem}-{version or 'new'}.exe")
+        install_dir = current_exe.parent
+        new_exe = install_dir / f"{current_exe.stem}-{version or 'new'}.exe"
         try:
             with urllib.request.urlopen(url, timeout=120) as resp:  # noqa: S310
                 payload = resp.read()
-            if zipfile.is_zipfile(io.BytesIO(payload)):
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "reason": f"download failed: {e}"}
+
+        is_zip = zipfile.is_zipfile(io.BytesIO(payload))
+        foldered = False
+        if is_zip:
+            with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+                foldered = _release_zip_is_folder(zf.namelist())
+
+        if is_zip and foldered:
+            # onedir release: the whole app folder is swapped, not one exe.
+            staged = _stage_folder_release(payload, expected, install_dir)
+            if not staged.get("ok"):
+                return staged
+            bat = install_dir / f"{current_exe.stem}-update.cmd"
+            bat.write_text(
+                _folder_updater_bat(
+                    staged["src"], staged["staging"], install_dir, current_exe
+                ),
+                encoding="ascii",
+            )
+            subprocess.Popen(
+                ["cmd", "/c", str(bat)],
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            threading.Timer(0.6, _quit_app).start()
+            return {"ok": True, "version": version}
+
+        # single-exe release (legacy URLs): swap the running executable itself.
+        try:
+            if is_zip:
                 with zipfile.ZipFile(io.BytesIO(payload)) as zf:
                     name = next((n for n in zf.namelist() if n.lower().endswith(".exe")), None)
                     if not name:
@@ -1654,6 +1685,67 @@ class NativeBridge:
                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         threading.Timer(0.6, _quit_app).start()
         return {"ok": True, "version": version}
+
+
+def _release_zip_is_folder(names: list[str]) -> bool:
+    """A foldered (onedir) release zips the whole app directory, so its entries
+    carry a directory component ("IGG VIP TOOL/_internal/python312.dll"). A
+    legacy release zip holds one loose exe at the archive root."""
+    return any("/" in n.replace("\\", "/") for n in names)
+
+
+def _stage_folder_release(payload: bytes, expected: str, install_dir: Path) -> dict:
+    """Verify and unpack an onedir release beside the install folder.
+
+    `CLIENT_UPDATE_SHA256` for a foldered release is the hash of the zip
+    itself — the CI workflow hashes the exact archive it attaches. Returns
+    {"ok": True, "src": <folder holding the new exe>, "staging": <unpack
+    root>} or {"ok": False, "reason": ...}. Nothing is written before the
+    hash check passes.
+    """
+    digest = hashlib.sha256(payload).hexdigest().lower()
+    if expected and digest != expected:
+        return {"ok": False, "reason": "sha256 mismatch"}
+    staging = install_dir.parent / (install_dir.name + ".new")
+    try:
+        if staging.exists():
+            shutil.rmtree(staging)
+        with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+            zf.extractall(staging)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": f"extract failed: {e}"}
+    entries = list(staging.iterdir())
+    # The release zips the app folder, so its payload sits one level down;
+    # a flat archive is accepted too.
+    src = entries[0] if len(entries) == 1 and entries[0].is_dir() else staging
+    if not any(p.is_file() and p.suffix.lower() == ".exe" for p in src.iterdir()):
+        return {"ok": False, "reason": "zip has no exe"}
+    return {"ok": True, "src": src, "staging": staging}
+
+
+def _folder_updater_bat(src: Path, staging: Path, install_dir: Path,
+                        current_exe: Path) -> str:
+    """The onedir swap script: wait for this process to exit (a running exe
+    may not be overwritten), copy the staged folder over the install folder,
+    relaunch, then clean up the staging folder and the script itself."""
+    return (
+        "@echo off\r\n"
+        "setlocal\r\n"
+        "set /a tries=0\r\n"
+        ":wait\r\n"
+        "ping 127.0.0.1 -n 2 >nul\r\n"
+        f'tasklist /fi "IMAGENAME eq {current_exe.name}" 2>nul '
+        f'| find /i "{current_exe.name}" >nul\r\n'
+        "if errorlevel 1 goto copy\r\n"
+        "set /a tries+=1\r\n"
+        "if %tries% lss 30 goto wait\r\n"
+        ":copy\r\n"
+        f'xcopy /y /e /q /i "{src}\\*" "{install_dir}\\" >nul\r\n'
+        f'start "" "{current_exe}"\r\n'
+        f'rmdir /s /q "{src}" >nul 2>&1\r\n'
+        f'rmdir /s /q "{staging}" >nul 2>&1\r\n'
+        'del "%~f0" >nul 2>&1\r\n'
+    )
 
 
 def _quit_app() -> None:

@@ -2770,8 +2770,15 @@ windowed mode PyInstaller 6.x leaves `sys.stdout`/`sys.stderr` as `None`, so
 bottle prints a banner on import and would otherwise crash startup.
 
 Client auto-update (`installUpdate`) fetches `CLIENT_UPDATE_URL` with no auth
-and refuses to swap the EXE unless the SHA-256 matches. The repository is
-**public** — measured 2026-09-30: the API reports `"private": false` and the
+and refuses the swap unless the SHA-256 matches. Since v1.1.28 (2026-10-07) the
+release is `IGG.VIP.TOOL.zip` — the whole onedir app folder — and the hash is
+of the **zip itself**; `installUpdate` tells a foldered archive apart by its
+directory-bearing entries (`_release_zip_is_folder`), stages it beside the
+install folder and swaps it with a `.cmd` that waits for the process to exit,
+`xcopy`s the staged folder over, relaunches and cleans up. A legacy
+single-exe URL (or a flat single-exe zip, hash of the EXE) still takes the old
+swap-the-exe path unchanged, so a server not yet pointed at the new asset keeps
+working. The repository is **public** — measured 2026-09-30: the API reports `"private": false` and the
 v1.1.27 asset answers HTTP 200 to an unauthenticated `HEAD` — so a GitHub
 release asset URL *does* work: `urllib` follows GitHub's 302 to
 `objects.githubusercontent.com` by itself, no token needed. Both env vars are
@@ -2792,10 +2799,12 @@ feature; setting both env vars is what makes it real.
 
 ### "decompression resulted in return code -1" = disk full
 
-Not a corrupt EXE and not a PyInstaller bug. The spec builds **onefile**
-(`runtime_tmpdir=None`, no `COLLECT`), so every launch unpacks ~300 MB into
-`%TEMP%\_MEIxxxx`; with no free bytes the bootloader's `inflate()` fails on the
-first large blob and the process exits `-1` before any of our Python runs.
+Not a corrupt EXE and not a PyInstaller bug. (Historical: this described the
+**onefile** build, the layout the client shipped until v1.1.28 — the spec is
+onedir now, see *Antivirus* below.) Onefile unpacks ~300 MB into
+`%TEMP%\_MEIxxxx` at every launch; with no free bytes the bootloader's
+`inflate()` fails on the first large blob and the process exits `-1` before
+any of our Python runs.
 Measured 2026-09-29: the machine had **0 bytes free** of 194.6 GB and had
 accumulated 17 leftover `_MEI*` folders (372 MB). Clearing stale temp plus the
 npm/uv caches gave 4.1 GB, and the rebuilt EXE opened its window normally —
@@ -2811,6 +2820,39 @@ The app runs in the **child** (`Win32_Process.ParentProcessId == $p.Id`), so
 polling `$p.MainWindowTitle` reports "hangs with no window" for an EXE that is
 working perfectly. Enumerate the child's windows instead, and kill the child
 too — stopping only the parent orphans live instances.
+
+### Antivirus: two warnings, two fixes, no crypter (2026-10-07)
+
+Reported with two artifacts: Defender quarantining the release EXE as
+`Trojan:Win32/Wacatac.C!ml`, and the SmartScreen "Windows protected your PC"
+dialog. These are **different problems** and are addressed separately. The
+report also asked repeatedly for "very strong encryption" so no warning could
+ever appear — that is a crypter, and it was declined: it converts a fixable
+false positive into a permanent, signature-worthy detection, and no layer of
+it can promise zero warnings anyway (detections are per-machine and
+per-definition-version).
+
+- **The Wacatac hit was PyInstaller onefile, and the build is now onedir
+  (v1.1.28).** The onefile bootloader ships the app as one encrypted blob and
+  unpacks it to `%TEMP%\_MEIxxxx` on every launch — the self-unpacking shape
+  malware authors also use, so heuristics score it down for everyone. The
+  spec now has `exclude_binaries=True` + `COLLECT` (folder
+  `dist/IGG VIP TOOL/`), `upx=False` kept as before; the release and artifact
+  are `IGG.VIP.TOOL.zip` (hash of the **zip**, see the auto-update note
+  above), and `build_exe.bat` zips the folder as step 3. `installUpdate`
+  gained the folder swap; the legacy single-exe path is untouched.
+- **Local builds need Python 3.12**, not the 3.14 on this machine: PyInstaller
+  6.22 ships no 3.14 bootloader and dies at the EXE step with "does not
+  include a pre-compiled bootloader". Use `py -3.12 -m PyInstaller …` (CI
+  already pins 3.12 for the same reason).
+- **The durable fix for the Wacatac detection is Microsoft's false-positive
+  portal** (microsoft.com/wdsi/filesubmission): submit the release zip, pick
+  "I believe this is a false positive", describe the PyInstaller build. If
+  confirmed the detection is removed for all clients. Re-obfuscating after a
+  submission restarts the cycle — a modified file is a new hash.
+- **SmartScreen is not a malware verdict**; it is the unsigned-app reputation
+  dialog. An OV/EV code-signing certificate removes it; so does accumulated
+  clean downloads of the same signed hash. No build trick deletes it.
 
 ## Deployment
 

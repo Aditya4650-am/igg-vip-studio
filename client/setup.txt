@@ -1,5 +1,5 @@
 ╔══════════════════════════════════════════════════════════════════╗
-║  🌟  IGG VIP TOOL — Township Studio  ·  v1.1.6                 ║
+║  🌟  IGG VIP TOOL — Township Studio  ·  v1.1.28                ║
 ║  Your complete setup & feature guide — from zero to pro 🚀     ║
 ╚══════════════════════════════════════════════════════════════════╝
 
@@ -12,7 +12,7 @@ every feature. Keep it open on your first run. Let's go! 🎮
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   🖥️  Windows 10 / 11 (64-bit)
-  📦  IGG VIP TOOL.exe v1.1.6 (no install needed — just run it!)
+  📦  IGG.VIP.TOOL.zip v1.1.28 (no install needed — extract & run!)
   📱  Android emulator — MEmu / BlueStacks / Nox / LDPlayer
        👉 Must be ROOTED 🔓 (Root mode ON in emulator settings)
        👉 Open Township in it at least ONCE 🏘️ (creates your city save)
@@ -24,7 +24,8 @@ every feature. Keep it open on your first run. Let's go! 🎮
 🚀  2. FIRST LAUNCH (2 minutes)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  1️⃣  Double-click  IGG VIP TOOL.exe ▶️
+  1️⃣  Extract the zip (right-click → Extract All 📂), then
+      double-click  IGG VIP TOOL\IGG VIP TOOL.exe ▶️
       No console window, no setup wizard — the studio opens directly. ✨
       ⏳ First open of the day can take ~30–60 sec (server waking up ☁️⏰).
          Second open is instant. ✅
@@ -119,6 +120,11 @@ every feature. Keep it open on your first run. Let's go! 🎮
 
   😴 First open slow? ......... Server waking up — wait 60 sec ☁️⏰
   🖼️ Images loading slowly? ... First load fills cache; reopen = instant ⚡
+  🛡️ Windows shows a warning? . SmartScreen (blue screen, unsigned app) =
+                                  click  More info ▶️ Run anyway ✅. This is
+                                  normal for any unsigned program and the
+                                  fix (code signing + Microsoft confirmation)
+                                  is already in progress ✅
   🔴 Device offline? .......... Restart emulator, re-pick device 📲
   📥 Load fails? .............. Root OFF 🔓 or Township never opened 🏘️
   ⌛ Session expired? ......... Connect & load again (10 sec) 🔗

@@ -15,23 +15,26 @@ game logic stays on the server.
 - For ADB features: an Android emulator (BlueStacks / Nox / LDPlayer / MEmu)
   with ADB enabled, or Android SDK platform-tools on PATH.
 
-## Download the prebuilt EXE
+## Download the prebuilt client
 
-Grab `IGG.VIP.TOOL.exe` from the latest release:
+Grab `IGG.VIP.TOOL.zip` from the latest release:
 **https://github.com/Aditya4650-am/igg-vip-studio/releases/latest**
 
-It is a windowed build, so no console window appears behind the app. Runs on
-64-bit Windows 10/11.
+Extract the zip and run `IGG VIP TOOL\IGG VIP TOOL.exe`. It is a windowed
+build, so no console window appears behind the app. Runs on 64-bit Windows
+10/11.
 
-> The asset is named `IGG.VIP.TOOL.exe`: GitHub replaces the spaces in the
-> local `IGG VIP TOOL.exe` when it uploads. The repository is public, so no
-> GitHub sign-in is needed — a plain download works. The same EXE is also
-> attached to each build as a workflow artifact (Actions → Build Windows
-> client → Artifacts), zipped under its original name.
+> The client ships as a folder (onedir) rather than one self-unpacking EXE.
+> PyInstaller onefile unpacks an encrypted payload to `%TEMP%` on every
+> launch, and that self-unpacking shape is what antivirus heuristics flag
+> (`Trojan:Win32/Wacatac`). A plain folder of files unpacks nothing and scans
+> as what it is. The repository is public, so no GitHub sign-in is needed —
+> a plain download works. The same zip is also attached to each build as a
+> workflow artifact (Actions → Build Windows client → Artifacts).
 
 ## Run it
 ```
-IGG VIP TOOL.exe
+IGG VIP TOOL\IGG VIP TOOL.exe
 ```
 
 ## Build it yourself
@@ -39,7 +42,8 @@ IGG VIP TOOL.exe
 cd client
 build_exe.bat
 ```
-The EXE is produced at `client\dist\IGG VIP TOOL.exe`.
+The app folder is produced at `client\dist\IGG VIP TOOL\`, and the release zip
+at `client\dist\IGG.VIP.TOOL.zip`.
 
 `build_exe.bat` builds with whatever Python is on PATH. If that interpreter is
 brand new, PyInstaller may not yet ship a bootloader for it, and the build can
@@ -65,7 +69,7 @@ rebuilding by either:
 | `pullLocalInfo(serial)` | Pull `mLocalInfo.xml`. |
 | `push(serial, b64, options)` | Force-stop, push save + `.bak`, optionally relaunch. |
 | `forceStop(serial)` | Force-stop the game package. |
-| `installUpdate(release)` | Download + verify (SHA-256) + swap in a new EXE. |
+| `installUpdate(release)` | Download + verify (SHA-256) + swap in a new release (app folder, or legacy single EXE). |
 | `loadSavedKey` / `saveKey` / `clearSavedKey` | Store the license key locally. |
 
 Game package assumed: `com.playrix.township` (save at

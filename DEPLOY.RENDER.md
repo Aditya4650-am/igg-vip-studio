@@ -48,8 +48,8 @@ and deploy time), so no extra package declaration is needed.
 | `IGG_VIP_OWNER` | ≥ 12 chars | Owner key for the Control panel. |
 | `DATABASE_URL` | Neon/Postgres string | Persistent DB (PGLite resets on redeploy). |
 | `PYTHON_BIN` | `python3` | Lets fetch_city.py spawn deterministically. |
-| `CLIENT_UPDATE_URL` | HTTPS URL of the client EXE | EXE auto-update. The release asset works as-is: `https://github.com/Aditya4650-am/igg-vip-studio/releases/download/<tag>/IGG.VIP.TOOL.exe` — the repo is public, so no token. |
-| `CLIENT_UPDATE_SHA256` | SHA-256 of that EXE | Auto-update integrity; `installUpdate` refuses the swap without it. The release body prints the hash. |
+| `CLIENT_UPDATE_URL` | HTTPS URL of the client **zip** | Client auto-update. The release asset works as-is: `https://github.com/Aditya4650-am/igg-vip-studio/releases/download/<tag>/IGG.VIP.TOOL.zip` — the repo is public, so no token. Legacy single-EXE URLs keep working. |
+| `CLIENT_UPDATE_SHA256` | SHA-256 of that **zip** (the EXE itself for a legacy single-exe URL) | Auto-update integrity; `installUpdate` refuses the swap without it. The release body prints the hash. |
 
 ## Step 4 — Deploy
 

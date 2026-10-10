@@ -6,13 +6,17 @@ including the Windows build runner before the EXE is packaged.
 
 from __future__ import annotations
 
+import hashlib
+import io
 import os
 import re
 import socket
 import sys
+import tempfile
 import types
 import unittest
 import urllib.request
+import zipfile
 from pathlib import Path
 
 # pywebview is imported at module import time and is not needed for these tests.
@@ -870,6 +874,88 @@ class CookieSafety(unittest.TestCase):
             src,
             "a cookie Domain would break the loopback proxy; keep cookies host-only",
         )
+
+
+class ReleaseZipLayout(unittest.TestCase):
+    """The release is a zipped onedir app folder; the updater must tell it
+    apart from the legacy single-exe zip so a server still pointing at an old
+    URL keeps working unchanged."""
+
+    def test_flat_exe_zip_is_the_legacy_layout(self):
+        self.assertFalse(c._release_zip_is_folder(["IGG VIP TOOL.exe"]))
+
+    def test_folder_entries_mark_the_onedir_layout(self):
+        self.assertTrue(
+            c._release_zip_is_folder(
+                ["IGG VIP TOOL/IGG VIP TOOL.exe",
+                 "IGG VIP TOOL/_internal/python312.dll"]
+            )
+        )
+
+
+class StageFolderRelease(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.install = Path(self._tmp.name) / "IGG VIP TOOL"
+        self.install.mkdir()
+
+    def _zip(self, entries: dict[str, bytes]) -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            for name, data in entries.items():
+                zf.writestr(name, data)
+        return buf.getvalue()
+
+    def test_matching_hash_unpacks_the_app_folder(self):
+        payload = self._zip({
+            "IGG VIP TOOL/IGG VIP TOOL.exe": b"MZ-fake",
+            "IGG VIP TOOL/_internal/mod.py": b"x",
+        })
+        expected = hashlib.sha256(payload).hexdigest()
+        out = c._stage_folder_release(payload, expected, self.install)
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(out["src"].name, "IGG VIP TOOL")
+        self.assertTrue((out["src"] / "IGG VIP TOOL.exe").is_file())
+        # staging sits beside the install folder, never inside it — an update
+        # must not copy the app onto its own leftovers.
+        self.assertEqual(out["staging"].parent, self.install.parent)
+        self.assertEqual(out["staging"].name, self.install.name + ".new")
+        self.assertNotEqual(out["staging"], self.install)
+
+    def test_wrong_hash_is_refused_before_anything_is_written(self):
+        payload = self._zip({"IGG VIP TOOL/IGG VIP TOOL.exe": b"MZ-fake"})
+        out = c._stage_folder_release(payload, "0" * 64, self.install)
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["reason"], "sha256 mismatch")
+        self.assertFalse((self.install.parent / (self.install.name + ".new")).exists())
+
+    def test_a_zip_without_an_exe_is_refused(self):
+        payload = self._zip({"IGG VIP TOOL/readme.txt": b"hi"})
+        expected = hashlib.sha256(payload).hexdigest()
+        out = c._stage_folder_release(payload, expected, self.install)
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["reason"], "zip has no exe")
+
+
+class FolderUpdaterBat(unittest.TestCase):
+    def test_waits_for_exit_then_swaps_and_relaunches(self):
+        bat = c._folder_updater_bat(
+            Path("C:\\x\\IGG VIP TOOL.new\\IGG VIP TOOL"),
+            Path("C:\\x\\IGG VIP TOOL.new"),
+            Path("C:\\x\\IGG VIP TOOL"),
+            Path("C:\\x\\IGG VIP TOOL\\IGG VIP TOOL.exe"),
+        )
+        self.assertIn(":wait", bat)
+        self.assertIn("tasklist", bat)
+        self.assertIn("xcopy /y /e /q /i", bat)
+        self.assertIn('start "" "C:\\x\\IGG VIP TOOL\\IGG VIP TOOL.exe"', bat)
+        # the running exe must be gone before xcopy may overwrite it, so the
+        # wait loop has to come before the copy.
+        self.assertLess(bat.index(":wait"), bat.index("xcopy"))
+        # cleanup: staged folder and the updater script itself both go.
+        self.assertIn("rmdir /s /q", bat)
+        self.assertIn('del "%~f0"', bat)
 
 
 if __name__ == "__main__":

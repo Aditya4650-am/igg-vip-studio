@@ -40,20 +40,23 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# onedir, NOT onefile: the onefile bootloader ships the whole app as one
+# encrypted blob and unpacks it to %TEMP%\_MEIxxxx on every launch. That
+# self-unpacking shape is the single largest contributor to antivirus
+# false-positives on this build (Trojan:Win32/Wacatac) — malware authors use
+# PyInstaller onefile heavily, so heuristics score it down for everyone. A
+# plain folder of files unpacks nothing and scans as what it is.
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="IGG VIP TOOL",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,                 # UPX often triggers antivirus false-positives
     upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,            # windowed build: no console window on launch
     disable_windowed_traceback=False,
     target_arch=None,
@@ -61,4 +64,14 @@ exe = EXE(
     entitlements_file=None,
     icon=str(ROOT / "icon.ico") if (ROOT / "icon.ico").exists() else None,
     version="version_info.txt" if (ROOT / "version_info.txt").exists() else None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name="IGG VIP TOOL",
 )
