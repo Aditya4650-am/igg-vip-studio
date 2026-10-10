@@ -2854,6 +2854,73 @@ per-definition-version).
   dialog. An OV/EV code-signing certificate removes it; so does accumulated
   clean downloads of the same signed hash. No build trick deletes it.
 
+### Device id: the EXE changed it on every restart (2026-10-11)
+
+Reported as *"clients see a different device id after they restart the exe"*. It
+is worse than cosmetic: single-device keys are `stableBoundKey(deviceId)`, so a
+changing id makes a paying client's own key read as *locked to another device*.
+
+**The machine id was never the problem — its delivery was.** `get_device_id()`
+has always been file-backed at `%APPDATA%/IGG-VIP-Studio/device.id` and is
+proven stable back-to-back by `test_back_to_back_launches_return_the_same_id`.
+The failure was two layers above it:
+
+- **pywebview's default is `private_mode=True`** (`webview/__init__.py`, the
+  `start()` signature and `_state` all carry it), whose own docstring reads
+  *"In private mode, cookies and local storage are not preserved"*. On Windows
+  `edgechromium.py` sets `IsInPrivateModeEnabled(True)` and deletes cookies on
+  exit. So `localStorage` is **empty at the start of every single launch** — the
+  "stored id" the web app trusted had never survived anything.
+- The web app's boot therefore minted a **fresh random id** on each launch
+  (`mintDeviceId()`), painted it, and only later tried to upgrade to the
+  file-backed id through the native bridge — whose wait is bounded at
+  30 × 50 ms = **1.5 s**. A cold WebView2 start loses that race, so the session
+  kept the random id. Warm launch: real id. Cold launch: random one. Exactly the
+  reported symptom.
+
+**The fix puts the id on the window URL.** `with_device_param()` in
+`igg_client.py` appends `?did=VIP-…` and `main()` builds the window URL from
+`get_device_id()` — so the id the page shows and the id the license binds to are
+one value, read **synchronously before React mounts**: no bridge, no polling, no
+storage, no race. The page reads it first in `readBootDeviceId()`; localStorage
+stays as the plain-browser fallback and minting stays the last resort.
+
+Points that are easy to get wrong:
+
+- **Apply it after `choose_window_url()`**, not before. That function may return
+  the loopback DoH proxy instead of the origin, and the proxy forwards
+  `handler.path` verbatim — query string included — so the param survives both
+  paths. Stripping it off a DNS-broken machine would bring the bug straight back.
+- **`normalize_base_url()` deliberately drops path and query**, so the param can
+  never ride along on it; only `with_device_param()` may add it.
+- **It replaces rather than appends** an existing `did`, so a stale one can never
+  be duplicated into two values.
+- **Both sides may ship in either order.** A new web app against an old EXE finds
+  no `?did=` and falls through to the bridge, which is unchanged; an old web app
+  against a new EXE ignores the param and still uses the bridge. Nothing is
+  coupled to a matching release.
+
+**The bridge path is kept, not deleted** — it is the compatibility layer above.
+A null answer from it never downgrades an id the URL already supplied.
+
+What this deliberately does **not** do: it does not set `private_mode=False`.
+Persistence of storage is not what makes the id stable, and flipping it would
+leave a WebView2 profile on every client machine for no gain. `saveKey` /
+`clearSavedKey` were already file-backed, so the saved license key never depended
+on localStorage either.
+
+Guard rails: `client/test_igg_client.py` gains `DeviceIdOnUrl` — the id lands on
+the URL, it round-trips through `parse_qs` (including a reserved-character id),
+an existing `did` is replaced not duplicated, an existing query survives, the
+loopback-proxy form carries it too, and an **AST** assertion on `main()` proves
+the URL is built from `get_device_id` and that `mint_device_id` is never called
+there. The AST read matters: a regex over the call cannot see past
+`normalize_base_url(resolve_server_url())`'s own closing parenthesis.
+`ui-regressions.test.mts` pins the boot order — `location.search` before
+`igg-vip-hwid` before `mintDeviceId()` — and that the EXE still wires the
+file-backed id in. Suite: 67 Python + 262 JS, typecheck clean, eslint reports no
+new problems.
+
 ## Deployment
 
 Render only, via `render.yaml`. This **must** be a persistent server: FetchCity

@@ -6,7 +6,9 @@ including the Windows build runner before the EXE is packaged.
 
 from __future__ import annotations
 
+import ast
 import hashlib
+import inspect
 import io
 import os
 import re
@@ -18,6 +20,7 @@ import unittest
 import urllib.request
 import zipfile
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 # pywebview is imported at module import time and is not needed for these tests.
 sys.modules.setdefault("webview", types.ModuleType("webview"))
@@ -149,6 +152,80 @@ class DeviceId(unittest.TestCase):
         fresh = c.get_device_id()
         self.assertRegex(fresh, r"^VIP(?:-[A-Z0-9]{4}){5}$")
         self.assertEqual(c.get_device_id(), fresh)
+
+
+class DeviceIdOnUrl(unittest.TestCase):
+    """The machine id must reach the page without depending on WebView2 storage.
+
+    pywebview defaults to private_mode, so localStorage is empty on every
+    launch; the window URL is what makes the id stable.
+    """
+
+    ID = "VIP-AAAA-BBBB-CCCC-DDDD-EEEE"
+
+    def test_the_id_lands_on_the_url(self):
+        url = c.with_device_param("https://igg-vip-studio-491.onrender.com/", self.ID)
+        self.assertIn("did=" + self.ID, url)
+
+    def test_the_id_is_url_encoded(self):
+        # An unencoded id would break the query if a future alphabet ever grew
+        # a reserved character; round-tripping through parse_qs proves it parses.
+        for device_id in (self.ID, "VIP-A&B=C?D-E"):
+            url = c.with_device_param("https://example.com", device_id)
+            got = parse_qs(urlsplit(url).query).get("did")
+            self.assertEqual(got, [device_id])
+
+    def test_an_existing_did_is_replaced_not_duplicated(self):
+        url = c.with_device_param(
+            "https://example.com/?did=VIP-STALE-STALE-STALE-STALE", self.ID
+        )
+        self.assertEqual(url.count("did="), 1)
+        self.assertEqual(parse_qs(urlsplit(url).query)["did"], [self.ID])
+
+    def test_an_existing_query_survives(self):
+        url = c.with_device_param("https://example.com/?lang=vi&tab=stats", self.ID)
+        q = parse_qs(urlsplit(url).query)
+        self.assertEqual(q["lang"], ["vi"])
+        self.assertEqual(q["tab"], ["stats"])
+        self.assertEqual(q["did"], [self.ID])
+
+    def test_the_loopback_proxy_form_also_carries_it(self):
+        # The DoH fallback serves the app from a loopback proxy; the id has to
+        # survive that path too or a DNS-broken machine gets a random id again.
+        url = c.with_device_param("http://127.0.0.1:42001/index.html", self.ID)
+        self.assertTrue(url.startswith("http://127.0.0.1:42001/index.html?"))
+        self.assertIn("did=" + self.ID, url)
+
+    def test_main_builds_the_window_url_from_the_file_backed_id(self):
+        # The window URL must be built from get_device_id(), so the id the page
+        # shows is the same one the license gets bound to. Read the AST rather
+        # than grepping: this has to survive reformatting the call across lines.
+        tree = ast.parse(inspect.getsource(c.main))
+        calls = list(ast.walk(tree))
+        builders = [
+            n
+            for n in calls
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "with_device_param"
+        ]
+        self.assertEqual(len(builders), 1, "main must build the window URL with with_device_param")
+        # Its second argument is the machine id itself...
+        self.assertEqual(len(builders[0].args), 2)
+        self.assertIsInstance(builders[0].args[1], ast.Name)
+        self.assertEqual(builders[0].args[1].id, "device_id")
+        # ...which must come from the file-backed getter...
+        getters = [
+            n
+            for n in calls
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "get_device_id"
+        ]
+        self.assertTrue(getters, "main must read the file-backed device id")
+        # ...and never from a fresh mint, which is the bug this fixes.
+        mints = [
+            n
+            for n in calls
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "mint_device_id"
+        ]
+        self.assertFalse(mints, "main must never mint a fresh device id")
 
 
 class LocalInfoPaths(unittest.TestCase):

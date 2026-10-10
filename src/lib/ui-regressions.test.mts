@@ -70,12 +70,28 @@ test("sidebar shell and login card share the same rgb comet ring", () => {
   }
 });
 
-test("device id waits for the native bridge instead of minting per launch", () => {
+test("device id comes from the window URL first — WebView2 runs InPrivate and wipes localStorage", () => {
   const tsx = read("../components/studio-app.tsx");
-  // The shell injects window.iggNative ~100ms after boot; a one-shot read
-  // here would miss it every launch and mint a fresh random id instead.
+  const py = read("../../client/igg_client.py");
+
+  // pywebview's default is private_mode=True, so WebView2 runs InPrivate and
+  // localStorage is EMPTY at the start of every EXE launch. An id that only
+  // lives in storage is therefore a fresh random one each time — the machine
+  // id has to arrive on the window URL instead.
+  assert.ok(py.includes("with_device_param("), "the EXE must put the machine id on the URL");
+  assert.ok(py.includes("device_id = get_device_id()"), "the URL id must be the file-backed one");
+
+  const src = tsx.slice(tsx.indexOf("const readBootDeviceId"), tsx.indexOf("setDeviceId(readBootDeviceId())"));
+  const urlAt = src.indexOf("location.search");
+  const storeAt = src.indexOf("igg-vip-hwid");
+  assert.ok(urlAt !== -1, "boot must read the ?did= param synchronously");
+  assert.ok(storeAt !== -1, "a plain browser still needs the localStorage fallback");
+  // The URL must win, or the EXE paints a random id before anything corrects it.
+  assert.ok(urlAt < storeAt, "the EXE's URL id must be read ahead of localStorage");
+  assert.ok(src.indexOf("mintDeviceId()") > storeAt, "minting must stay the very last resort");
+
+  // The bridge remains the fallback for EXE builds that predate the URL param.
   assert.ok(tsx.includes("igg-native-ready"), "boot must listen for bridge injection");
-  // Old EXE builds without deviceId must resolve immediately, never hang.
   assert.ok(tsx.includes('typeof bridge.deviceId !== "function"'), "old bridge must short-circuit");
 });
 

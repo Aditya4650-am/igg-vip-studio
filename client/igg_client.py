@@ -31,7 +31,7 @@ import zipfile
 from http.client import HTTPConnection, HTTPSConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 # In a windowed (no-console) build sys.stdout/sys.stderr are None, not a
 # NullWriter. Anything that writes to them - including libraries we do not
@@ -185,6 +185,29 @@ def normalize_base_url(url: str) -> str:
     ):
         return DEFAULT_SERVER_URL
     return urlunsplit((u.scheme, u.netloc, "", "", ""))
+
+
+def with_device_param(url: str, device_id: str) -> str:
+    """Carry the machine's device id to the page on the window URL itself.
+
+    pywebview defaults to `private_mode=True`, so WebView2 runs InPrivate and
+    `localStorage` is empty at the start of every launch (`webview/__init__.py`
+    documents it: "In private mode, cookies and local storage are not
+    preserved"). The web app's boot code therefore had nothing stored to read
+    and minted a fresh random id on each start, only to have the native bridge
+    overwrite it later - and the bridge wait is bounded at 1.5s, so a cold
+    WebView2 start lost that race and the session kept the random id. A key
+    bound to the machine then read as "locked to another device".
+
+    Putting the id on the URL makes it available to the page synchronously,
+    before React mounts: no bridge, no polling, no storage, no race. The
+    existing localStorage and bridge paths stay as fallbacks for plain
+    browsers and for older EXE builds, so either side can ship first.
+    """
+    u = urlsplit(url)
+    pairs = [(k, v) for (k, v) in parse_qsl(u.query, keep_blank_values=True) if k != "did"]
+    pairs.append(("did", device_id))
+    return urlunsplit((u.scheme, u.netloc, u.path, urlencode(pairs), u.fragment))
 
 
 _ALPH = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -1984,10 +2007,14 @@ def choose_window_url(base: str) -> str:
 
 
 def main() -> None:
-    url = choose_window_url(normalize_base_url(resolve_server_url()))
-
     bridge = NativeBridge()
-    get_device_id()  # ensure a stable device id exists for the app to match
+    # The file-backed id is this app's only device identity. Read it once and
+    # put it on the window URL, so the id the page shows and the id the license
+    # is bound to are the same value on every launch - no bridge timing involved.
+    device_id = get_device_id()
+    url = with_device_param(
+        choose_window_url(normalize_base_url(resolve_server_url())), device_id
+    )
     window = webview.create_window(
         APP_NAME,
         url,

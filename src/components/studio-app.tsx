@@ -1350,7 +1350,22 @@ export function StudioApp() {
       /* ignore */
     }
 
-    const readStoredOrMint = (): string => {
+    // Boot order, most authoritative first:
+    //   1. `?did=` on the URL. The EXE puts its file-backed machine id here, and
+    //      it is read synchronously - correct on the very first paint, with no
+    //      bridge, no polling and no storage involved.
+    //   2. localStorage: a plain browser's own id, stable across reloads.
+    //   3. A fresh random id: a browser's very first visit only.
+    // pywebview starts WebView2 with private_mode=True (its default), so
+    // localStorage is EMPTY on every EXE launch and step 3 would mint a new id
+    // each time - the URL is what makes the id stable inside the EXE.
+    const readBootDeviceId = (): string => {
+      try {
+        const fromUrl = new URLSearchParams(window.location.search).get("did");
+        if (fromUrl && isDeviceId(fromUrl)) return normalizeDeviceId(fromUrl);
+      } catch {
+        /* ignore */
+      }
       try {
         const hwid = localStorage.getItem("igg-vip-hwid");
         if (hwid && isDeviceId(hwid)) return normalizeDeviceId(hwid);
@@ -1366,16 +1381,16 @@ export function StudioApp() {
       return fresh;
     };
 
-    // Instant paint from the stored id. Inside the EXE this is then
-    // upgraded to the file-backed machine id below.
-    setDeviceId(readStoredOrMint());
+    // Paint the boot id at once. For an older EXE build, which does not put it
+    // on the URL, this is the localStorage value until the bridge answers.
+    setDeviceId(readBootDeviceId());
 
-    // The shell injects window.iggNative ~100ms after boot, i.e. AFTER this
-    // effect runs — reading it once here would miss it every launch and
-    // fall back to a fresh random id. So wait for the bridge: its ready
-    // event first, then a bounded poll (old EXE builds without deviceId
-    // resolve immediately; plain browsers hit the timeout and keep the
-    // stored id).
+    // Fallback for an EXE build that does not put the id on the URL. The shell
+    // injects window.iggNative ~100ms AFTER this effect runs, so reading it
+    // once would miss every launch: wait for its ready event first, then a
+    // bounded poll (old EXE builds without deviceId resolve immediately; plain
+    // browsers hit the timeout and keep the boot id). It only ever refines the
+    // id above — a null answer never downgrades it.
     void (async () => {
       const readNative = async (): Promise<string | null> => {
         try {
