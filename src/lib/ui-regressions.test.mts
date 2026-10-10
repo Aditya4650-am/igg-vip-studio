@@ -502,3 +502,59 @@ test("the Bloom & Buzz push is wired through the same choke point as every other
   }
   assert.ok(events.includes("stripWalletValues"), "the writer must self-check that only the pair moved");
 });
+
+test("the owner panel deletes a key for real, and only after a second confirming click", () => {
+  const tsx = read("../components/owner-hub.tsx");
+  const api = read("../lib/admin-api.ts");
+
+  // the server function exists and the panel calls it
+  assert.ok(/export const deleteKey = createServerFn/.test(api), "deleteKey must be a server function");
+  assert.ok(/deleteLicense\(data\.token, data\.key\)/.test(api), "deleteKey must reach deleteLicense");
+  assert.ok(tsx.includes("deleteKey"), "the key list must call deleteKey");
+
+  // a single stray click must not erase a key: the first press arms, the
+  // second confirms, and the armed state disarms itself on a timer
+  assert.ok(/pendingDelete === k\.key/.test(tsx), "the delete must require a confirming click");
+  assert.ok(/setPendingDelete\(k\.key\)/.test(tsx), "the trash button must arm the confirm");
+  assert.ok(/setTimeout\(\(\) => setPendingDelete\(null\)/.test(tsx), "an armed delete must disarm itself");
+  assert.ok(!/window\.confirm\(\s*["'`]/.test(tsx), "the confirm stays in the panel, not in a browser dialog");
+
+  // the owner key unlocks this panel — it must never offer a delete button
+  assert.ok(/k\.admin \?/.test(tsx), "the owner row must be handled separately");
+  assert.ok(tsx.includes('tr("owner")'), "the owner row shows a badge instead");
+
+  // the button is not reachable while another delete is in flight
+  assert.ok(/disabled=\{busy \|\| deleting\}/.test(tsx), "the confirm button must respect the in-flight delete");
+});
+
+test("delete strings exist in both master dictionaries", () => {
+  for (const key of ["licenseDelete", "licenseDeleting", "licenseDeleted", "deleteConfirm", "keyRule4"]) {
+    assert.ok(key in DICT.vi, `${key} missing from vi`);
+    assert.ok(key in DICT.en, `${key} missing from en`);
+    assert.ok(DICT.vi[key as keyof typeof DICT.vi].length > 0, `${key} empty in vi`);
+    assert.ok(DICT.en[key as keyof typeof DICT.en].length > 0, `${key} empty in en`);
+  }
+});
+
+test("the persisted licenses table stores every field the in-memory record has", () => {
+  const sql = read("../../migrations/0002_licenses.sql");
+  for (const col of [
+    "license_key",
+    "key_fp",
+    "plan",
+    "created_at",
+    "expires_at",
+    "duration_ms",
+    "is_group",
+    "max_devices",
+    "devices",
+    "bound_device",
+    "is_active",
+    "note",
+  ]) {
+    assert.ok(new RegExp(`\\b${col}\\b`).test(sql), `licenses table is missing ${col}`);
+  }
+  // `group` and `key` are reserved-ish in Postgres; the columns avoid them so
+  // neither backend needs quoting.
+  assert.ok(!/^\s+group\s/m.test(sql), "do not name a column `group`");
+});

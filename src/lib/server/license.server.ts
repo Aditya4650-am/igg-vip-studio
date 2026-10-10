@@ -1,5 +1,11 @@
 import { createHmac } from "node:crypto";
 import { fingerprintKey, openToken, sealToken, deviceWrapKey } from "./crypto.server";
+import {
+  deleteLicenseRow,
+  licensesPersisted,
+  loadLicenseRowsBounded,
+  saveLicenseRow,
+} from "./license-store.server";
 
 export type Plan = "trial" | "week" | "month" | "year" | "lifetime" | "custom";
 
@@ -155,6 +161,104 @@ function seed() {
 }
 seed();
 
+/** A copy that can be handed back to `put()` if the database write fails. */
+function snapshot(lic: License): License {
+  return { ...lic, devices: [...lic.devices] };
+}
+
+/** Forget a key entirely — the in-memory half of a delete. */
+function drop(lic: License) {
+  byFp.delete(lic.fp);
+  const k = lic.key.toLowerCase();
+  if (byKey.get(k) === lic.fp) byKey.delete(k);
+}
+
+/**
+ * Write one key to the durable store. The owner key is never stored: it is
+ * re-seeded from IGG_VIP_OWNER on every boot, it cannot be deleted, and there
+ * is no reason to keep another copy of it in a database.
+ */
+async function persist(lic: License) {
+  if (lic.admin) return;
+  await saveLicenseRow({
+    licenseKey: lic.key,
+    keyFp: lic.fp,
+    plan: lic.plan,
+    createdAt: lic.createdAt,
+    expiresAt: lic.expiresAt,
+    durationMs: lic.durationMs,
+    isGroup: lic.group,
+    maxDevices: lic.maxDevices,
+    devices: [...lic.devices],
+    boundDevice: lic.boundDevice,
+    isActive: lic.active,
+    note: lic.note,
+  });
+}
+
+/**
+ * Undo an in-memory change after the store rejected it, then rethrow.
+ *
+ * Annotated `never` so the compiler knows execution stops here: the callers
+ * fall through to a success return otherwise, and reporting an issue that the
+ * database refused is exactly the false success this exists to prevent.
+ */
+function rollback(lic: License, before: License | null, action: string): never {
+  if (before) {
+    put(before);
+    throw new Error(`${action} — the key was left as it was.`);
+  }
+  // never stored, and in the new-key path never published to the Maps either
+  drop(lic);
+  throw new Error(`${action} — no key was created.`);
+}
+
+/**
+ * Boot-time hydration of the in-memory cache from the database.
+ *
+ * Runs as a top-level await, which is the point: ESM blocks every importer
+ * until this module finishes evaluating, so no request can reach
+ * `verifyLicenseKey()` before the stored keys are loaded. A lazy or
+ * fire-and-forget load would leave a window after every restart in which a
+ * client's perfectly good key answers "Invalid key" — the exact failure this
+ * table exists to remove.
+ *
+ * A failure here must not stop the server: the owner key still seeds from
+ * memory, so the Control panel stays reachable and the problem is visible
+ * rather than a blank page.
+ */
+async function hydrateLicenses(): Promise<void> {
+  if (!licensesPersisted()) return;
+  try {
+    const rows = await loadLicenseRowsBounded();
+    for (const r of rows) {
+      if (r.licenseKey === ownerKey()) continue; // never shadow the owner key
+      put(
+        makeLic({
+          key: r.licenseKey,
+          plan: r.plan as Plan,
+          createdAt: r.createdAt,
+          expiresAt: r.expiresAt,
+          durationMs: r.durationMs,
+          group: r.isGroup,
+          maxDevices: r.maxDevices,
+          devices: r.devices,
+          boundDevice: r.boundDevice,
+          active: r.isActive,
+          admin: false,
+          note: r.note,
+        }),
+      );
+    }
+  } catch (err) {
+    console.error(
+      "[license] could not load stored keys — starting with none for this boot:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
+await hydrateLicenses();
+
 function findLicense(key: string) {
   const k = norm(key);
   if (!k) return null;
@@ -210,7 +314,7 @@ export function licenseStatus(token: string) {
   return snap;
 }
 
-export function issueLicense(
+export async function issueLicense(
   token: string,
   p: {
     plan: Plan;
@@ -235,6 +339,7 @@ export function issueLicense(
   if (!p.group && !key && bound) {
     const existing = [...byFp.values()].find((lic) => !lic.group && lic.boundDevice === bound);
     if (existing) {
+      const before = snapshot(existing);
       existing.active = true;
       existing.plan = p.plan;
       if (durationMs === 0) {
@@ -247,6 +352,11 @@ export function issueLicense(
         existing.durationMs += durationMs;
       }
       if (p.note !== undefined) existing.note = String(p.note).trim();
+      try {
+        await persist(existing);
+      } catch {
+        rollback(existing, before, "Could not store the renewed key");
+      }
       return adminSnap(existing);
     }
   }
@@ -269,11 +379,18 @@ export function issueLicense(
     note: (p.note ?? "").trim(),
   });
   if (lic.boundDevice) lic.devices = [lic.boundDevice];
+  // Store before publishing: a key that exists only in memory would look
+  // issued to the owner and then disappear on the next restart.
+  try {
+    await persist(lic);
+  } catch {
+    rollback(lic, null, "Could not store the new key");
+  }
   put(lic);
   return adminSnap(lic);
 }
 
-export function restoreLicense(
+export async function restoreLicense(
   token: string,
   p: { key: string; plan?: Plan; days?: number; hours?: number },
 ) {
@@ -281,6 +398,7 @@ export function restoreLicense(
   if (!actor.admin) throw new Error("Admin key required");
   const lic = findLicense(p.key);
   if (!lic) throw new Error("Unknown key");
+  const before = snapshot(lic);
   const plan = p.plan ?? lic.plan;
   const add = durationFor(plan === "custom" ? "custom" : plan, p.days, p.hours);
   lic.active = true;
@@ -296,7 +414,39 @@ export function restoreLicense(
     lic.expiresAt = base + add;
     lic.durationMs += add;
   }
+  try {
+    await persist(lic);
+  } catch {
+    rollback(lic, before, "Could not store the restored key");
+  }
   return adminSnap(lic);
+}
+
+/**
+ * Permanently delete a key.
+ *
+ * This is a delete, not a revocation: the record is removed outright so the
+ * string stops resolving at all. A client who pastes it gets "Invalid key"
+ * from `verifyLicenseKey`, and every session already unlocked with it dies on
+ * its next call to `requireToken` — which looks up the same missing record.
+ *
+ * The row is removed from the database BEFORE the in-memory copy, so a failed
+ * write leaves a key that is still listed and still unlockable and the owner
+ * can simply retry. The other order would leave the worst of both: gone from
+ * the panel, still opening the client.
+ *
+ * The owner key cannot be deleted — it would lock the Control panel until the
+ * next restart, and it is re-seeded from IGG_VIP_OWNER anyway.
+ */
+export async function deleteLicense(token: string, key: string) {
+  const { license: actor } = requireToken(token);
+  if (!actor.admin) throw new Error("Admin key required");
+  const lic = findLicense(key);
+  if (!lic) throw new Error("Unknown key");
+  if (lic.admin) throw new Error("The owner key cannot be deleted");
+  await deleteLicenseRow(lic.key);
+  drop(lic);
+  return { ok: true as const, key: lic.key };
 }
 
 export function listLicenses(token: string) {

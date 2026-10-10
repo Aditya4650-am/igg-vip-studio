@@ -15,13 +15,14 @@ import {
   Server,
   ShieldCheck,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Dict, Lang } from "@/lib/i18n";
-import { issueKey, listInbox, listKeys, publishUpdate, restoreKey } from "@/lib/admin-api";
+import { deleteKey, issueKey, listInbox, listKeys, publishUpdate, restoreKey } from "@/lib/admin-api";
 import { getRelease } from "@/lib/studio-api";
 
 type HubTab = "arch" | "keys" | "update" | "mail";
@@ -106,6 +107,8 @@ export function OwnerHub({
   const [note, setNote] = useState("");
   const [bindDevice, setBindDevice] = useState("");
   const [restoreTarget, setRestoreTarget] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [issued, setIssued] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [nextVer, setNextVer] = useState("1.17.0");
@@ -127,6 +130,14 @@ export function OwnerHub({
   useEffect(() => {
     void refresh().catch((e) => toast.error(e instanceof Error ? e.message : "Fail"));
   }, [refresh]);
+
+  // An armed Delete disarms itself: the first click arms, the second confirms,
+  // and walking away from it cancels — so a stray click can never erase a key.
+  useEffect(() => {
+    if (!pendingDelete) return;
+    const t = window.setTimeout(() => setPendingDelete(null), 6000);
+    return () => window.clearTimeout(t);
+  }, [pendingDelete]);
 
   const copy = (text: string) => {
     void navigator.clipboard?.writeText(text);
@@ -181,6 +192,27 @@ export function OwnerHub({
       toast.error(e instanceof Error ? e.message : "Fail");
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Delete is permanent: the server erases the key, so this client's string
+  // stops resolving and any session it already opened dies on its next call.
+  const onDelete = async (key: string) => {
+    setBusy(true);
+    setDeleting(true);
+    try {
+      await deleteKey({ data: { token, key } });
+      setPendingDelete(null);
+      // tidy the panels that still hold the dead string
+      if (issued === key) setIssued(null);
+      if (restoreTarget.trim() === key) setRestoreTarget("");
+      await refresh();
+      toast.success(tr("licenseDeleted"));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Fail");
+    } finally {
+      setBusy(false);
+      setDeleting(false);
     }
   };
 
@@ -341,6 +373,10 @@ export function OwnerHub({
                     <KeyRound className="mt-0.5 size-3.5 shrink-0 text-purple" />
                     {tr("keyRule3")}
                   </li>
+                  <li className="flex gap-2">
+                    <Trash2 className="mt-0.5 size-3.5 shrink-0 text-danger" />
+                    {tr("keyRule4")}
+                  </li>
                 </ul>
               </section>
 
@@ -475,6 +511,26 @@ export function OwnerHub({
                       <span className="ml-auto text-xs font-semibold text-amber tabular-nums">
                         {remain(k.remainingMs, k.lifetime, lang)}
                       </span>
+                      {k.admin ? (
+                        // the owner key unlocks this panel — deleting it would
+                        // lock you out until the next restart, so it has no button
+                        <span className="rounded-full bg-ok/15 px-2 py-0.5 text-xs text-ok">{tr("owner")}</span>
+                      ) : pendingDelete === k.key ? (
+                        <Button size="sm" variant="danger" disabled={busy || deleting} onClick={() => void onDelete(k.key)}>
+                          <Trash2 className="size-3.5" />
+                          {deleting ? tr("licenseDeleting") : tr("deleteConfirm")}
+                        </Button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="grid size-9 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-danger-deep/15 hover:text-danger"
+                          onClick={() => setPendingDelete(k.key)}
+                          aria-label={tr("licenseDelete")}
+                          title={tr("licenseDelete")}
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      )}
                       {k.note ? <p className="w-full text-xs text-muted">{k.note}</p> : null}
                       {k.devices.length ? (
                         <p className="w-full font-mono text-xs text-muted">{k.devices.join(" · ")}</p>

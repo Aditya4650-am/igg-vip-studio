@@ -2883,6 +2883,78 @@ need declaring: `python3` ships in Render's runtime image (Debian 12 bookworm)
 at both build and deploy time, which is what `spawn("python3", …)` relies on.
 Verify that assumption on a new host before trusting FetchCity there.
 
+## License keys: deleting one, and surviving a restart
+
+Before this, every key lived only in two module-level Maps in
+`license.server.ts` (`byFp` / `byKey`), so a Render restart or redeploy wiped
+the whole key set: clients came back with "Invalid key" and the Control panel
+showed an empty list. Persistence and a delete button landed together.
+
+**Persistence.** `migrations/0002_licenses.sql` holds one row per issued key,
+and `license-store.server.ts` is the write-through store behind those Maps. The
+Maps stay, because `verifyLicenseKey()` and `requireToken()` are **synchronous**
+and every caller in the request path depends on that.
+
+Three decisions not to reverse:
+
+- **Storage is Postgres only, gated on `DATABASE_URL`.** Render's free plan has
+  no persistent disk, so a local JSON file would be wiped on every cold start
+  and would fail silently at the one thing it was added for. Without
+  `DATABASE_URL` the app falls back to the in-memory PGLite, whose lifetime
+  equals the Maps' own, so writing to it is motion without effect —
+  persistence is switched off entirely (`LICENSE_STORE === "memory"`) and
+  behaviour is exactly what it was before. Do not "fix" this with a file store.
+- **Hydration is a top-level `await`**, and that is the point: ESM blocks every
+  importer until the module finishes evaluating, so no request can reach
+  `verifyLicenseKey()` before the stored keys are loaded. A lazy or
+  fire-and-forget load leaves a window after every restart in which a
+  customer's perfectly good key answers "Invalid key" — the exact failure the
+  table exists to remove. It is bounded (15 s) and never throws: a dead
+  database must not stop the owner key from seeding.
+- **`license-store.server.ts` imports `@/lib/db` lazily, inside its
+  functions**, and reads the switch straight off `process.env.DATABASE_URL`.
+  Importing `db.ts` at module scope runs its PGLite bootstrap on load, which
+  calls `import.meta.glob` — Vite-only — so a plain `node --test` process died
+  with `glob is not a function` on a module that was never going to touch a
+  database. That is what made `studio-pipeline.test.ts` fail. Do not hoist the
+  import back to the top of the file.
+
+The owner key is **never** written to the table: it is re-seeded from
+`IGG_VIP_OWNER` on every boot, so there is no row to orphan and one fewer copy
+of it in the world.
+
+**Delete** (`deleteLicense` in `license.server.ts`, `deleteKey` in
+`admin-api.ts`, the trash button in `owner-hub.tsx`) is a delete and not a
+revocation: the row and the Map entry both go, so the string stops resolving at
+all. A customer pasting it gets `Invalid key`, and every session it already
+opened dies on its next `requireToken` — which looks up the same missing
+record. `restoreLicense` answers `Unknown key`, so it cannot be resurrected.
+
+- The row goes **before** the Map entry. The other order leaves the worst of
+  both: gone from the panel, still opening the client.
+- **The owner key cannot be deleted** — it is what opens this panel, and
+  losing it locks you out until the next restart.
+- The confirm is two clicks and disarms itself after 6 s, so a stray click
+  cannot erase a key.
+- Deleting is **not a device ban**, and it cannot be one: a single-device key
+  with no custom string is `stableBoundKey(deviceId)`, so re-issuing to that
+  machine reproduces the same string. That is the documented renewal behaviour
+  ("create again = add time"). Nothing revives a deleted key on its own.
+
+Guard rails: `src/lib/license-keys.test.ts` (9 tests — the customer's key and
+its already-open session both die, restore cannot revive it, one delete leaves
+every other key intact, a group key dies for all its devices, the owner key and
+a customer token are both refused, an unknown key is refused, and the bound-key
+revival is pinned as by-design) plus three greps in `ui-regressions.test.mts`
+(the confirm wiring, the owner row having no button, every column of the
+table). The migration is validated against real Postgres: it applies cleanly
+and is **idempotent on re-run**, which it must be because `db:migrate` runs on
+every deploy.
+
+**Honest limit:** persistence engages only with `DATABASE_URL` set on Render.
+Without it the delete still works but the whole key set still resets on a
+deploy, exactly as before — a property of the host, not of this code.
+
 ## Skins: finding the real game ids
 
 Skin ids cannot be invented — a wrong id makes the tool write a skin the game

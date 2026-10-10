@@ -45,6 +45,13 @@ export const listKeys = createServerFn({ method: "POST" })
     return listLicenses(data.token);
   });
 
+export const deleteKey = createServerFn({ method: "POST" })
+  .validator(z.object({ token: z.string(), key: z.string().min(1) }))
+  .handler(async ({ data }) => {
+    const { deleteLicense } = await import("./server/license.server");
+    return deleteLicense(data.token, data.key);
+  });
+
 export const listInbox = createServerFn({ method: "POST" })
   .validator(z.object({ token: z.string() }))
   .handler(async ({ data }) => {
