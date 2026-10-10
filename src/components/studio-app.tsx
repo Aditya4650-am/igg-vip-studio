@@ -82,6 +82,20 @@ function nativeBridge(): NativeBridge | undefined {
   return (window as unknown as { iggNative?: NativeBridge }).iggNative;
 }
 
+// The WebView2 runtime injects window.chrome.webview before any page script
+// runs, so it is the only signal that answers "are we inside the EXE?"
+// synchronously at first paint. pywebview's own window.pywebview is injected on
+// navigation-completed — far too late to decide by — and a plain Edge/Chrome
+// has window.chrome but never window.chrome.webview. Used only to decide
+// whether minting a device id is allowed at all.
+function inWebView2(): boolean {
+  try {
+    return Boolean((window as unknown as { chrome?: { webview?: unknown } }).chrome?.webview);
+  } catch {
+    return false;
+  }
+}
+
 function downloadB64(name: string, b64: string) {
   const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);
@@ -1351,27 +1365,40 @@ export function StudioApp() {
     }
 
     // Boot order, most authoritative first:
-    //   1. `?did=` on the URL. The EXE puts its file-backed machine id here, and
-    //      it is read synchronously - correct on the very first paint, with no
-    //      bridge, no polling and no storage involved.
-    //   2. localStorage: a plain browser's own id, stable across reloads.
-    //   3. A fresh random id: a browser's very first visit only.
-    // pywebview starts WebView2 with private_mode=True (its default), so
-    // localStorage is EMPTY on every EXE launch and step 3 would mint a new id
-    // each time - the URL is what makes the id stable inside the EXE.
-    const readBootDeviceId = (): string => {
+    //   1. `?did=` on the URL — a current EXE build puts its file-backed machine
+    //      id here, read synchronously before React mounts: no bridge, no
+    //      polling, no storage, no race.
+    //   2. The bridge's deviceId() — the only path an older EXE build has.
+    //   3. localStorage — a plain browser's own id, stable across reloads.
+    //   4. A fresh random id — a browser's very first visit only.
+    //
+    // Inside the EXE minting is forbidden outright. pywebview starts WebView2
+    // with private_mode=True (its default), so localStorage is EMPTY on every
+    // launch and an allowed mint won every launch — that is exactly what made
+    // the id change on each restart, and it cost the client its key, which is
+    // bound to one id. An EXE therefore stays empty until the bridge fills it
+    // in, rather than ever showing a number that is not this machine's.
+    const inExe = inWebView2();
+
+    const urlDeviceId = (() => {
       try {
-        const fromUrl = new URLSearchParams(window.location.search).get("did");
-        if (fromUrl && isDeviceId(fromUrl)) return normalizeDeviceId(fromUrl);
+        const v = new URLSearchParams(window.location.search).get("did");
+        return v && isDeviceId(v) ? normalizeDeviceId(v) : null;
       } catch {
-        /* ignore */
+        return null;
       }
+    })();
+
+    const readStoredId = (): string | null => {
       try {
         const hwid = localStorage.getItem("igg-vip-hwid");
-        if (hwid && isDeviceId(hwid)) return normalizeDeviceId(hwid);
+        return hwid && isDeviceId(hwid) ? normalizeDeviceId(hwid) : null;
       } catch {
-        /* private mode */
+        return null; // private mode
       }
+    };
+
+    const mintNewId = (): string => {
       const fresh = mintDeviceId();
       try {
         localStorage.setItem("igg-vip-hwid", fresh);
@@ -1381,16 +1408,24 @@ export function StudioApp() {
       return fresh;
     };
 
-    // Paint the boot id at once. For an older EXE build, which does not put it
-    // on the URL, this is the localStorage value until the bridge answers.
-    setDeviceId(readBootDeviceId());
+    if (urlDeviceId) setDeviceId(urlDeviceId);
+    else if (inExe) setDeviceId(readStoredId() ?? "");
+    else setDeviceId(readStoredId() ?? mintNewId());
 
-    // Fallback for an EXE build that does not put the id on the URL. The shell
-    // injects window.iggNative ~100ms AFTER this effect runs, so reading it
-    // once would miss every launch: wait for its ready event first, then a
-    // bounded poll (old EXE builds without deviceId resolve immediately; plain
-    // browsers hit the timeout and keep the boot id). It only ever refines the
-    // id above — a null answer never downgrades it.
+    // How long the bridge may take to appear. A current EXE build has already
+    // answered on the URL; an older one has not, and the shell injects
+    // window.iggNative only after navigation completes, its installer then
+    // polling for up to 5s. The old 1.5s budget was shorter than that on a cold
+    // start — that was the whole race. Inside WebView2 the host object proves
+    // the bridge is coming, so waiting properly is correct rather than hopeful.
+    const bridgeBudgetMs = inExe && !urlDeviceId ? 20_000 : 1_500;
+
+    // Fill in (or correct) the id from the bridge. The shell injects
+    // window.iggNative only after navigation completes, so a one-shot read here
+    // would miss every launch: wait for its ready event first, then poll for
+    // the budget above. An old EXE build without deviceId short-circuits
+    // immediately — that build has no file-backed id to wait for. A null answer
+    // never downgrades an id the URL already supplied.
     void (async () => {
       const readNative = async (): Promise<string | null> => {
         try {
@@ -1436,7 +1471,7 @@ export function StudioApp() {
           };
           const tick = window.setInterval(() => {
             waited += 1;
-            if (probe() || waited >= 30) done(null);
+            if (probe() || waited * 50 >= bridgeBudgetMs) done(null);
           }, 50);
           window.addEventListener("igg-native-ready", onEvent);
           probe();
@@ -1567,6 +1602,15 @@ export function StudioApp() {
     setLoginErr("");
     if (candidate.length < 4) {
       setLoginErr(tr("errKey"));
+      return;
+    }
+    // Never verify against an empty id. The server binds an unbound key to
+    // whatever it is handed, so "" would bind the key to nothing and lock the
+    // real machine out on its next launch — strictly worse than the bug this
+    // whole change fixes. The bridge fills the id in within a couple of
+    // seconds; this only ever fires if it somehow never does.
+    if (!deviceId) {
+      setLoginErr(tr("errDeviceId"));
       return;
     }
     setBusy(true);
@@ -2311,11 +2355,14 @@ export function StudioApp() {
                 <span className="device-id-icon"><GameIcon name="device" /></span>
                 <div className="min-w-0 flex-1">
                   <span className="device-id-caption">{tr("deviceId")}</span>
-                  <code className="mt-1 block break-all font-mono text-xs leading-relaxed tabular-nums sm:text-sm">{deviceId}</code>
+                  <code className={`mt-1 block break-all font-mono text-xs leading-relaxed tabular-nums sm:text-sm${deviceId ? "" : " device-id-pending"}`}>
+                    {deviceId || tr("errDeviceId")}
+                  </code>
                 </div>
                 <button
                   type="button"
                   className="copy-button"
+                  disabled={!deviceId}
                   onClick={async () => {
                     let didCopy = false;
                     try {
@@ -2380,7 +2427,7 @@ export function StudioApp() {
               {loginErr ? (
                 <p className="login-error mt-3 flex items-start gap-2 px-3 py-2 text-sm text-err"><GameIcon name="warning" /><span>{loginErr}</span></p>
               ) : null}
-              <Button className="login-unlock mt-5 w-full" size="lg" disabled={busy} onClick={() => void unlock()}>
+              <Button className="login-unlock mt-5 w-full" size="lg" disabled={busy || !deviceId} onClick={() => void unlock()}>
                 <span className="icon-swap login-action-icon size-5">
                   <LoaderCircle className={cn("size-5", busy ? "is-on animate-spin" : "is-off")} />
                   <GameIcon name="unlock" className={cn("size-5", busy ? "is-off" : "is-on")} />

@@ -1515,6 +1515,14 @@ textarea {
   color: #94a3b8 !important;
 }
 
+/* Shown only while an EXE is waiting for the shell to hand over the machine
+   id. Minting a stand-in id instead is exactly what made the id change on every
+   restart, so the box stays visibly pending until the real one arrives. */
+.device-id-pending {
+  color: #64748b !important;
+  font-style: italic;
+}
+
 .copy-button {
   border-color: rgba(167, 139, 250, 0.28) !important;
   border-radius: 10px !important;

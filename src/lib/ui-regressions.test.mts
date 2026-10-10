@@ -81,18 +81,51 @@ test("device id comes from the window URL first — WebView2 runs InPrivate and 
   assert.ok(py.includes("with_device_param("), "the EXE must put the machine id on the URL");
   assert.ok(py.includes("device_id = get_device_id()"), "the URL id must be the file-backed one");
 
-  const src = tsx.slice(tsx.indexOf("const readBootDeviceId"), tsx.indexOf("setDeviceId(readBootDeviceId())"));
-  const urlAt = src.indexOf("location.search");
-  const storeAt = src.indexOf("igg-vip-hwid");
-  assert.ok(urlAt !== -1, "boot must read the ?did= param synchronously");
-  assert.ok(storeAt !== -1, "a plain browser still needs the localStorage fallback");
-  // The URL must win, or the EXE paints a random id before anything corrects it.
-  assert.ok(urlAt < storeAt, "the EXE's URL id must be read ahead of localStorage");
-  assert.ok(src.indexOf("mintDeviceId()") > storeAt, "minting must stay the very last resort");
+  const src = tsx.slice(tsx.indexOf("const urlDeviceId"), tsx.indexOf("setDeviceId(readStoredId() ?? mintNewId())"));
+  assert.ok(src.indexOf("location.search") !== -1, "boot must read the ?did= param synchronously");
+  assert.ok(src.indexOf("igg-vip-hwid") !== -1, "a plain browser still needs the localStorage fallback");
+  // localStorage may only ever be reached through readStoredId(), never first.
+  assert.ok(
+    src.indexOf("const urlDeviceId") < src.indexOf("const readStoredId"),
+    "the EXE's URL id must be resolved ahead of localStorage",
+  );
 
   // The bridge remains the fallback for EXE builds that predate the URL param.
   assert.ok(tsx.includes("igg-native-ready"), "boot must listen for bridge injection");
   assert.ok(tsx.includes('typeof bridge.deviceId !== "function"'), "old bridge must short-circuit");
+});
+
+test("inside the EXE the device id is never invented, and an empty one never reaches the server", () => {
+  const tsx = read("../components/studio-app.tsx");
+
+  // window.chrome.webview is injected by the WebView2 runtime before any page
+  // script runs, so it is the only synchronous "are we in the EXE?" signal.
+  // pywebview's own window.pywebview arrives on navigation-completed — too late.
+  assert.ok(tsx.includes("chrome?: { webview?: unknown }"), "boot must detect WebView2 synchronously");
+
+  // The whole bug was an allowed mint winning every launch inside the EXE.
+  // Minting must sit strictly behind the `else` branch that excludes inExe.
+  const branch = tsx.slice(tsx.indexOf("if (urlDeviceId) setDeviceId"), tsx.indexOf("const bridgeBudgetMs"));
+  assert.ok(branch.includes("else if (inExe)"), "the EXE must take its own branch");
+  assert.ok(
+    /else if \(inExe\) setDeviceId\(readStoredId\(\) \?\? ""\)/.test(branch),
+    "an EXE with no stored id must stay empty, never mint",
+  );
+  assert.ok(
+    /else setDeviceId\(readStoredId\(\) \?\? mintNewId\(\)\)/.test(branch),
+    "only a plain browser may mint",
+  );
+
+  // An EXE whose bridge is slow must be waited for, not raced. The old 1.5s
+  // budget was shorter than pywebview's own 5s installer.
+  assert.ok(tsx.includes("20_000"), "an EXE must wait properly for the bridge");
+  assert.ok(tsx.includes("inExe && !urlDeviceId ? 20_000 : 1_500"), "only an EXE waits long");
+
+  // A key binds on first use, so an empty id would bind it to nothing and
+  // lock the machine out on the next launch.
+  assert.ok(tsx.includes("if (!deviceId)"), "unlock must refuse an empty device id");
+  assert.ok(tsx.includes('setLoginErr(tr("errDeviceId"))'), "the refusal must be explained");
+  assert.ok(tsx.includes("disabled={busy || !deviceId}"), "the login button waits for the id");
 });
 
 test("every launch stops at the login screen, never auto-unlocks", () => {

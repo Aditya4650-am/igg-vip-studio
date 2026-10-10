@@ -2878,15 +2878,38 @@ The failure was two layers above it:
   kept the random id. Warm launch: real id. Cold launch: random one. Exactly the
   reported symptom.
 
-**The fix puts the id on the window URL.** `with_device_param()` in
-`igg_client.py` appends `?did=VIP-…` and `main()` builds the window URL from
-`get_device_id()` — so the id the page shows and the id the license binds to are
-one value, read **synchronously before React mounts**: no bridge, no polling, no
-storage, no race. The page reads it first in `readBootDeviceId()`; localStorage
-stays as the plain-browser fallback and minting stays the last resort.
+**Two fixes, and the second is the one that makes shipped EXEs correct.**
+
+**1. The id rides on the window URL.** `with_device_param()` in `igg_client.py`
+appends `?did=VIP-…` and `main()` builds the window URL from
+`get_device_id()` — one value for the id the page shows and the id the license
+binds to, read **synchronously before React mounts**: no bridge, no polling, no
+storage, no race.
+
+**2. Minting is forbidden inside the EXE, so a shipped build cannot regress.**
+This is the half that fixes EXEs already in the field. pywebview's own
+`window.pywebview` is injected on *navigation-completed*, too late to decide by,
+but the **WebView2 runtime injects `window.chrome.webview` before any page
+script runs** — a plain Edge/Chrome has `window.chrome` but never
+`window.chrome.webview`, so `inWebView2()` answers "are we in the EXE?"
+synchronously at first paint. Inside the EXE boot therefore sets the id to the
+stored value or **empty**, and never calls `mintDeviceId()`. It then waits
+`bridgeBudgetMs = 20_000` for the bridge instead of the old 1.5 s. Since
+pywebview's own alias installer polls for up to 5 s, 1.5 s was simply shorter
+than the shell on a cold start — that was the entire race. An old build's
+`deviceId()` reads the same file, so giving it time is all it ever needed.
 
 Points that are easy to get wrong:
 
+- **An empty id must never reach the server.** `verifyLicenseKey` binds an
+  unbound key to whatever it is handed (`if (!lic.boundDevice) lic.boundDevice =
+  dev`), so `""` would bind a key to nothing and lock the machine out on its
+  next launch — strictly worse than the original bug. `unlock()` refuses it,
+  and the login button is `disabled={busy || !deviceId}`.
+- **MSHTML degrades, it does not break.** pywebview falls back to IE/MSHTML when
+  WebView2 is missing (`winforms.py`, `is_chromium`), and that host has no
+  `window.chrome.webview`. Such a build takes the browser branch and mints —
+  exactly today's behaviour, never worse.
 - **Apply it after `choose_window_url()`**, not before. That function may return
   the loopback DoH proxy instead of the origin, and the proxy forwards
   `handler.path` verbatim — query string included — so the param survives both
@@ -2896,9 +2919,10 @@ Points that are easy to get wrong:
 - **It replaces rather than appends** an existing `did`, so a stale one can never
   be duplicated into two values.
 - **Both sides may ship in either order.** A new web app against an old EXE finds
-  no `?did=` and falls through to the bridge, which is unchanged; an old web app
-  against a new EXE ignores the param and still uses the bridge. Nothing is
-  coupled to a matching release.
+  no `?did=` and waits for the bridge, which is unchanged; an old web app against
+  a new EXE ignores the param and still uses the bridge. Nothing is coupled to a
+  matching release — which is what let the shipped EXEs be fixed without a
+  rebuild.
 
 **The bridge path is kept, not deleted** — it is the compatibility layer above.
 A null answer from it never downgrades an id the URL already supplied.
@@ -2916,10 +2940,19 @@ loopback-proxy form carries it too, and an **AST** assertion on `main()` proves
 the URL is built from `get_device_id` and that `mint_device_id` is never called
 there. The AST read matters: a regex over the call cannot see past
 `normalize_base_url(resolve_server_url())`'s own closing parenthesis.
-`ui-regressions.test.mts` pins the boot order — `location.search` before
-`igg-vip-hwid` before `mintDeviceId()` — and that the EXE still wires the
-file-backed id in. Suite: 67 Python + 262 JS, typecheck clean, eslint reports no
-new problems.
+`ui-regressions.test.mts` adds two: the boot order (`urlDeviceId` resolved
+before `readStoredId`), and *"inside the EXE the device id is never invented, and
+an empty one never reaches the server"* — which pins `inWebView2`, the
+`else if (inExe) setDeviceId(readStoredId() ?? "")` branch, that only the plain
+browser reaches `mintNewId()`, the 20 s budget, and the `!deviceId` refusal on
+both the button and `unlock()`. Suite: 67 Python + 263 JS, typecheck clean,
+eslint reports no new problems.
+
+**`i18n.ts` masters and overlays do not share an indent** — the `vi` and `en`
+master dictionaries indent **one** space, the 16 locale overlays **two**. A
+script that inserts a key by matching `^\s{2}` lands it in Korean and French
+instead of the masters, and typecheck is what catches it (`errDeviceId does not
+exist in type 'Partial<…>'`). Match `^ {1}errKey: ` for a master.
 
 ## Deployment
 
