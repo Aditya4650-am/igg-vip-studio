@@ -241,6 +241,67 @@ test("regata refuses when there is no real record to copy from", () => {
   assert.throws(() => injectRegata(bare, 5), /regatta/i);
 });
 
+test("regata mints its own counter when the live week is empty but an archive supplies the templates", () => {
+  // `regattaTemplates()` scans the WHOLE document, so `<PrevRegata>` hands over
+  // its records as templates even when the live week has completed nothing —
+  // which is precisely the "Completed 0 → 12, Templates: 9" badge. Those
+  // archived records carry their own `takenCounter`, and it is a *per-regatta*
+  // number: two archives lifted from different weeks can read 10 and 2.
+  //
+  // `maxTaken` is read from the LIVE block only, so it came out -1, `takenBase`
+  // fell through to -1 on the clone path, and the `takenBase >= 0` guard meant
+  // `takenCounter` was never rewritten — every new record kept its template's
+  // archived number. Cycling them wrote 10, 2, 25… into the live week and the
+  // push gate refused with `regatta-taken-counter:10-2`: a clean save locked
+  // out of the whole feature over a field this tool had copied verbatim.
+  //
+  // Three untouched weeks all start their counter at 2, so that is the seed for
+  // both paths — the clone path must not differ from the synthesized one here.
+  const now = Math.floor(Date.now() / 1000);
+  const start = now - 4 * 86400;
+  const end = now + 4 * 86400;
+  // A complete, measured record — `match3_create_bonus_with_chips_3` is
+  // 150/120/15 on every save that has ever completed one, and `15` is the
+  // block's own `TaskQuota`, which is where a real `anlLimit` comes from.
+  const archived = [10, 2, 25, 7]
+    .map(
+      (c, i) =>
+        `<MyOldTask id="match3_create_bonus_with_chips_3" type="event_order" eventType="Match3" ` +
+        `target="create_bonus_with_chips" need="150" have="150" user="MECITY1" num="${i + 1}" ` +
+        `ver="1" takenCounter="${c}" score="120" regataCash="15" anlNumber="1" anlLimit="15" ` +
+        `takeTime="${start + 300}" completeTime="${start + 900}" endTime="${start + 1000}" ` +
+        `realEndTime="${start + 1000}"/>`,
+    )
+    .join("");
+  const xml =
+    `<?xml version="1.0" encoding="utf-8"?><Global>` +
+    `<Var name="cityId" v="MECITY1" t="s"/>` +
+    `<PrevRegata>${archived}</PrevRegata>` +
+    `<Regata id="533" startTime="${start}" endTime="${end}" season="108" week="4" league="4" ` +
+    `score="120" scoreUpd="${start + 900}">` +
+    `<FreeTask id="match3_win_game_in_row_1" type="" num="1" ver="59"/>` +
+    `<Vars><Var name="TaskQuota" v="15"/></Vars>` +
+    `</Regata></Global>`;
+
+  const before = inspectRegatta(xml, 12);
+  assert.equal(before.current, 0, "the live week starts empty");
+  assert.ok(before.templates > 0, "the archive is what supplies the templates");
+
+  const out = injectRegata(xml, 12);
+  wellFormed(out);
+  const inner = out.match(/<Regata\b[^>]*>([\s\S]*?)<\/Regata\s*>/)![1];
+  const counters = [...inner.matchAll(/<MyOldTask\b[^>]*\btakenCounter="(\d+)"/g)].map((m) => Number(m[1]));
+  assert.equal(counters.length, 12, "every new record carries a counter");
+  assert.equal(counters[0], 2, "a fresh week starts at 2, like every untouched one");
+  for (let i = 1; i < counters.length; i++) {
+    assert.ok(counters[i]! > counters[i - 1]!, `counter ran backwards: ${counters.join(",")}`);
+  }
+  // The archived donor's own number must not survive into the live week.
+  assert.ok(!counters.includes(25), "an archived counter must not be copied through");
+
+  assert.doesNotThrow(() => assertRegattaSafe(xml, out), "a fresh counter must pass the push gate");
+});
+
 test("regata takes a batch the moment the window opens — a young week refuses nothing", () => {
   // The rule this replaces wanted every completion before *now* AND
   // `regattaMinGap(quota)` apart, so a window opened ten minutes ago had room

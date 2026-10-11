@@ -1269,15 +1269,27 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   //
   // A block that holds no record at all has no counter to continue, but every
   // real record still carries one and three untouched weeks each start theirs
-  // at 2 — so a synthesized batch starts there too. The clone path keeps its
-  // old behaviour untouched: a save whose records simply lack the field still
-  // gains none.
+  // at 2 — so a batch mints its own sequence from there.
+  //
+  // It must do so on **both** paths. `regattaTemplates()` scans the whole
+  // document, so `<PrevRegata>` hands over its records as templates while the
+  // live week is still empty: the tab reads "Completed 0 → 12, Templates: 9"
+  // and the clone path runs against a block whose `maxTaken` is -1. Falling
+  // through to -1 made the `takenBase >= 0` guard below decline to rewrite the
+  // field, so every new record kept its template's archived number — and two
+  // archives lifted from different weeks can read 10 and 2, which is not a
+  // counter that grows. That is what the push gate refused as
+  // `regatta-taken-counter:10-2`: a clean save locked out of the whole feature
+  // over a field this tool had copied verbatim out of an old week.
+  //
+  // A save whose records simply lack the field still gains none — that is the
+  // `attrValue(a, "takenCounter") !== null` half of the guard below, not this.
   let maxTaken = -1;
   for (const m of block.inner.matchAll(/<MyOldTask\b[^>]*\btakenCounter="(\d+)"/g)) {
     const v = Number(m[1]);
     if (Number.isFinite(v) && v > maxTaken) maxTaken = v;
   }
-  const takenBase = maxTaken >= 0 ? maxTaken + 1 : src.synthetic ? 2 : -1;
+  const takenBase = maxTaken >= 0 ? maxTaken + 1 : 2;
 
   const tasks: string[] = [];
 
