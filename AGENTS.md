@@ -687,6 +687,65 @@ foreign-`user` / `ver="0"` / offer-list-conflicting / tally-less /
 score-drifted one. `injectRegata` on the real `mGameInfo.current-9.xml` passes
 all of them at 10, 12 and 15.
 
+### An empty week cloned from an archive kept the archive's counter (2026-10-11)
+
+Reported as a refusal on a perfectly ordinary push:
+
+> Không đẩy file lên máy: task regatta vừa thêm không khớp dữ liệu thật
+> (`regatta-taken-counter:10-2`)
+
+The tab's own badge gave the shape away — **`Completed 0 → 12, Templates: 9`**.
+`regattaTemplates()` scans the **whole document**, so `<PrevRegata>` hands over
+its records as templates even when the live week has completed nothing. Those
+archived records carry a `takenCounter`, and it is a **per-regatta** number:
+two archives lifted from different weeks read `10` and `2`, which is not a
+counter that grows.
+
+Every half of the fix was already in place for the case it was written for:
+
+- `maxTaken` is read from the **live block only**, so an empty week gives `-1`;
+- `takenBase = maxTaken >= 0 ? maxTaken + 1 : src.synthetic ? 2 : -1` seeded `2`
+  for the **synthesized** path and fell through to `-1` for the **clone** path;
+- the emitter guarded on `takenBase >= 0`, so on that fall-through it simply
+  declined to rewrite the field and each new record kept its template's own
+  archived number.
+
+Cycling nine such templates wrote `10, 2, 25, …` straight into the live week and
+the gate refused every one of them — a clean save locked out of the whole
+feature over a field this tool had copied verbatim. The clone and synthesized
+paths must agree here, and three untouched weeks all start theirs at **2**, so
+that is now the seed for both:
+
+```ts
+const takenBase = maxTaken >= 0 ? maxTaken + 1 : 2;
+```
+
+Nothing else moved. A save whose records simply **lack** the field still gains
+none — that is the emitter's `attrValue(a, "takenCounter") !== null` half, not
+this one — and a live block that already has records still continues above its
+own highest, which is the measured rule and is untouched.
+
+Guard rail: `regata mints its own counter when the live week is empty but an
+archive supplies the templates` pins the reported shape (empty live block,
+archive supplying **complete** measured records at counters 10/2/25/7), the
+batch running `2..13` in order, the donor's own `25` not surviving, and
+`assertRegattaSafe` passing. It was written first and proven against the old
+code, failing with `expected: 2, actual: 10`.
+
+Two things worth knowing when reading a report like this:
+
+- **`assertRegattaSafe` runs per key, not per record.** The refusal named only
+  `regatta-taken-counter`, which proves the templates were otherwise complete
+  real records — a fixture missing `regataCash` / `anlLimit` / `need` / `have`
+  trips `regatta-record-missing` instead, and `score="100"` on an id whose
+  measured score is 120 trips `regatta-score:100`. That is why the guard rail's
+  archive carries the full field set and a measured triple.
+- **The console line `Save rejected by identity gate: regatta` is the same
+  event.** `applySave` logs that string for *any* of the five push gates
+  refusing (`studio.server.ts`), not just the identity one, so it names the
+  feature rather than the rule that fired. The toast above it carries the real
+  key.
+
 ### The daily limit is the game's own quota, read out of the save (2026-10-01)
 
 The game states the number itself. The live client's regatta panel reads
