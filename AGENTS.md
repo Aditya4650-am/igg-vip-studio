@@ -907,6 +907,44 @@ gates say *nothing provably wrong*, never *cannot be banned* — no tool can
 promise 100% protection, and removing a clamp removes a safety rail whether or
 not anyone can show it ever fired.
 
+## Barn: capacity is only refit by a save that edited the barn
+
+The barn tier auto-fit in `save()` (`studio-app.tsx`) exists because the game
+trims anything above capacity on load — 325 products at 500 each need far more
+than a small tier holds — which reads to the user as *"only some items were
+collected"*. So a batch that raises quantities has to raise the tier with them.
+
+It used to run on **every** save, and that made it fire on saves nobody had
+touched. A save whose items already sat above its own capacity (a tool-edited
+save, or one that has drifted) took a `barn(N)` capacity change on a push the
+user had asked for something else entirely: pressing Save on the Regatta tab
+reported `pushed · regatta-100, barn(20)` and rewrote the tier behind their
+back. Two reasons that is worse than it looks:
+
+- `applyBarnCapacity` writes the `WareHouseCashUpgrade` / `WHUdup` pair, and
+  which of the two numbers the game actually reads is an **open question**
+  recorded in the ban-protection pass. Writing it for a feature nobody asked
+  for is exactly the unrequested edit the push gates cannot see the intent of.
+- The success message named a feature the user never opened, so the batch
+  never matched what they thought they were pushing.
+
+It also measured the total from `barnItems` *after* the re-pull at the top of
+`save()`, which holds the **device's** quantities with the user's edit already
+discrolled — so it could under-provision the very change it exists to protect.
+
+**Now:** the fit runs only when `changedBarn` is non-empty, and the total is
+`{ ...activeSession.barn.items, ...changedBarn }` — the device's own with the
+edit laid over it. `changedBarn` is computed before the re-pull, so it is
+precisely what the user changed. The payload half is untouched: `barnItems`
+still ships only when edited and `barnUpgrades` only when it differs, and the
+server already guards on `if (p.barnUpgrades && p.barnUpgrades > 0)`, so an
+omitted tier writes nothing.
+
+Guard rail: `ui-regressions.test.mts` → *"the barn tier is only touched by a
+save that actually edited barn items"* pins the gate, the edited total, that
+the total is no longer read from the post-re-pull state, and both payload
+conditions.
+
 ## Factory / upgrade levels
 
 The **Factories** tab (`tab === "factory"`) raises `<Upgrade version="4">`

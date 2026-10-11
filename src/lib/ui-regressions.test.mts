@@ -607,3 +607,49 @@ test("the persisted licenses table stores every field the in-memory record has",
   // neither backend needs quoting.
   assert.ok(!/^\s+group\s/m.test(sql), "do not name a column `group`");
 });
+
+test("the barn tier is only touched by a save that actually edited barn items", () => {
+  const tsx = read("../components/studio-app.tsx");
+
+  // The auto-fit used to run on EVERY save, so any save whose items already
+  // sat above its own capacity took a barn(N) capacity change on a push the
+  // user had asked for something else entirely: pressing Save on the Regatta
+  // tab reported "pushed · regatta-100, barn(20)" and rewrote the barn tier
+  // behind their back. applyBarnCapacity writes the WareHouseCashUpgrade /
+  // WHUdup pair, and which of the two the game reads is an open question — so
+  // it must not be written for a feature nobody asked for.
+  const start = tsx.indexOf("let barnTier = barnUpgrades");
+  const end = tsx.indexOf("const profileDelta = profileAdditions()");
+  assert.ok(start !== -1 && end > start, "the barn auto-fit block must still exist");
+  const block = tsx.slice(start, end);
+
+  assert.ok(
+    block.includes("Object.keys(changedBarn).length > 0"),
+    "the auto-fit must be gated on the user having edited barn quantities",
+  );
+
+  // The intended total has to carry the user's edit, not just the device's own
+  // quantities — otherwise it under-provisions the very change it protects.
+  assert.ok(
+    block.includes("...activeSession.barn.items, ...changedBarn"),
+    "the auto-fit must measure the device's items with the user's edit over them",
+  );
+
+  // And it must not go back to measuring `barnItems` on its own: that state is
+  // the device's copy, taken after the re-pull has already dropped the edit.
+  assert.ok(
+    !/Object\.values\(barnItems\)\.reduce/.test(block),
+    "do not measure the total from the post-re-pull state, which has lost the edit",
+  );
+
+  // The payload half is unchanged: item edits only travel when they exist, and
+  // a tier only travels when it differs from the session's own.
+  assert.ok(
+    tsx.includes("barnItems: Object.keys(changedBarn).length ? changedBarn : undefined"),
+    "barn items still only ship when they were edited",
+  );
+  assert.ok(
+    tsx.includes("barnTier && barnTier !== activeSession.barn.upgrades ? barnTier : undefined"),
+    "the barn tier still only ships when it actually changed",
+  );
+});

@@ -1828,15 +1828,32 @@ export function StudioApp() {
       // trims anything above capacity on load (325 products at 500 each need
       // far more than a small tier holds), which reads as "only some items
       // collected". The picked tier stays visible in the UI like a manual pick.
+      //
+      // Only when the user actually edited barn quantities. It used to run on
+      // EVERY save, so a save whose items already sat above its own capacity
+      // took a `barn(N)` capacity change whether or not the barn had been
+      // touched: pressing Save on the Regatta tab reported
+      // "pushed · regatta-100, barn(20)" and rewrote the barn tier behind the
+      // user's back. `applyBarnCapacity` writes the WareHouseCashUpgrade /
+      // WHUdup pair, and which of the two numbers the game reads is an open
+      // question in AGENTS.md — so writing it for a feature nobody asked for is
+      // precisely the unrequested edit the gates cannot see the intent of.
+      //
+      // It also measured `total` from `barnItems` *after* the re-pull above,
+      // which holds the device's quantities and NOT the user's edit, so it
+      // could under-provision the very change it exists to protect. The
+      // intended total is the device's own with the edit laid over it.
       let barnTier = barnUpgrades;
-      if (catalogs) {
-        const total = Object.values(barnItems).reduce((n, v) => n + (Number(v) || 0), 0);
-        const cur = catalogs.barnCapacity.find((c) => c.upgrades === (barnTier ?? activeSession.barn.upgrades))?.capacity
+      if (catalogs && Object.keys(changedBarn).length > 0) {
+        const intended = { ...activeSession.barn.items, ...changedBarn };
+        const total = Object.values(intended).reduce((n, v) => n + (Number(v) || 0), 0);
+        const tierNow = barnTier ?? activeSession.barn.upgrades;
+        const cur = catalogs.barnCapacity.find((c) => c.upgrades === tierNow)?.capacity
           ?? activeSession.barn.capacity ?? 0;
         if (total > cur) {
           const fit = catalogs.barnCapacity.find((c) => c.capacity >= total)
             ?? catalogs.barnCapacity[catalogs.barnCapacity.length - 1];
-          if (fit && fit.upgrades !== (barnTier ?? activeSession.barn.upgrades)) {
+          if (fit && fit.upgrades !== tierNow) {
             barnTier = fit.upgrades;
             setBarnUpgrades(fit.upgrades);
           }
