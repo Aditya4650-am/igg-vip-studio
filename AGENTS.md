@@ -966,6 +966,100 @@ gates say *nothing provably wrong*, never *cannot be banned* — no tool can
 promise 100% protection, and removing a clamp removes a safety rail whether or
 not anyone can show it ever fired.
 
+### Golden pass: the season was in no copy block at all (2026-10-12)
+
+Reported as *"when i copy city of friends then why i cant see golden pass"*,
+with a real live save supplied to prove one exists (`cbwsoNDEWe`, townName
+`IGG`, `<SeasonTicket id="810" … premium="1" score="1002">`).
+
+**The whole season is one self-contained block, and no copy list carried it.**
+Measured on that save: `<SeasonTicketCenter lastId="810">` wraps a
+`<SeasonTicket>` of **20,935 chars** holding its own window
+(`startTime=2026-10-02`, `endTime=2026-10-23`), its `premium="1"` flag, its
+`score`, and **both reward roads** — `<FreeRoad>` + `<PremiumRoad>`, 67
+`<Stage>`, 87 `<Reward>`, 100 `<SubReward>`, 6 `<Task>`, a `<SafeRoad>` and the
+season's own `<Vars>`. It is a *cache* of a season Playrix announced, and it is
+what the game renders the pass from. Yet:
+
+- `COMPLETO_BLOCKS` and `NOVO_BLOCKS` contain no `SeasonTicket`;
+- `SeasonTicketCenter`, `SeasonPassCenter` and `GeneratedSeasonStoreItems`
+  appear **nowhere** in the restore path;
+- the only season thing a restore ever touched was two tutorial flags
+  (`SeasonTicketTutorShowed`, `SeasonTicketShowArrow`).
+
+**And there was nothing to show on our side either.** Swept all 34
+`mGameInfo*.xml` on the machine: **28 hold no ticket at all — including every
+own save** — and hold `<SeasonTicketCenter lastId="0"/>`. Of the 6 that have a
+ticket, all 6 carry `premium="1"` and exactly **one** window is still live (the
+supplied file). A save that has never started a season has no season context
+whatsoever: no `SeasonTicketStartedIds`, no `SeasonTicket_NumberOfStartedSeasons`,
+no `startStage_SeasonTicket_<id>`. `injectSeason` refuses this exact shape by
+design, because it only ever rewrites `premium` on a ticket that already exists.
+
+**`cloneSeasonTicket(src, tgt, scrub)`**, called in the town-mode branch right
+after the `COMPLETO_BLOCKS` loop, so it travels with the town in `completo` /
+`novo` and never with `inicial` (which copies no town). It prefers the donor's
+`<SeasonTicketCenter>` and falls back to a bare `<SeasonTicket>`, installs it
+over ours or via `insertInsideRoot()`, then writes the vars.
+
+Two rules, and both are deliberate:
+
+- **A live ticket of ours is never replaced.** Starting a season is the
+  player's own action; a city copy that overwrote it would delete a pass the
+  user opened themselves and hand them the donor's — the same class of removal
+  the `townName` skip exists to prevent. `seasonTicketLive()` reads the window.
+  A season that has already **ended** *is* replaced, because a dead ticket is
+  nothing to keep and taking the donor's live one is the point of the copy.
+  When we keep ours we do **not** write the donor's `SeasonTicketStartedIds`:
+  claiming to have started a season we did not take is the same dangling record
+  the rest of this file refuses to invent.
+- **A donor block carrying an identity marker is skipped, not imported.**
+  Measured clean on the real block (0 hits for `cityId`, `deviceId`,
+  `mainPlayer`, `saveId`, `currentProfiles`, `user=`, `MyClan`, `townName`,
+  `gameId`) — it is *not* the `DataStoreCollection` class of danger — but the
+  rule is enforced rather than assumed, because that exact shape is what made
+  `DataStoreCollection` an instant ban.
+
+Installing a centre strips any bare `<SeasonTicket>` of ours standing outside
+it, so the game never finds two rivals and silently reads only the first — the
+same rule `<BuildingsStash>` follows. `SeasonTicketStartedIds` is **unioned**
+(ours ∪ the donor's, deduped) rather than replaced, so a pass for 810 never
+erases the record that we started 800; the two `SeasonTicket_NumberOfStartedSeasons*`
+counters may only **rise**; `SeasonStoreWasAvailable` follows; and every
+`startStage_SeasonTicket_*` comes across — its name is season-specific, so no
+fixed list would cover the next season's id.
+
+Measured end to end against the real pair — own save fetched from Playrix
+(`SJzfOUKzQx`) against the supplied donor — all three modes: `inicial` gains no
+ticket, `completo` / `novo` gain `id=810 premium=1 score=1002`, window
+**2026-10-02..2026-10-23 LIVE**, 20,996-char centre, both roads present,
+`StartedIds=810` / `StartedSeasons=1` / `startStage_SeasonTicket_810=1089`,
+**zero donor identity inside the block**, XML balanced. The 8 `profile-unknown:*`
+shape keys on that output are **pre-existing on the untouched own save** (the
+known donor-high-level-id case) — this copy introduces **none**, and
+`assertSaveShapeSafe` / `assertProgressionsSafe` / `assertNoForeignIdentity`
+all pass on all three modes.
+
+Guard rails: `studio-pipeline.test.ts` →
+`copy: a live golden pass comes with the town` (the donor's centre lands with
+its window intact, `premium="1"`, its golden rewards, the season vars, exactly
+one ticket and no donor identity; `inicial` gains none) and
+`copy: a live season of ours survives, a dead one is replaced` (ours kept and
+the donor's *not* claimed as started; a closed season swapped for their live
+one with the dead ticket leaving no rival, `StartedIds` unioned). Both were
+**proven failing first** against `HEAD` (0 pass / 2 fail), then pass.
+
+**Honest limit.** This makes the transplant complete and provably clean; it
+does **not** prove the pass renders. Seasons are announced server-side and your
+account may never have started 810, so the client can either draw from the
+cache or re-check the server and find nothing — unresolvable without pushing it
+and looking. Note also that `premium="1"` is a **purchase** (the donor's save
+lists `Price_GoldPass = £4.49`) with a billing record behind it: a different
+and more provable class of import than the cosmetics this repo already pulled
+out of the copy. And the window closes **2026-10-23** — after that this donor
+supplies a dead season, so the feature is per-season and needs a fresh donor
+each time. In-game confirmation needs a throwaway account, never a main.
+
 ## Barn: capacity is only refit by a save that edited the barn
 
 The barn tier auto-fit in `save()` (`studio-app.tsx`) exists because the game

@@ -1832,6 +1832,110 @@ test("copy: our town name is never the donor's", () => {
   }
 });
 
+test("copy: a live golden pass comes with the town", () => {
+  // Measured on the real live save `cbwsoNDEWe` (supplied 2026-10-12): the
+  // whole season is one self-contained block inside
+  // `<SeasonTicketCenter lastId="810">` — window, `premium="1"`, score, and
+  // both reward roads (67 stages, 87 rewards). Neither `COMPLETO_BLOCKS` nor
+  // `NOVO_BLOCKS` carried it, and `SeasonTicketCenter` appeared nowhere in
+  // the restore path, so a copy left the town standing in no season at all
+  // while the donor's city showed a live pass. 28 of 34 saves on the machine,
+  // including every own save, hold `lastId="0"` and no ticket — which is why
+  // there was nothing to show even in principle.
+  const NOW = Math.floor(Date.now() / 1000);
+  const START = NOW - 10 * 86400;
+  const END = NOW + 10 * 86400;
+  const ticket =
+    `<SeasonTicket id="810" packageId="810" startTime="${START}" endTime="${END}" ` +
+    `theme="wildwest_81" score="1002" premium="1" colorScheme="red">` +
+    `<FreeRoad><Stage score="0" rewardGiven="1"><Reward type="cash" count="10"/></Stage></FreeRoad>` +
+    `<PremiumRoad><Stage score="0"><Reward type="Skin_Airplane_wildwest_81" count="1"/></Stage></PremiumRoad>` +
+    `</SeasonTicket>`;
+  const donor = [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    "<Global>",
+    '<Var name="cityId" v="FRD123456"/>',
+    '<Var name="levelup" v="42" t="i"/>',
+    '<Var name="residents" v="9000" t="i"/>',
+    '<Var name="SeasonTicketStartedIds" v="810"/>',
+    '<Var name="SeasonTicket_NumberOfStartedSeasons" v="1" t="i"/>',
+    '<Var name="SeasonTicket_NumberOfStartedSeasonsM3" v="1" t="i"/>',
+    '<Var name="SeasonStoreWasAvailable" v="1" t="i"/>',
+    '<Var name="startStage_SeasonTicket_810" v="42" t="i"/>',
+    "</Global>",
+    `<SeasonTicketCenter lastId="810">${ticket}</SeasonTicketCenter>`,
+    '<TownGround ver="2"><row j="0" v="FRIENDTOWN"/></TownGround><Buildings><Object id="friend1"/></Buildings>',
+  ].join("");
+  const own = [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    "<Global>",
+    '<Var name="cityId" v="ME12345678"/>',
+    '<Var name="levelup" v="30" t="i"/>',
+    '<Var name="residents" v="500" t="i"/>',
+    "</Global>",
+    '<SeasonTicketCenter lastId="0"/>',
+    '<TownGround ver="2"><row j="0" v="MYTOWN"/></TownGround><Buildings><Object id="mine1"/></Buildings>',
+  ].join("");
+
+  for (const mode of ["completo", "novo"] as const) {
+    const xml = applyDesban(own, donor, mode);
+    const center = xml.match(/<SeasonTicketCenter[^>]*>[\s\S]*?<\/SeasonTicketCenter>/)?.[0];
+    assert.ok(center, `${mode}: the donor's season centre must land`);
+    assert.match(center!, /premium="1"/, `${mode}: the golden road stays unlocked`);
+    assert.ok(center!.includes(`startTime="${START}"`), `${mode}: the window is copied intact`);
+    assert.ok(center!.includes(`endTime="${END}"`), `${mode}: and it is the donor's own`);
+    assert.match(center!, /Skin_Airplane_wildwest_81/, `${mode}: the golden rewards come with it`);
+    assert.equal((xml.match(/<SeasonTicket\b/g) || []).length, 1, `${mode}: exactly one ticket, never a rival`);
+    assert.equal(readVar(xml, "SeasonTicketStartedIds"), "810", `${mode}: the season is recorded as started`);
+    assert.equal(readVar(xml, "startStage_SeasonTicket_810"), "42", `${mode}: the level it opened at`);
+    assert.equal(readVar(xml, "SeasonStoreWasAvailable"), "1", `${mode}: the season store follows`);
+    assert.equal(readVar(xml, "SeasonTicket_NumberOfStartedSeasons"), "1", `${mode}: and the count of seasons started`);
+    for (const marker of ['cityId="FRD123456"', "deviceId=", "mainPlayer", "saveId=", "currentProfiles", 'user="', "MyClan"]) {
+      assert.ok(!center!.includes(marker), `${mode}: the transplanted pass carries no donor identity (${marker})`);
+    }
+    balanced(xml);
+  }
+
+  // `inicial` copies no town, so it copies no season either.
+  assert.ok(!applyDesban(own, donor, "inicial").includes('lastId="810"'), "inicial copies neither town nor season");
+});
+
+test("copy: a live season of ours survives, a dead one is replaced", () => {
+  // Starting a season is the player's own action. A restore that overwrote a
+  // live pass with the donor's would delete one the user opened themselves —
+  // the same class of removal the `townName` skip exists to prevent. A season
+  // that has already *ended*, though, is nothing to keep: taking the donor's
+  // live one is the whole point of the copy.
+  const NOW = Math.floor(Date.now() / 1000);
+  const live = (id: string, theme: string) =>
+    `<SeasonTicketCenter lastId="${id}"><SeasonTicket id="${id}" startTime="${NOW - 86400}" ` +
+    `endTime="${NOW + 86400}" theme="${theme}" premium="0" score="0"/></SeasonTicketCenter>`;
+  const dead = `<SeasonTicketCenter lastId="790"><SeasonTicket id="790" startTime="${NOW - 40 * 86400}" ` +
+    `endTime="${NOW - 20 * 86400}" theme="summer" premium="0" score="0"/></SeasonTicketCenter>`;
+  const wrap = (city: string, center: string, started = "") =>
+    [`<?xml version="1.0" encoding="utf-8"?>`, "<Global>", `<Var name="cityId" v="${city}"/>`,
+     '<Var name="levelup" v="30" t="i"/>', '<Var name="residents" v="500" t="i"/>',
+     started ? `<Var name="SeasonTicketStartedIds" v="${started}"/>` : "", "</Global>", center,
+     '<TownGround ver="2"><row j="0" v="MYTOWN"/></TownGround><Buildings><Object id="mine1"/></Buildings>'].join("");
+  const donor = wrap("FRD123456", live("810", "wildwest_81"), "810").replace("MYTOWN", "FRIENDTOWN");
+
+  const kept = applyDesban(wrap("ME12345678", live("805", "summer"), "805"), donor, "completo");
+  assert.ok(kept.includes('id="805"'), "our own live season must survive a city copy");
+  assert.ok(!kept.includes('id="810"'), "and the donor's must not replace it");
+  // We did not take their season, so we must never claim to have started it:
+  // a started-id with no ticket behind it is the same dangling record the rest
+  // of this file refuses to invent.
+  assert.equal(readVar(kept, "SeasonTicketStartedIds"), "805", "and we claim only the season we actually hold");
+  balanced(kept);
+
+  const swapped = applyDesban(wrap("ME12345678", dead, "790"), donor, "completo");
+  assert.ok(swapped.includes('id="810"'), "a season that has ended is replaced by the donor's live one");
+  assert.ok(!swapped.includes('id="790"'), "and the dead ticket leaves no rival behind");
+  assert.equal((swapped.match(/<SeasonTicket\b/g) || []).length, 1, "exactly one ticket after the swap");
+  assert.equal(readVar(swapped, "SeasonTicketStartedIds"), "790,810", "a season we did start stays recorded beside the new one");
+  balanced(swapped);
+});
+
 test("copy: a newborn keeps its own pictures and face", () => {
   // Gaining the donor's 386 avatars and look on day zero is review
   // ammunition — the first-message ban wore the full union on an hours-old,

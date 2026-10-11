@@ -517,6 +517,132 @@ function cloneSimple(src: string, tgt: string, tag: string, scrub = scrubber(src
 }
 
 /**
+ * The season — the golden pass — a city copy takes with the town.
+ *
+ * Measured on a real live save (`cbwsoNDEWe`, supplied 2026-10-12): the whole
+ * season is one self-contained block inside `<SeasonTicketCenter lastId="810">`
+ * — a `<SeasonTicket>` of ~21 KB carrying its own window (`startTime` /
+ * `endTime`), its `premium="1"` flag, its `score`, and both reward roads
+ * (`<FreeRoad>` + `<PremiumRoad>`, 67 stages, 87 rewards, 100 sub-rewards,
+ * 6 daily tasks). It is a *cache* of a season Playrix announced, and it is
+ * what the game renders the pass from.
+ *
+ * None of it was in either block list, which is why a restore left the copied
+ * town standing in no season at all: `COMPLETO_BLOCKS` and `NOVO_BLOCKS` carry
+ * `SeasonTicket`-nothing, and `SeasonTicketCenter` / `SeasonPassCenter` /
+ * `GeneratedSeasonStoreItems` appeared nowhere in the restore path. The only
+ * season thing a restore ever touched was two tutorial flags. A save that has
+ * never started a season holds `<SeasonTicketCenter lastId="0"/>` and no
+ * ticket — measured on 28 of 34 saves on this machine, including every own
+ * save — so there was nothing to show even in principle.
+ *
+ * Two rules stop it becoming an import of somebody else's account:
+ *
+ * - **A live ticket of ours is never replaced.** Starting a season is the
+ *   player's own action. A city copy that overwrote it would delete a pass the
+ *   user opened themselves and hand them the donor's — the same class of
+ *   removal the `townName` skip exists to prevent.
+ * - **A donor block carrying an identity marker is skipped, not imported.**
+ *   Measured clean on the real block (0 hits for `cityId`, `deviceId`,
+ *   `mainPlayer`, `saveId`, `currentProfiles`, `user=`, `MyClan`, `townName`,
+ *   `gameId`), but the rule is enforced rather than assumed — that is the exact
+ *   shape which made `DataStoreCollection` an instant ban.
+ */
+const SEASON_IDENTITY_MARKERS =
+  /\b(?:cityId|deviceId|mainPlayer|saveId|currentProfiles|townName|gameId|MyClan)=|\buser="/i;
+
+// Count seasons started over the account's life, so they may only ever rise:
+// a copy that walked them backwards would contradict the ticket it just
+// installed.
+const SEASON_COUNT_VARS = [
+  "SeasonTicket_NumberOfStartedSeasons",
+  "SeasonTicket_NumberOfStartedSeasonsM3",
+];
+
+const SEASON_PLAIN_VARS = ["SeasonStoreWasAvailable"];
+
+/** A `<SeasonTicket>` whose window has not yet closed — i.e. one to show. */
+function seasonTicketLive(xml: string): boolean {
+  const open = /<SeasonTicket\b([^>]*)>/i.exec(xml);
+  if (!open) return false;
+  const st = Number(attrValue(open[1] ?? "", "startTime"));
+  const en = Number(attrValue(open[1] ?? "", "endTime"));
+  if (!Number.isFinite(st) || !Number.isFinite(en)) return false;
+  const now = Math.floor(Date.now() / 1000);
+  return now >= st && now <= en;
+}
+
+/** Drop any `<SeasonTicket>` that is not inside a `<SeasonTicketCenter>`. */
+function stripBareTickets(xml: string): string {
+  const centers = findAllBlocks(xml, "SeasonTicketCenter");
+  let out = xml;
+  for (const b of findAllBlocks(xml, "SeasonTicket").slice().reverse()) {
+    if (centers.some((c) => b.start >= c.start && b.end <= c.end)) continue;
+    out = out.slice(0, b.start) + out.slice(b.end);
+  }
+  return out;
+}
+
+function installSeasonVars(src: string, tgt: string, scrub: (t: string) => string): string {
+  let out = tgt;
+  // The ids of every season this account has started. Ours and the donor's are
+  // unioned rather than replaced: a ticket for 810 must not erase the record
+  // that we started 800.
+  const ids = (v: string | null) => (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const union = [
+    ...new Set([...ids(readVarLoose(out, "SeasonTicketStartedIds")), ...ids(readVarLoose(src, "SeasonTicketStartedIds"))]),
+  ];
+  if (union.length) out = writeVar(out, "SeasonTicketStartedIds", union.join(","));
+
+  for (const name of SEASON_COUNT_VARS) {
+    const val = Number(readVarLoose(src, name));
+    const cur = Number(readVarLoose(out, name) ?? 0);
+    if (Number.isFinite(val) && val > cur) out = writeVar(out, name, String(val));
+  }
+  for (const name of SEASON_PLAIN_VARS) {
+    const val = readVarLoose(src, name);
+    if (val != null) out = writeVar(out, name, scrub(val));
+  }
+  // `startStage_SeasonTicket_<id>` is the level the season was opened at. The
+  // name is season-specific, so every one the donor holds comes across — there
+  // is no fixed list that would cover the next season's id.
+  for (const m of src.matchAll(/<Var\s+name="(startStage_SeasonTicket_[^"]+)"\s+v="([^"]*)"/g)) {
+    out = writeVar(out, m[1]!, scrub(m[2]!));
+  }
+  return out;
+}
+
+function cloneSeasonTicket(
+  src: string,
+  tgt: string,
+  scrub = scrubber(src, tgt),
+): { xml: string; action: string } {
+  const centers = findAllBlocks(src, "SeasonTicketCenter");
+  // A donor holding only a bare `<SeasonTicket>` (the shape older saves and
+  // fixtures use) is still a donor with a season.
+  const srcBare = findAllBlocks(src, "SeasonTicket").filter(
+    (b) => !centers.some((c) => b.start >= c.start && b.end <= c.end),
+  );
+  const block = centers[0]?.block ?? srcBare[0]?.block;
+  if (!block) return { xml: tgt, action: "missing_src" };
+  if (SEASON_IDENTITY_MARKERS.test(block)) return { xml: tgt, action: "foreign_identity" };
+  if (seasonTicketLive(tgt)) return { xml: tgt, action: "ours_is_live" };
+
+  // Installing a centre must not leave a bare ticket of ours standing beside
+  // it as a rival: the game reads whichever it finds first and the other is
+  // silently dead — the same rule `<BuildingsStash>` follows.
+  let out = stripBareTickets(tgt);
+  const mine = findAllBlocks(out, "SeasonTicketCenter");
+  if (mine.length) {
+    const t = mine[0]!;
+    out = out.slice(0, t.start) + block + out.slice(t.end);
+  } else {
+    out = insertInsideRoot(out, block);
+  }
+  return { xml: installSeasonVars(src, out, scrub), action: mine.length ? "replace" : "insert" };
+}
+
+/**
  * Profile lists (`UnlockedBadges` / `UnlockedExpRanks` / `UnlockedFrames` /
  * `UnlockedStyles`) are never taken from the donor: every join-era banned
  * save on file wears the donor's lists (8: 19/14/8/20, 13: 2/0/1/6,
@@ -1392,6 +1518,12 @@ export function applyDesban(ownXml: string, friendXml: string, mode: "inicial" |
 
     for (const tag of ["TownGround", "Buildings"]) own = cloneMain(fr, own, tag, scrub).xml;
     for (const tag of COMPLETO_BLOCKS) own = cloneSimple(fr, own, tag, scrub).xml;
+    // The season travels with the town. It is the event the copied city is
+    // *in*: leaving it behind showed a town with no season running while the
+    // donor's city showed a live golden pass. Skipped on its own when the
+    // donor has no season, when ours is already live, or when the donor's
+    // block carries an identity — the city copy never fails over it.
+    own = cloneSeasonTicket(fr, own, scrub).xml;
 
     // `skin_` / `decor_` vars: they describe how *this* town's buildings look,
     // so they follow the town the way `TOWN_HISTORY_VARS` does.
