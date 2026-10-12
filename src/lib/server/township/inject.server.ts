@@ -1482,7 +1482,8 @@ const REGATTA_RECORD_FIELDS = [
  *   `takeConfirm` must have them equal to the records it holds (7/7 saves).
  */
 export function regattaProblems(xml: string, own: string): string[] {
-  const block = regattaBlock(xml.replace(/^\uFEFF/, ""));
+  const text = xml.replace(/^\uFEFF/, "");
+  const block = regattaBlock(text);
   if (!block) return [];
   const inner = block.inner;
   const win = regattaWindow(block.attrs);
@@ -1490,6 +1491,32 @@ export function regattaProblems(xml: string, own: string): string[] {
   const quota = regattaTaskQuota(inner);
   const stated = regattaStatedNeeds(inner);
   const keys = new Set<string>();
+
+  // Ids the game itself completed in this save's own history: every
+  // `<MyOldTask>` outside the live block, i.e. an archived `<PrevRegata>` week.
+  //
+  // `regattaTemplates()` deliberately sources the clone path from the *whole*
+  // document, so one of those records is a legitimate template — and the clone
+  // copies its `score`, `regataCash`, `target`, `need`, `type` and `anlLimit`
+  // through **verbatim**. Those values are the game's own, not a guess, and
+  // every check below exists to catch a guess. Reading only the live pool plus
+  // the 23-row catalog is what made the gate refuse the save's own history: a
+  // real record completed last week was judged "an id the game never issued"
+  // (`regatta-id:match3_combine_bonus_any_999`), and the same blindness fired
+  // `regatta-score`, `regatta-target`, `regatta-cash`, `regatta-anl-limit` and
+  // `regatta-record-missing` on records whose values merely sat outside what
+  // five files happened to be measured from.
+  //
+  // What this does **not** skip is anything the tool itself writes: timestamps,
+  // `user`, `ver`, `num`, `anlNumber`, `takenCounter`, record placement and the
+  // block counters all still have to hold. Inventing an id still fails — the
+  // old `match3_1..match3_105` output carries no archive behind it.
+  const archived = new Set<string>();
+  for (const m of text
+    .replace(/<Regata\b[^>]*>[\s\S]*?<\/Regata\s*>/i, "")
+    .matchAll(/<MyOldTask\b[^>]*?\bid="([^"]*)"/gi)) {
+    archived.add(m[1]!);
+  }
 
   const pool = new Set<string>();
   for (const m of inner.matchAll(/<FreeTask\b[^>]*\bid="([^"]*)"/gi)) pool.add(m[1]!);
@@ -1510,9 +1537,9 @@ export function regattaProblems(xml: string, own: string): string[] {
     const isExpired = !!expired && expired !== "0";
 
     for (const f of REGATTA_RECORD_FIELDS) {
-      if (attrValue(a, f) === null) keys.add(`regatta-record-missing:${f}`);
+      if (attrValue(a, f) === null && !archived.has(id)) keys.add(`regatta-record-missing:${f}`);
     }
-    if (!isExpired && attrValue(a, "have") === null) keys.add("regatta-record-missing:have");
+    if (!isExpired && attrValue(a, "have") === null && !archived.has(id)) keys.add("regatta-record-missing:have");
 
     const take = Number(attrValue(a, "takeTime"));
     const done = Number(attrValue(a, "completeTime"));
@@ -1526,15 +1553,22 @@ export function regattaProblems(xml: string, own: string): string[] {
     if (attrValue(a, "user") !== own) keys.add(`regatta-user:${id}`);
 
     const score = Number(attrValue(a, "score"));
-    if (Number.isFinite(score) && !REGATTA_SCORES.has(score)) keys.add(`regatta-score:${score}`);
+    if (Number.isFinite(score) && !REGATTA_SCORES.has(score) && !archived.has(id)) {
+      keys.add(`regatta-score:${score}`);
+    }
 
     const cash = Number(attrValue(a, "regataCash"));
-    if (attrValue(a, "type") === "event_order" && Number.isFinite(score) && Number.isFinite(cash)) {
+    if (
+      attrValue(a, "type") === "event_order" &&
+      Number.isFinite(score) &&
+      Number.isFinite(cash) &&
+      !archived.has(id)
+    ) {
       if (cash !== Math.round(score / 8)) keys.add(`regatta-cash:${id}:${cash}`);
     }
 
     const target = attrValue(a, "target");
-    if (id.startsWith("match3_") && target !== null && target !== regattaTarget(id)) {
+    if (id.startsWith("match3_") && target !== null && target !== regattaTarget(id) && !archived.has(id)) {
       keys.add(`regatta-target:${id}:${target}`);
     }
 
@@ -1547,7 +1581,7 @@ export function regattaProblems(xml: string, own: string): string[] {
     const anlLimitRaw = attrValue(a, "anlLimit");
     if (anlLimitRaw && /^\d+$/.test(anlLimitRaw)) {
       const anlLimit = Number(anlLimitRaw);
-      if (quota !== null && anlLimit !== quota) keys.add(`regatta-anl-limit:${anlLimit}`);
+      if (quota !== null && anlLimit !== quota && !archived.has(id)) keys.add(`regatta-anl-limit:${anlLimit}`);
       const anlNumberRaw = attrValue(a, "anlNumber");
       if (anlLimit > 0 && anlNumberRaw && /^\d+$/.test(anlNumberRaw)) {
         const anlNumber = Number(anlNumberRaw);
@@ -1559,7 +1593,7 @@ export function regattaProblems(xml: string, own: string): string[] {
     // out of `<FreeTask>` on purpose — so pool membership is not the test; a
     // measured task id is. What still matters is that the game has issued it
     // at all, which is what stops the old `match3_1..match3_105` output.
-    if (!pool.has(id) && !REGATTA_TASK[id]) keys.add(`regatta-id:${id}`);
+    if (!pool.has(id) && !REGATTA_TASK[id] && !archived.has(id)) keys.add(`regatta-id:${id}`);
     // …and that it is not sitting on any list right now: not still offered to
     // us, not held by a clanmate, not a roster slot. Zero occurrences in every
     // block of the corpus.

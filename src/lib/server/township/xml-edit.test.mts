@@ -762,6 +762,61 @@ test("the regatta push gate refuses a fabricated batch but not a measured one", 
   );
 });
 
+test("regata accepts a record cloned from the save's own archived week, and only then", () => {
+  // Reported verbatim: "Không đẩy file lên máy: task regatta vừa thêm không
+  // khớp dữ liệu thật (regatta-id:match3_combine_bonus_any_999)".
+  //
+  // That id is a real offer — the fixture below offers it as slot 6 — but no
+  // save in the corpus has ever *completed* it, so it is absent from
+  // `REGATTA_TASK` and the gate could not recognise it. `regattaTemplates()`
+  // scans the whole document on purpose, so a completed record for it sitting
+  // in an archived `<PrevRegata>` week is a legitimate template, and the clone
+  // copies its `score` / `regataCash` / `target` / `need` through verbatim:
+  // the game's own values, not a guess. The gate read only the live block plus
+  // the 23-row catalog and so refused the save's own history.
+  //
+  // This week deliberately does **not** re-offer the id, so pool membership
+  // cannot be what saves it — that is the shape the report came in on.
+  const live = greenWeekSave();
+  const offer = `<FreeTask id="match3_combine_bonus_any_999" type="" num="6" ver="54"/>`;
+  const thisWeek = live.replace(offer, "");
+  assert.notEqual(thisWeek, live, "the fixture really does offer that id");
+
+  const now = Math.floor(Date.now() / 1000);
+  const done = now - 9 * 86400;
+  const archive =
+    `<PrevRegata id="532" startTime="${now - 16 * 86400}" endTime="${now - 4 * 86400}" season="108" week="4">` +
+    `<MyOldTask id="match3_combine_bonus_any_999" type="match3" user="JqpjJQ9lom" num="6" ver="54" ` +
+    `score="150" regataCash="19" need="100" have="100" target="combine_bonus_any" ` +
+    `anlNumber="3" anlLimit="15" takenCounter="9" ` +
+    `takeTime="${done}" completeTime="${done + 60}" realEndTime="${done + 120}" endTime="${done + 120}"/>` +
+    `</PrevRegata>`;
+  const xml = thisWeek.replace("<Regata ", archive + "<Regata ");
+
+  const out = injectRegata(xml, 10);
+  assert.match(out, /<MyOldTask id="match3_combine_bonus_any_999"/, "the archived record really was cloned");
+  assert.doesNotThrow(
+    () => assertRegattaSafe(xml, out),
+    "a record the save's own history proves the game wrote is not an invention",
+  );
+
+  // The relaxation is keyed on that archive, not taken away: strip the archive
+  // out of the very same pushed file and the id is once again one no save has
+  // ever completed and no offer list carries.
+  assert.throws(
+    () => assertRegattaSafe(thisWeek, out.replace(archive, "")),
+    /regatta/i,
+    "the identical record with no archive behind it must still be refused",
+  );
+
+  // …and the checks on what this tool itself writes are untouched: a cloned
+  // record dated in the future is refused even for an archived id, so the only
+  // thing trusted is the data that came verbatim from the game.
+  const future = out.replace(/realEndTime="\d+"/g, `realEndTime="${now + 99999}"`);
+  assert.notEqual(future, out, "the fixture really does carry realEndTime");
+  assert.throws(() => assertRegattaSafe(xml, future), /regatta/i, "our own timestamps are still checked");
+});
+
 test("the regatta push gate refuses a lifetime counter with no records behind it", () => {
   // The file the 10-point tutorial-task ban arrived in
   // (`mGameInfo.current-14.xml`): `RegataTasksCompleted=77` over zero
