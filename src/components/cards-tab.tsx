@@ -78,6 +78,20 @@ const CONFIRM_ATTEMPTS = 2;
 const MAX_READ_FAILS = 8;
 const READ_RETRY_DELAY_MS = 700;
 /**
+ * The headroom hold is real waiting, not a hang — the receiver's inbox holds
+ * only INBOX_BOX_CAP boxes and the 101st evicts the oldest, so a run that has
+ * filled the budget must stop until their save shows room. What made it read
+ * as frozen was that the wait was *silent*: no log line, no phase change, no
+ * deadline, and after MAX_READ_FAILS the polling kept going with nothing left
+ * to say. A hold now names itself the moment it starts, repeats a heartbeat
+ * while nothing moves, and ends with a resumable verdict instead of polling
+ * forever. `HOLD_STALL_MS` is a silence bound, not a cap on the friendship —
+ * any movement in their save resets it, so a receiver who is merely slow is
+ * never cut off mid-collect.
+ */
+const HOLD_HEARTBEAT_MS = 90_000;
+const HOLD_STALL_MS = 15 * 60_000;
+/**
  * How many boxes one `checkInbox` read can list — must match the server's
  * `raws.slice(-60)` in `cardsend.server.ts`. Above that count the live list
  * is a window, so "not visible" stops proving "not delivered" and the verify
@@ -88,7 +102,7 @@ const INBOX_LIST_MAX = 60;
 /** One own-inbox read: the uncapped box count plus the card ids it lists. */
 type LiveRead = { ok: true; total: number; cards: number[] } | { ok: false; error: string };
 
-type Phase = "sending" | "confirming";
+type Phase = "sending" | "confirming" | "holding";
 type WaveResult = "done" | "stop";
 /** What one friend's run knows about their save at any moment. */
 type RunState = {
@@ -100,10 +114,20 @@ type RunState = {
   activity: boolean;
   /** Consecutive failed reads; MAX_READ_FAILS gates one warn per streak. */
   readFails: number;
+  /** When the current headroom hold began (ms), 0 while not holding. */
+  holdSince: number;
+  /** The estimate the hold is waiting on — a change in it means movement. */
+  holdEstimate: number;
 };
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** `95` → `1m35s`. The hold badge refreshes once per poll, so legible beats precise. */
+function fmtDur(sec: number): string {
+  if (sec < 60) return `${sec}s`;
+  return `${Math.floor(sec / 60)}m${String(sec % 60).padStart(2, "0")}s`;
 }
 
 function avatarColor(id: string) {
@@ -161,6 +185,7 @@ export function CardsTab({
     resent: 0,
     confirmed: 0,
     awaiting: 0,
+    holdFor: 0,
     phase: "sending" as Phase,
   });
   /** Wall-clock verdict of the last finished run — drives the completion
@@ -324,6 +349,7 @@ export function CardsTab({
       resent: 0,
       confirmed: 0,
       awaiting: 0,
+      holdFor: 0,
       phase: "sending",
     });
     setFinished(null);
@@ -348,7 +374,7 @@ export function CardsTab({
     let done = 0;
     let abort = false;
 
-    const flush = (phase: Phase) =>
+    const flush = (phase: Phase, holdFor = 0) =>
       setProgress({
         done,
         total: runTotal,
@@ -359,6 +385,7 @@ export function CardsTab({
         resent,
         confirmed,
         awaiting,
+        holdFor,
         phase,
       });
 
@@ -410,9 +437,9 @@ export function CardsTab({
     /**
      * Send `queue` (card numbers, numeric order) in cap-aware waves: never
      * push the estimated footprint past INBOX_SAFE. While there is no
-     * headroom the run holds silently — no notice, no deadline, no pause —
-     * polling the friend's save in the background and resuming by itself
-     * the moment their game has collected enough room.
+     * headroom the run holds and polls their save, resuming by itself the
+     * moment their game has collected enough room — see `beginHold` for why
+     * that hold announces itself instead of waiting invisibly.
      */
     const sendWaves = async (
       f: { name: string },
@@ -424,31 +451,73 @@ export function CardsTab({
     ): Promise<WaveResult> => {
       let qi = 0;
 
+      /**
+       * Enter the headroom hold. The wait is real (their inbox is capped), so
+       * it announces itself once with the numbers it is waiting on, then keeps
+       * the badge ticking — a hold must never read as a freeze.
+       */
+      const beginHold = () => {
+        const est = estimateBoxes(st.snap, st.unmerged, Date.now());
+        if (!st.holdSince) {
+          st.holdSince = Date.now();
+          st.holdEstimate = est;
+          pushLog("info", `⏳ ${f.name} · ${tr("cardsHoldStart")} (${est}/${INBOX_SAFE})`);
+        }
+        flush("holding", Math.round((Date.now() - st.holdSince) / 1000));
+      };
+
       while (qi < queue.length) {
         if (stopRef.current) return "stop";
         const room = INBOX_SAFE - estimateBoxes(st.snap, st.unmerged, Date.now());
 
         if (room <= 0) {
-          // Silent hold: poll until their save shows headroom, however long
-          // that takes. Nothing is logged per wait — one warn per failing
-          // read streak only — and the run never gives up or pauses.
+          // Their save is the only thing that can free room, so poll it and
+          // resume the moment it moves. Movement — any drop in the estimate —
+          // restarts the silence bound, so a receiver who is merely slow is
+          // never cut off mid-collect; a run only ever stops after
+          // HOLD_STALL_MS of hearing nothing at all, and it stops with a
+          // verdict the next press resumes from rather than spinning on.
+          beginHold();
           let step = 0;
+          let lastChange = st.holdSince;
+          let lastBeat = st.holdSince;
           for (;;) {
             if (stopRef.current) return "stop";
             await sleep(WAIT_POLL_STEPS[Math.min(step, WAIT_POLL_STEPS.length - 1)]);
             step++;
             const r = await readState(cityId);
+            const now = Date.now();
             if (r.ok) {
               st.readFails = 0;
               noteSnapshot(st, st.snap, r.snap);
               st.snap = r.snap;
               syncHistory(hist, r.snap);
               st.unmerged = unmergedOf(hist, r.snap);
-              if (INBOX_SAFE - estimateBoxes(st.snap, st.unmerged, Date.now()) > 0) break;
+              const est = estimateBoxes(st.snap, st.unmerged, now);
+              if (est < st.holdEstimate) {
+                st.holdEstimate = est;
+                lastChange = now;
+              }
+              flush("holding", Math.round((now - st.holdSince) / 1000));
+              if (est < INBOX_SAFE) break;
+              if (now - lastBeat >= HOLD_HEARTBEAT_MS) {
+                lastBeat = now;
+                pushLog("info", `⏳ ${f.name} · ${tr("cardsHoldBeat")} (${est}/${INBOX_SAFE})`);
+              }
             } else if (++st.readFails === MAX_READ_FAILS) {
               pushLog("warn", `${tr("cardsVerifyFail")} — ${f.name}: ${r.error}`);
             }
+            if (now - lastChange >= HOLD_STALL_MS) {
+              st.holdSince = 0;
+              flush("sending", 0);
+              pushLog(
+                "warn",
+                `⏸ ${f.name} · ${tr("cardsHoldPause")} (${queue.length - qi}) — ${tr("cardsHoldResume")}`,
+              );
+              return "done";
+            }
           }
+          st.holdSince = 0;
           continue;
         }
 
@@ -628,7 +697,14 @@ export function CardsTab({
       flush("sending");
 
       // ── baseline: their box footprint + what they already hold from us
-      const st: RunState = { snap: null, unmerged: 0, activity: false, readFails: 0 };
+      const st: RunState = {
+        snap: null,
+        unmerged: 0,
+        activity: false,
+        readFails: 0,
+        holdSince: 0,
+        holdEstimate: 0,
+      };
       let baseErr: string | null = null;
       for (let i = 0; i < 2 && !st.snap; i++) {
         if (i) await sleep(READ_RETRY_DELAY_MS);
@@ -832,6 +908,7 @@ export function CardsTab({
       resent: 0,
       confirmed: 0,
       awaiting: 0,
+      holdFor: 0,
       phase: "sending",
     });
     setFinished(null);
@@ -857,7 +934,7 @@ export function CardsTab({
      *  resend that would have evicted something instead of filling it. */
     let deferred = 0;
 
-    const flush = (phase: Phase) =>
+    const flush = (phase: Phase, holdFor = 0) =>
       setProgress({
         done,
         total: runTotal,
@@ -868,6 +945,7 @@ export function CardsTab({
         resent,
         confirmed,
         awaiting,
+        holdFor,
         phase,
       });
 
@@ -1688,6 +1766,12 @@ export function CardsTab({
               {progress.retried > 0 ? (
                 <span className="state-badge rounded-full bg-input px-2 py-0.5 text-cyan">
                   ⟳ {progress.retried}
+                </span>
+              ) : null}
+              {running && progress.phase === "holding" ? (
+                <span className="state-badge animate-pulse rounded-full bg-amber/15 px-2 py-0.5 text-amber">
+                  ⏳ {tr("cardsHolding")}
+                  {progress.holdFor > 0 ? ` · ${fmtDur(progress.holdFor)}` : ""}
                 </span>
               ) : null}
               {running && progress.phase === "confirming" ? (

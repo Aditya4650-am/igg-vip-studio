@@ -448,6 +448,11 @@ const vi = {
   cardsAlready: "đã có sẵn — bỏ qua",
   cardsVerifyFail: "Không đọc được save của bạn này",
   cardsPaused: "Tạm dừng — chờ thu thập",
+  cardsHolding: "Đang chờ bạn kia thu thập",
+  cardsHoldStart: "hộp quà đã đầy — tạm dừng gửi, chờ bạn kia mở game nhận",
+  cardsHoldBeat: "vẫn đang chờ bạn kia thu thập",
+  cardsHoldPause: "dừng tạm — hộp quà đầy và không có gì thay đổi trong 15 phút, còn phải gửi",
+  cardsHoldResume: "bấm Gửi để gửi tiếp phần còn lại",
 
   // ---- Cards tab: thu thập thẻ cho mình (gửi về chính tài khoản qua SendBox) ----
   cardsSelfTitle: "Thu thập thẻ cho mình",
@@ -894,6 +899,11 @@ const en: typeof vi = {
   cardsAlready: "already delivered — skipping",
   cardsVerifyFail: "Cannot read this friend's save",
   cardsPaused: "Paused — waiting for collection",
+  cardsHolding: "Waiting for them to collect",
+  cardsHoldStart: "their gift inbox is full — holding until they open the game and collect",
+  cardsHoldBeat: "still waiting for them to collect",
+  cardsHoldPause: "paused — their inbox is full and nothing has changed for 15 min, still to send",
+  cardsHoldResume: "press Send to continue from here",
 
   // ---- Cards tab: collect for myself (self-send through SendBox) ----
   cardsSelfTitle: "Collect for myself",

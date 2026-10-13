@@ -653,3 +653,43 @@ test("the barn tier is only touched by a save that actually edited barn items", 
     "the barn tier still only ships when it actually changed",
   );
 });
+
+test("the card send hold is announced, bounded and resumable — never a silent freeze", () => {
+  const tsx = read("../components/cards-tab.tsx");
+  const delivery = read("../lib/cards-delivery.ts");
+
+  // A send that has filled the receiver's 100-box budget *has* to wait for
+  // them to collect — that is the server's cap, not a bug. What made the tab
+  // read as "stuck between sends" was that the wait was invisible: no log
+  // line, no phase change, no deadline, and once MAX_READ_FAILS had fired the
+  // polling carried on saying nothing at all. Real case on file: a 150-card
+  // run stopped dead at 39/150 because 90 - 11 pending - 40 stale reserve
+  // left exactly 39 of room, and the receiver never came online.
+  assert.ok(/const HOLD_HEARTBEAT_MS/.test(tsx), "a long hold must repeat itself in the log");
+  assert.ok(/const HOLD_STALL_MS/.test(tsx), "a hold must have a silence bound");
+
+  const hold = tsx.slice(tsx.indexOf("const beginHold"), tsx.indexOf("const batch = Math.min(room"));
+  assert.ok(hold.length > 0, "could not locate the headroom hold");
+  assert.ok(hold.includes('tr("cardsHoldStart")'), "the hold must announce itself, with the numbers it waits on");
+  assert.ok(hold.includes('tr("cardsHoldBeat")'), "a hold that hears nothing must keep saying so");
+  assert.ok(hold.includes('flush("holding"'), "the badge must change phase while holding");
+  assert.ok(hold.includes('tr("cardsHoldResume")'), "an end must tell the user how to continue");
+  assert.ok(/return "done";/.test(hold), "a stalled hold must end with a resumable verdict, not spin forever");
+  assert.ok(/if \(stopRef\.current\) return "stop";/.test(hold), "Stop must still work during a hold");
+
+  // the phase is drawn, with how long it has been waiting
+  assert.ok(tsx.includes('progress.phase === "holding"'), "the holding phase must be rendered");
+  assert.ok(/fmtDur\(progress\.holdFor\)/.test(tsx), "the badge must show how long it has waited");
+
+  // the cap is measured against a live server — it is not ours to loosen just
+  // because a wait is unpopular; loosening it is what loses cards
+  assert.ok(delivery.includes("export const INBOX_SAFE = 90;"), "the 10-box headroom under the proven cap stays");
+  assert.ok(delivery.includes("export const INBOX_BOX_CAP = 100;"), "the proven 100-box cap stays");
+
+  for (const key of ["cardsHolding", "cardsHoldStart", "cardsHoldBeat", "cardsHoldPause", "cardsHoldResume"]) {
+    assert.ok(key in DICT.vi, `${key} missing from vi`);
+    assert.ok(key in DICT.en, `${key} missing from en`);
+    assert.ok(DICT.vi[key as keyof typeof DICT.vi].length > 0, `${key} empty in vi`);
+    assert.ok(DICT.en[key as keyof typeof DICT.en].length > 0, `${key} empty in en`);
+  }
+});

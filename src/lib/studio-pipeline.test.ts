@@ -23,6 +23,8 @@ const { CHAT_EMOJI_IDS } = await import("./server/township/chat-emoji.server.ts"
 const { saveShapeProblems, assertSaveShapeSafe, stripUnknownAvatars, isRealAvatarId, assertProgressionsSafe, progressionProblems } =
   await import("./server/township/save-shape.server.ts");
 const { accountAgeSeconds, timeInGameExceedsAge, readVar } = await import("./server/township/vars.server.ts");
+const { RAW_PROFILE } = await import("./server/catalogs.data.server.ts");
+const { iconForProfileLabel } = await import("./game-icon-map.ts");
 
 const { token } = verifyLicenseKey("IGG-OWNER-TESTKEY", "TEST-DEVICE-0001");
 
@@ -2597,5 +2599,83 @@ test("a refused Frozen Fortune push rolls the whole batch back", () => {
     studio.exportCurrent(token, snap.sessionId).fileB64,
     before,
     "the whole batch must be undone, not just the part that failed",
+  );
+});
+
+test("profile: every frame id a real save carries is offered, and none is invented", () => {
+  const frames = RAW_PROFILE.find((g) => g.id === "Frames");
+  assert.ok(frames, "the Frames group must exist");
+
+  // Four ids measured in saves Playrix itself served. `VEdYLhJsAnU9…` is the
+  // 17-byte family's byte-7 continuation of Frame 12 (0x74 → 0x75); the other
+  // three are separate families (12 B, 15 B, 12 B). Until they joined the
+  // catalog, a donor wearing one was refused by
+  // `profile-unknown:Frames:<id>` on an otherwise perfectly clean copy.
+  const MEASURED = [
+    ["VEdYLhJsAnU9Gy0tFgIwCCM=", "Frame 13"],
+    ["fbwcfgtQVl0mEVRb", "Frame 14"],
+    ["Z8pyyL7TfVJRJ1MfKSka", "Frame 15"],
+    ["5bwcfgtQVl0mEVRb", "Frame 16"],
+  ] as const;
+  for (const [id, label] of MEASURED) {
+    const item: { id: string; label: string } | undefined = frames.items.find((x) => x.id === id);
+    assert.ok(item, `frame id ${id} must be in the catalog`);
+    assert.equal(item.label, label, `frame ${id} must carry the label the icon map already ships`);
+  }
+
+  assert.equal(
+    new Set(frames.items.map((i) => i.id)).size,
+    frames.items.length,
+    "no two frame ids may collide — the wallet is a comma list, a repeat is a wasted grant",
+  );
+  assert.equal(
+    new Set(frames.items.map((i) => i.label)).size,
+    frames.items.length,
+    "no two frame labels may collide — the label is what resolves the artwork",
+  );
+  assert.ok(
+    frames.items.every((i) => i.id.length > 0 && i.label.length > 0),
+    "no blank id or label may slip in",
+  );
+
+  // `public/game-icons/Frame_13..15.png` shipped long before the ids did; the
+  // label is the only link between them, so renaming one silently blanks it.
+  for (const label of ["Frame 13", "Frame 14", "Frame 15"]) {
+    assert.ok(iconForProfileLabel(label), `${label} must resolve to shipped artwork`);
+  }
+});
+
+test("profile: a save wearing a newly measured frame is not refused by the shape gate", () => {
+  const mk = (value: string) =>
+    [
+      '<?xml version="1.0" encoding="utf-8"?>',
+      "<Global>",
+      '<Var name="cityId" v="ME12345678" t="s"/>',
+      '<DataElem name="PlayerProfile" type="Data">',
+      '<DataElem name="Configs" type="Data">',
+      `<DataElem name="UnlockedFrames" type="s" value="${value}"/>`,
+      "</DataElem>",
+      "</DataElem>",
+      "</Global>",
+    ].join("");
+
+  const measured =
+    "VEdYLhJsAnU9Gy0tFgIwCCM=,fbwcfgtQVl0mEVRb,Z8pyyL7TfVJRJ1MfKSka,5bwcfgtQVl0mEVRb";
+
+  // The refusal is asserted first on purpose: a "no unknown ids" check on a
+  // document shape the rule never even looks at would pass without testing
+  // anything, and that is exactly how a catalog gate goes soft unnoticed.
+  assert.deepEqual(
+    saveShapeProblems(mk("notARealFrameId")).filter((k) =>
+      k.startsWith("profile-unknown:UnlockedFrames"),
+    ),
+    ["profile-unknown:UnlockedFrames:notARealFrameId"],
+    "an id no save has ever carried is still refused",
+  );
+
+  assert.deepEqual(
+    saveShapeProblems(mk(measured)).filter((k) => k.startsWith("profile-unknown")),
+    [],
+    "every frame id measured in a real save must be a known id",
   );
 });
