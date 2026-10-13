@@ -2602,7 +2602,10 @@ test("a refused Frozen Fortune push rolls the whole batch back", () => {
   );
 });
 
-test("profile: every frame id a real save carries is offered, and none is invented", () => {
+test("profile: every frame id a real save carries stays known, and none is invented", () => {
+  // "Known", not "offered": RAW_PROFILE is the table the shape gate reads, and
+  // three of these ids are deliberately *not* offered as buttons any more — see
+  // the test directly below.
   const frames = RAW_PROFILE.find((g) => g.id === "Frames");
   assert.ok(frames, "the Frames group must exist");
 
@@ -2642,6 +2645,30 @@ test("profile: every frame id a real save carries is offered, and none is invent
   // label is the only link between them, so renaming one silently blanks it.
   for (const label of ["Frame 13", "Frame 14", "Frame 15"]) {
     assert.ok(iconForProfileLabel(label), `${label} must resolve to shipped artwork`);
+  }
+});
+
+test("profile: the frames that grant nothing are no longer offered, but stay known to the gate", async () => {
+  const { publicCatalogs } = await import("./server/catalogs.server.ts");
+  const pub = publicCatalogs().profile.find((g) => g.id === "Frames");
+  assert.ok(pub, "the public Frames group must exist");
+
+  const offered = new Set(pub.items.map((i) => i.label));
+  assert.ok(offered.has("Frame 13"), "Frame 13 stays offered");
+  for (const label of ["Frame 14", "Frame 15", "Frame 16"]) {
+    assert.ok(!offered.has(label), `${label} must no longer be offered — pushing it granted nothing`);
+  }
+
+  // …but the ids themselves must survive in RAW_PROFILE. `PROFILE_IDS` and the
+  // pubId pre-registration below it both read that table, so dropping them
+  // would refuse a save that already wears one — the exact refusal that
+  // `964ce99` fixed. Hiding the button and forgetting the knowledge are two
+  // different changes, and only the first is wanted.
+  const raw = RAW_PROFILE.find((g) => g.id === "Frames");
+  assert.ok(raw, "the raw Frames group must exist");
+  const known = new Set(raw.items.map((i) => i.id));
+  for (const id of ["fbwcfgtQVl0mEVRb", "Z8pyyL7TfVJRJ1MfKSka", "5bwcfgtQVl0mEVRb"]) {
+    assert.ok(known.has(id), `frame id ${id} must stay in RAW_PROFILE for the shape gate`);
   }
 });
 

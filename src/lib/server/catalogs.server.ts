@@ -452,7 +452,31 @@ function avatarGroups(): Group[] {
   return out;
 }
 
-const PROFILE: Group[] = RAW_PROFILE.filter((g) => g.id !== "Themes").map((g) => cloakGroup("profile", g));
+/**
+ * Frame ids that real saves demonstrably carry, but whose unlock button grants
+ * nothing in game (reported 2026-10-13 by pushing each one: "i pushed this 3
+ * buttons nothing collect").
+ *
+ * They must **stay** in `RAW_PROFILE`: `PROFILE_IDS` in the shape gate and the
+ * `pubId` pre-registration below both read it, so a save that already wears one
+ * keeps round-tripping instead of being refused for an id Playrix itself wrote.
+ * Only the *button* is withdrawn — a control that silently does nothing is
+ * worse than no control at all.
+ */
+const NO_BUTTON_PROFILE_IDS = new Set([
+  "fbwcfgtQVl0mEVRb", // Frame 14
+  "Z8pyyL7TfVJRJ1MfKSka", // Frame 15
+  "5bwcfgtQVl0mEVRb", // Frame 16
+]);
+
+const PROFILE: Group[] = RAW_PROFILE.filter((g) => g.id !== "Themes").map((g) =>
+  cloakGroup(
+    "profile",
+    g.id === "Frames"
+      ? { ...g, items: g.items.filter((it) => !NO_BUTTON_PROFILE_IDS.has(it.id)) }
+      : g,
+  ),
+);
 const SKIN_LABELS = new Map<string, string>();
 for (const g of RAW_SKINS) for (const it of g.items) SKIN_LABELS.set(it.id, it.label);
 
