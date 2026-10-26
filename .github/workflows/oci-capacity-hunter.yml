@@ -22,7 +22,8 @@ permissions:
 
 jobs:
   hunt:
-    runs-on: ubuntu-latest
+    # Pinned rather than ubuntu-latest (which has migrated to 26.04).
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       # Not secrets: OCIDs are identifiers, not credentials.
@@ -35,13 +36,18 @@ jobs:
 
     steps:
       - name: Install OCI CLI
-        run: pip3 install --quiet --break-system-packages oci || pip3 install --quiet oci
+        run: |
+          pip3 install --user --break-system-packages oci oci-cli
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
+          oci --version
 
       - name: Write OCI config and SSH key
         env:
           PRIV: ${{ secrets.OCI_PRIVATE_KEY }}
           FP: ${{ secrets.OCI_FINGERPRINT }}
         run: |
+          export PATH="$HOME/.local/bin:$PATH"
           if [ -z "$PRIV" ] || [ -z "$FP" ]; then
             echo "MISSING SECRET: add OCI_PRIVATE_KEY and OCI_FINGERPRINT"
             exit 1
@@ -65,10 +71,16 @@ jobs:
       - name: Hunt for capacity
         run: |
           set -u
+          export PATH="$HOME/.local/bin:$PATH"
           AD1="ttMs:US-CHICAGO-1-AD-1"
           AD2="ttMs:US-CHICAGO-1-AD-2"
           AD3="ttMs:US-CHICAGO-1-AD-3"
           FALLBACK_IMG="ocid1.image.oc1.us-chicago-1.aaaaaaaanieojf26h4duqxd642dpyhkbbuszqjbbwqhmf2udlevbtaixy4vq"
+
+          if ! command -v oci >/dev/null 2>&1; then
+            echo "OCI CLI not on PATH - install step is broken"
+            exit 1
+          fi
 
           echo "== sanity check (identity) =="
           if ! oci iam user get --user-id "$OCI_USER_OCID" --query 'data.name' --raw-output; then
