@@ -110,24 +110,32 @@ jobs:
           echo "using image: $IMG"
 
           CREATED=""
-          for AD in "$AD1" "$AD2" "$AD3"; do
-            echo "--- trying $AD"
-            R=$(oci compute instance launch --compartment-id "$OCI_COMPARTMENT" \
-              --availability-domain "$AD" \
-              --shape "VM.Standard.A1.Flex" --shape-config '{"ocpus":1,"memoryInGBs":6}' \
-              --display-name "$OCI_DISPLAY_NAME" --image-id "$IMG" --subnet-id "$OCI_SUBNET" \
-              --assign-public-ip true --boot-volume-size-in-gbs 50 \
-              --metadata file:///tmp/metadata.json 2>&1) || true
-            if echo "$R" | grep -q '"id"'; then
-              CREATED=$(echo "$R" | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])') || true
-              echo "CREATED in $AD -> $CREATED"
-              break
-            fi
-            echo "$R" | tail -n 3
+          # Each launch takes ~1.5 min to be answered, so one run keeps cycling
+          # for ~9 minutes instead of trying once and quitting. The schedule
+          # fires again 10 min after this run starts, so runs never pile up.
+          DEADLINE=$(( $(date +%s) + 540 ))
+          ROUND=0
+          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+            ROUND=$(( ROUND + 1 ))
+            for AD in "$AD1" "$AD2" "$AD3"; do
+              echo "--- round $ROUND, trying $AD"
+              R=$(oci compute instance launch --compartment-id "$OCI_COMPARTMENT" \
+                --availability-domain "$AD" \
+                --shape "VM.Standard.A1.Flex" --shape-config '{"ocpus":1,"memoryInGBs":6}' \
+                --display-name "$OCI_DISPLAY_NAME" --image-id "$IMG" --subnet-id "$OCI_SUBNET" \
+                --assign-public-ip true --boot-volume-size-in-gbs 50 \
+                --metadata file:///tmp/metadata.json 2>&1) || true
+              if echo "$R" | grep -q '"id"'; then
+                CREATED=$(echo "$R" | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])') || true
+                echo "CREATED in $AD -> $CREATED"
+                break 2
+              fi
+              echo "$R" | grep -iE '"code"|"message"' | head -n 2
+            done
           done
 
           if [ -z "$CREATED" ]; then
-            echo "no capacity this round - will retry in 10 minutes"
+            echo "no capacity after $ROUND rounds - next run in 10 minutes"
             exit 0
           fi
 
