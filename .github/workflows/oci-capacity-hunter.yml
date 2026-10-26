@@ -10,7 +10,9 @@ name: Oracle capacity hunter
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    # Every 10 minutes, offset off the round number: GitHub docs warn queued
+    # runs can be dropped at the top of the hour under load.
+    - cron: "6,16,26,36,46,56 * * * *"
   workflow_dispatch:
 
 concurrency:
