@@ -90,19 +90,23 @@ jobs:
 
           EXIST=$(oci compute instance list --compartment-id "$OCI_COMPARTMENT" --all \
             --display-name "$OCI_DISPLAY_NAME" \
-            --query 'data[?lifecycle-state!=`TERMINATED` && lifecycle-state!=`TERMINATING`].id|[0]' \
-            --raw-output 2>/dev/null)
-          if [ -n "${EXIST:-}" ] && [ "$EXIST" != "None" ]; then
-            echo "ALREADY EXISTS - nothing to do: $EXIST"
-            exit 0
-          fi
+            --query 'data[?"lifecycle-state"!=`TERMINATED` && "lifecycle-state"!=`TERMINATING`].id|[0]' \
+            --raw-output 2>&1) || true
+          echo "existing-check: [$EXIST]"
+          case "$EXIST" in
+            ocid1.instance*) echo "ALREADY EXISTS - nothing to do: $EXIST"; exit 0 ;;
+            *) ;;
+          esac
 
           IMG=$(oci compute image list --compartment-id "$OCI_COMPARTMENT" \
             --operating-system "Canonical Ubuntu" --operating-system-version "22.04" \
             --shape "VM.Standard.A1.Flex" --limit 20 \
             --sort-by TIMECREATED --sort-order DESC \
-            --query 'data[0].id' --raw-output 2>/dev/null)
-          if [ -z "${IMG:-}" ] || [ "$IMG" = "None" ]; then IMG="$FALLBACK_IMG"; fi
+            --query 'data[0].id' --raw-output 2>&1) || true
+          case "$IMG" in
+            ocid1.image*) ;;
+            *) echo "image lookup failed: [$IMG] - using pinned image"; IMG="$FALLBACK_IMG" ;;
+          esac
           echo "using image: $IMG"
 
           CREATED=""
