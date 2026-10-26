@@ -1,0 +1,142 @@
+name: Oracle capacity hunter
+
+# Keeps trying to create the Always Free ARM machine in Chicago until a slot
+# opens. Capacity is random, so this runs by itself every 10 minutes without
+# needing a PC on. Public repo = unlimited free Actions minutes.
+#
+# Exit codes on purpose:
+#   0 = no capacity this round (quiet, no email)
+#   1 = the machine WAS created (intentional "failure" so GitHub emails you)
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: oci-capacity-hunter
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  hunt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # Not secrets: OCIDs are identifiers, not credentials.
+      OCI_TENANCY: ocid1.tenancy.oc1..aaaaaaaacwbxhg5gdi55scbvpd4pvbpcbarr77swafov2xdchyf5o5psfqtq
+      OCI_USER_OCID: ocid1.user.oc1..aaaaaaaa2bqpxekm5gndwhoq5hzlyzcwlvjoolfngmlmfg6jd76xuw3hxrza
+      OCI_REGION: us-chicago-1
+      OCI_COMPARTMENT: ocid1.tenancy.oc1..aaaaaaaacwbxhg5gdi55scbvpd4pvbpcbarr77swafov2xdchyf5o5psfqtq
+      OCI_SUBNET: ocid1.subnet.oc1.us-chicago-1.aaaaaaaaptbdgbj3mo6wzjbokndhhlhokdlacpivne4v7qsqx2ofqofmqqsa
+      OCI_DISPLAY_NAME: igg-vip-studio
+
+    steps:
+      - name: Install OCI CLI
+        run: pip3 install --quiet --break-system-packages oci || pip3 install --quiet oci
+
+      - name: Write OCI config and SSH key
+        env:
+          PRIV: ${{ secrets.OCI_PRIVATE_KEY }}
+          FP: ${{ secrets.OCI_FINGERPRINT }}
+        run: |
+          if [ -z "$PRIV" ] || [ -z "$FP" ]; then
+            echo "MISSING SECRET: add OCI_PRIVATE_KEY and OCI_FINGERPRINT"
+            exit 1
+          fi
+          mkdir -p ~/.oci ~/.ssh
+          printf '%s\n' "$PRIV" | tr -d '\r' > ~/.oci/oci_api_key.pem
+          chmod 600 ~/.oci/oci_api_key.pem
+          cat > ~/.oci/config <<EOF
+          [DEFAULT]
+          user=$OCI_USER_OCID
+          fingerprint=$FP
+          tenancy=$OCI_TENANCY
+          region=$OCI_REGION
+          key_file=$HOME/.oci/oci_api_key.pem
+          EOF
+          chmod 600 ~/.oci/config
+          echo 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOswk2YxZ2+XRcvMuKBY/WAQUPK4ptMflr8ot9aHhqLp igg-oracle-chicago' > ~/.ssh/igg.pub
+          printf '{"ssh_authorized_keys": "%s"}\n' "$(cat ~/.ssh/igg.pub)" > /tmp/metadata.json
+          echo "OCI config ready"
+
+      - name: Hunt for capacity
+        run: |
+          set -u
+          AD1="ttMs:US-CHICAGO-1-AD-1"
+          AD2="ttMs:US-CHICAGO-1-AD-2"
+          AD3="ttMs:US-CHICAGO-1-AD-3"
+          FALLBACK_IMG="ocid1.image.oc1.us-chicago-1.aaaaaaaanieojf26h4duqxd642dpyhkbbuszqjbbwqhmf2udlevbtaixy4vq"
+
+          echo "== sanity check (identity) =="
+          if ! oci iam user get --user-id "$OCI_USER_OCID" --query 'data.name' --raw-output; then
+            echo "AUTH FAILED - check OCI_PRIVATE_KEY / OCI_FINGERPRINT"
+            exit 1
+          fi
+
+          EXIST=$(oci compute instance list --compartment-id "$OCI_COMPARTMENT" --all \
+            --display-name "$OCI_DISPLAY_NAME" \
+            --query 'data[?lifecycle-state!=`TERMINATED` && lifecycle-state!=`TERMINATING`].id|[0]' \
+            --raw-output 2>/dev/null)
+          if [ -n "${EXIST:-}" ] && [ "$EXIST" != "None" ]; then
+            echo "ALREADY EXISTS - nothing to do: $EXIST"
+            exit 0
+          fi
+
+          IMG=$(oci compute image list --compartment-id "$OCI_COMPARTMENT" \
+            --operating-system "Canonical Ubuntu" --operating-system-version "22.04" \
+            --shape "VM.Standard.A1.Flex" --limit 20 \
+            --sort-by TIMECREATED --sort-order DESC \
+            --query 'data[0].id' --raw-output 2>/dev/null)
+          if [ -z "${IMG:-}" ] || [ "$IMG" = "None" ]; then IMG="$FALLBACK_IMG"; fi
+          echo "using image: $IMG"
+
+          CREATED=""
+          for AD in "$AD1" "$AD2" "$AD3"; do
+            echo "--- trying $AD"
+            R=$(oci compute instance launch --compartment-id "$OCI_COMPARTMENT" \
+              --availability-domain "$AD" \
+              --shape "VM.Standard.A1.Flex" --shape-config '{"ocpus":1,"memoryInGBs":6}' \
+              --display-name "$OCI_DISPLAY_NAME" --image-id "$IMG" --subnet-id "$OCI_SUBNET" \
+              --assign-public-ip true --boot-volume-size-in-gbs 50 \
+              --metadata file:///tmp/metadata.json 2>&1)
+            if echo "$R" | grep -q '"id"'; then
+              CREATED=$(echo "$R" | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+              echo "CREATED in $AD -> $CREATED"
+              break
+            fi
+            echo "$R" | tail -n 3
+          done
+
+          if [ -z "$CREATED" ]; then
+            echo "no capacity this round - will retry in 10 minutes"
+            exit 0
+          fi
+
+          echo "waiting for the machine to boot..."
+          for i in $(seq 1 30); do
+            ST=$(oci compute instance get --instance-id "$CREATED" \
+              --query 'data."lifecycle-state"' --raw-output 2>/dev/null)
+            echo "  state: $ST"
+            [ "$ST" = "RUNNING" ] && break
+            [ "$ST" = "TERMINATED" ] && break
+            sleep 20
+          done
+
+          IP=$(oci compute instance list-vnics --instance-id "$CREATED" \
+            --query 'data[0]."public-ip"' --raw-output 2>/dev/null)
+
+          echo ""
+          echo "=========================================="
+          echo " SUCCESS - MACHINE IS YOURS"
+          echo " name:   $OCI_DISPLAY_NAME"
+          echo " ocid:   $CREATED"
+          echo " state:  $(oci compute instance get --instance-id "$CREATED" --query 'data."lifecycle-state"' --raw-output)"
+          echo " public: $IP"
+          echo " ssh:    ssh -i C:\\Users\\User\\.ssh\\igg-oracle ubuntu@$IP"
+          echo "=========================================="
+          echo ""
+          echo "This job now FAILS ON PURPOSE so GitHub sends you the email."
+          exit 1
