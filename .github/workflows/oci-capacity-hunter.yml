@@ -117,9 +117,9 @@ jobs:
               --shape "VM.Standard.A1.Flex" --shape-config '{"ocpus":1,"memoryInGBs":6}' \
               --display-name "$OCI_DISPLAY_NAME" --image-id "$IMG" --subnet-id "$OCI_SUBNET" \
               --assign-public-ip true --boot-volume-size-in-gbs 50 \
-              --metadata file:///tmp/metadata.json 2>&1)
+              --metadata file:///tmp/metadata.json 2>&1) || true
             if echo "$R" | grep -q '"id"'; then
-              CREATED=$(echo "$R" | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+              CREATED=$(echo "$R" | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])') || true
               echo "CREATED in $AD -> $CREATED"
               break
             fi
@@ -134,7 +134,7 @@ jobs:
           echo "waiting for the machine to boot..."
           for i in $(seq 1 30); do
             ST=$(oci compute instance get --instance-id "$CREATED" \
-              --query 'data."lifecycle-state"' --raw-output 2>/dev/null)
+              --query 'data."lifecycle-state"' --raw-output 2>&1) || true
             echo "  state: $ST"
             [ "$ST" = "RUNNING" ] && break
             [ "$ST" = "TERMINATED" ] && break
@@ -142,14 +142,14 @@ jobs:
           done
 
           IP=$(oci compute instance list-vnics --instance-id "$CREATED" \
-            --query 'data[0]."public-ip"' --raw-output 2>/dev/null)
+            --query 'data[0]."public-ip"' --raw-output 2>&1) || true
 
           echo ""
           echo "=========================================="
           echo " SUCCESS - MACHINE IS YOURS"
           echo " name:   $OCI_DISPLAY_NAME"
           echo " ocid:   $CREATED"
-          echo " state:  $(oci compute instance get --instance-id "$CREATED" --query 'data."lifecycle-state"' --raw-output)"
+          echo " state:  $ST"
           echo " public: $IP"
           echo " ssh:    ssh -i C:\\Users\\User\\.ssh\\igg-oracle ubuntu@$IP"
           echo "=========================================="
