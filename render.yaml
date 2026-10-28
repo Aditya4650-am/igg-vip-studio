@@ -5,7 +5,13 @@ services:
     plan: free
     region: singapore
     branch: main
-    autoDeploy: true
+    # Free plan = 750 instance-hours/month; this service runs ~24/7 (744h in a
+    # 31-day month), leaving ~6h spare. Every push builds a second instance
+    # while the old one still runs, and that overlap is what pushed the
+    # workspace past 750h. Deploys are manual now: Render dashboard ->
+    # igg-vip-studio -> Manual Deploy. Flip back to true only if the tool
+    # moves to a paid plan or another host.
+    autoDeploy: false
     buildCommand: NPM_CONFIG_PRODUCTION=false npm install && npm run build
     startCommand: node .output/server/index.mjs
     envVars:
