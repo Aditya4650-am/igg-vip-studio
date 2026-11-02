@@ -146,6 +146,14 @@ export const RAW_PROFILE: RawGroup[] = [
       {
         "id": "USVTHSoRQlAJCDkDWRI/DykOExRTNys=",
         "label": "Badge 16"
+      },
+      {
+        "id": "USVTHSoRQl8JCDkDWRI/DykOExRTNys=",
+        "label": "Badge 17"
+      },
+      {
+        "id": "UVIgUB8Qfko4NA44Bz0XVw0vCBEWXQ==",
+        "label": "Badge 18"
       }
     ]
   },
@@ -231,6 +239,38 @@ export const RAW_PROFILE: RawGroup[] = [
       {
         "id": "PxceLTU3ASA9AkNqCTkMGRU/MSEXEA9UUlE=",
         "label": "Title 20"
+      },
+      {
+        "id": "PxceLTU3ASA9Ak5qCTkMGRU/MSEXEA9UUlE=",
+        "label": "Title 21"
+      },
+      {
+        "id": "PxceLTU3ASA9Ak9qCTkMGRU/MSEXEA9UUlE=",
+        "label": "Title 22"
+      },
+      {
+        "id": "PxceLTU3ASA9AkBqCTkMGRU/MSEXEA9UUlE=",
+        "label": "Title 23"
+      },
+      {
+        "id": "PxceLTU3ASA9AkFqCTkMGRU/MSEXEA9UUlE=",
+        "label": "Title 24"
+      },
+      {
+        "id": "ciIfESAGOAQUVw4pVw84CH0QVzMnERINWg==",
+        "label": "Title 25"
+      },
+      {
+        "id": "ciIfESAGOAQUVw8pVw84CH0QVzMnERINWg==",
+        "label": "Title 26"
+      },
+      {
+        "id": "ciIfESAGOAQUVwApVw84CH0QVzMnERINWg==",
+        "label": "Title 27"
+      },
+      {
+        "id": "ciIfESAGOAQUVwEpVw84CH0QVzMnERINWg==",
+        "label": "Title 28"
       }
     ]
   },
@@ -300,6 +340,10 @@ export const RAW_PROFILE: RawGroup[] = [
       {
         "id": "5bwcfgtQVl0mEVRb",
         "label": "Frame 16"
+      },
+      {
+        "id": "VEdYLhJsAnY9Gy0tFgIwCCM=",
+        "label": "Frame 17"
       }
     ]
   },
@@ -337,6 +381,10 @@ export const RAW_PROFILE: RawGroup[] = [
       {
         "id": "train",
         "label": "Train"
+      },
+      {
+        "id": "pumpkin",
+        "label": "Pumpkin"
       }
     ]
   },
@@ -450,6 +498,10 @@ export const RAW_SKINS: RawGroup[] = [
       {
         "id": "Skin_Ship_harvest_80",
         "label": "Harvest 80"
+      },
+      {
+        "id": "Skin_Ship_skiresort_83",
+        "label": "Ski Resort 83"
       }
     ]
   },
@@ -547,6 +599,10 @@ export const RAW_SKINS: RawGroup[] = [
       {
         "id": "Skin_Train_christmas2024",
         "label": "Christmas 2024"
+      },
+      {
+        "id": "Skin_Train_halloween_82",
+        "label": "Halloween 82"
       }
     ]
   },
@@ -644,6 +700,14 @@ export const RAW_SKINS: RawGroup[] = [
       {
         "id": "Skin_TrainStation_vacation_78",
         "label": "Vacation"
+      },
+      {
+        "id": "Skin_TrainStation_halloween_82",
+        "label": "Halloween 82"
+      },
+      {
+        "id": "Skin_TrainStation_future_76",
+        "label": "Future 76"
       }
     ]
   },
@@ -729,6 +793,10 @@ export const RAW_SKINS: RawGroup[] = [
       {
         "id": "Skin_Harbor_harvest_80",
         "label": "Harvest 80"
+      },
+      {
+        "id": "Skin_Harbor_skiresort_83",
+        "label": "Ski Resort 83"
       }
     ]
   },
@@ -891,6 +959,10 @@ export const RAW_SKINS: RawGroup[] = [
       {
         "id": "Skin_Chicken_harvest_80",
         "label": "Harvest 80"
+      },
+      {
+        "id": "Skin_Chicken_halloween_82",
+        "label": "Halloween 82"
       }
     ]
   },
@@ -980,6 +1052,14 @@ export const RAW_SKINS: RawGroup[] = [
       {
         "id": "Skin_Airplane_culinary_74",
         "label": "Culinary 74"
+      },
+      {
+        "id": "Skin_Airplane_wildwest_81",
+        "label": "Wild West 81"
+      },
+      {
+        "id": "Skin_Airplane_christmas_84",
+        "label": "Christmas 84"
       }
     ]
   },
@@ -1146,6 +1226,14 @@ export const RAW_SKINS: RawGroup[] = [
       {
         "id": "Skin_Sheep_Gatsby",
         "label": "Gatsby"
+      },
+      {
+        "id": "Skin_Sheep_Default",
+        "label": "Default"
+      },
+      {
+        "id": "Skin_Sheep_skiresort_83",
+        "label": "Ski Resort 83"
       }
     ]
   },
@@ -1235,6 +1323,14 @@ export const RAW_SKINS: RawGroup[] = [
       {
         "id": "Skin_Airport_culinary_74",
         "label": "Culinary 74"
+      },
+      {
+        "id": "Skin_Airport_wildwest_81",
+        "label": "Wild West 81"
+      },
+      {
+        "id": "Skin_Airport_christmas_84",
+        "label": "Christmas 84"
       }
     ]
   },
@@ -1328,6 +1424,14 @@ export const RAW_SKINS: RawGroup[] = [
       {
         "id": "Skin_Cow_vacation_78",
         "label": "Vacation 78"
+      },
+      {
+        "id": "Skin_Cow_wildwest_81",
+        "label": "Wild West 81"
+      },
+      {
+        "id": "Skin_Cow_christmas_84",
+        "label": "Christmas 84"
       }
     ]
   },
@@ -1337,6 +1441,10 @@ export const RAW_SKINS: RawGroup[] = [
       {
         "id": "Skin_Pig_CNY",
         "label": "Chinese New Year"
+      },
+      {
+        "id": "Skin_Pig_Default",
+        "label": "Default"
       }
     ]
   },

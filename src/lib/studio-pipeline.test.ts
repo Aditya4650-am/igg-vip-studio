@@ -2648,6 +2648,30 @@ test("profile: every frame id a real save carries stays known, and none is inven
   }
 });
 
+test("profile: every game-40.0.1 label resolves to artwork that ships on disk", () => {
+  const shipped = new Set(readdirSync("public/game-icons"));
+  // The 40.0.1 additions (badges 17/18, frame 17, titles 21-28, style Pumpkin)
+  // arrived as uploads with mixed names and a cream JPG background; the label
+  // is the only link to the converted transparent PNG, so pin every one.
+  const labels = [
+    "Badge 17", "Badge 18", "Frame 17",
+    "Title 21", "Title 22", "Title 23", "Title 24",
+    "Title 25", "Title 26", "Title 27", "Title 28",
+    "Pumpkin",
+  ];
+  for (const label of labels) {
+    const src = iconForProfileLabel(label);
+    assert.ok(src, `${label} must resolve to an icon path`);
+    const file = src.replace("/game-icons/", "");
+    assert.ok(shipped.has(file), `${label} -> ${file} must ship in public/game-icons`);
+  }
+  // The uploads were JPG/cream-background; these pins stop an opaque
+  // rectangle or a re-upload of the original sneaking back in.
+  const png = readFileSync("public/game-icons/Title_21.png");
+  assert.equal(png[25], 6, "Title_21 must be RGBA (cream background removed)");
+  assert.ok(png.length > 1000, "Title_21 must not be an empty placeholder");
+});
+
 test("profile: the frames that grant nothing are no longer offered, but stay known to the gate", async () => {
   const { publicCatalogs } = await import("./server/catalogs.server.ts");
   const pub = publicCatalogs().profile.find((g) => g.id === "Frames");

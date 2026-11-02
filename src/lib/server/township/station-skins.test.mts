@@ -77,9 +77,11 @@ test("every station skin in the catalog has a resolvable label", () => {
   }
 });
 
-// The 22 ids confirmed by the game data: 21 have an identical twin in the
+// The 24 ids confirmed by the game data: 21 have an identical twin in the
 // already-shipping Train group (Skin_TrainStation_X <-> Skin_Train_X), and
-// SP2/SP5 are confirmed rendering in-game.
+// SP2/SP5 are confirmed rendering in-game. halloween_82 / future_76 were
+// measured on a game 40.0.1 save (`mGameInfo_40.0.1.xml`) whose own
+// `<Skins>` block lists them as real rows.
 const EXPECTED_STATION_IDS = [
   "Skin_TrainStation_SP2",
   "Skin_TrainStation_SP5",
@@ -103,6 +105,8 @@ const EXPECTED_STATION_IDS = [
   "Skin_TrainStation_france_68",
   "Skin_TrainStation_celebrity_73",
   "Skin_TrainStation_vacation_78",
+  "Skin_TrainStation_halloween_82",
+  "Skin_TrainStation_future_76",
 ];
 
 test("the catalog ships every confirmed station skin id and nothing invented", () => {
@@ -126,7 +130,9 @@ test("station icons resolve to files that exist on disk", () => {
     mapped += 1;
     assert.ok(existsSync(join(repoRoot, "public", icon.replace(/^\//, ""))), `icon file missing: ${icon}`);
   }
-  // France/Celebrity/Vacation have no artwork yet, so 20 of 23 rows carry an icon.
+  // France/Celebrity/Vacation have no artwork yet, and the 40.0.1 arrivals
+  // (Halloween 82 / Future 76) have none either, so 20 of 25 rows carry an
+  // icon — the rest fall back to the group emoji.
   assert.equal(mapped, 20, `expected 20 station icons, got ${mapped}`);
 });
 
