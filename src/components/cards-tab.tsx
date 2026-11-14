@@ -880,11 +880,9 @@ export function CardsTab({
    * the proven SendBox loop — same physics as the friend run (numeric order,
    * delay ≥800ms, 403 retry, a stop button that stops), with two upgrades of
    * its own: it runs straight through with no wave hold and no inbox notice
-   * mid-run, while the plan itself never exceeds the inbox's safe line — the
-   * 101st box in a full inbox evicts the oldest, which would destroy the
-   * cards this run just delivered, so whatever does not fit is named once at
-   * the end (collect in game, run again). A fully successful run opens the
-   * completion popup. `CheckCity` reads our
+   * mid-run, and the whole plan goes out — nothing is held back for inbox
+   * headroom and nothing is reported as "left for later". A fully successful
+   * run opens the completion popup. `CheckCity` reads our
    * *own* live inbox, so delivery is proven the moment the box appears
    * there. The game then absorbs the boxes itself — album, counters,
    * set completions and set rewards all happen in the client, exactly like a
@@ -930,9 +928,6 @@ export function CardsTab({
     let abort = false;
     /** Card numbers that answered "sent" this run — what verify reads back. */
     const sentList: number[] = [];
-    /** Cards left for a later pass: over the safe line now, or skipped by a
-     *  resend that would have evicted something instead of filling it. */
-    let deferred = 0;
 
     const flush = (phase: Phase, holdFor = 0) =>
       setProgress({
@@ -1029,26 +1024,10 @@ export function CardsTab({
       return;
     }
 
-    // ── prune guard: the inbox holds INBOX_BOX_CAP boxes — the 101st
-    // insert evicts the oldest down to 50, destroying cards this run just
-    // delivered. Only the safe headroom goes out (a slice decided before
-    // the first send, so the loop itself still runs straight through with
-    // no hold and no notice); the remainder is reported once at the end.
-    const usedNow = (snap?.pendingTotal ?? 0) + (liveOk ? liveTotal : 0);
-    const budget = Math.max(0, INBOX_SAFE - usedNow);
-    if (budget === 0) {
-      pushLog("warn", tr("cardsSelfFullRun"));
-      toast(tr("cardsSelfFullRun"));
-      setRunning(false);
-      setStop(false);
-      void analyzeSelf();
-      return;
-    }
-    deferred = Math.max(0, queue.length - budget);
-    if (deferred > 0) {
-      queue = queue.slice(0, budget);
-      pushLog("info", `${deferred} ${tr("cardsSelfLeft")}`);
-    }
+    // ── no inbox hold: every planned card goes out. The 100-box cap is the
+    // receiver's business, not a reason to stop the run — the game collects
+    // boxes itself, and a card already sitting in the album is never planned
+    // twice, so the plan is exactly the gap.
     runTotal = queue.length;
     flush("sending");
     pushLog(
@@ -1057,8 +1036,7 @@ export function CardsTab({
     );
 
     // ── straight send: every planned card, one after another, no wave cap
-    // and no inbox hold — the plan above already stops at the safe line,
-    // and this loop only stops on Stop or an auth failure.
+    // and no inbox hold — this loop only stops on Stop or an auth failure.
     let qi = 0;
     while (!abort && qi < queue.length) {
       if (stopRef.current) {
@@ -1126,17 +1104,7 @@ export function CardsTab({
         if (missingNow.length === 0 || attempt === CONFIRM_ATTEMPTS) break;
         // A provably lost box is resent silently — the final summary line
         // already reports it as "+⟳ N", so no mid-run notice is needed.
-        // A resend is an insert like any other: it stops at the safe line
-        // too, or it would evict a card instead of filling the gap.
-        const room = Math.max(
-          0,
-          INBOX_SAFE - ((snap?.pendingTotal ?? 0) + (liveOk ? liveTotal : 0)),
-        );
-        const resendQ = missingNow.slice(0, room);
-        if (resendQ.length < missingNow.length) {
-          deferred += missingNow.length - resendQ.length;
-        }
-        for (const n of resendQ) {
+        for (const n of missingNow) {
           if (stopRef.current) break;
           const cardId = cardIdOf(n);
           try {
@@ -1172,13 +1140,12 @@ export function CardsTab({
     flush("sending");
     pushLog(
       abort && stopRef.current ? "warn" : errors > 0 ? "warn" : "ok",
-      `${tr("cardsDone")}: ✓ ${sent} · ✗ ${rejected} · ⚠ ${errors}${retried ? ` · ⟳ ${retried}` : ""}${resent ? ` · +⟳ ${resent}` : ""} · ✓✓ ${confirmed} · ⏳ ${awaiting}${deferred ? ` · ⏭ ${deferred}` : ""}`,
+      `${tr("cardsDone")}: ✓ ${sent} · ✗ ${rejected} · ⚠ ${errors}${retried ? ` · ⟳ ${retried}` : ""}${resent ? ` · +⟳ ${resent}` : ""} · ✓✓ ${confirmed} · ⏳ ${awaiting}`,
     );
 
     // The wall-clock verdict for the banner, the toast and the popup — a
     // run is a success whenever every planned card went out, receipts
-    // included; only a success with nothing deferred earns the completion
-    // dialog (a capped pass is honest about the cards still to come).
+    // included, and that is what earns the completion dialog.
     const seconds = Math.max(1, Math.round((Date.now() - t0) / 1000));
     const ok = !abort && sent === runTotal && rejected === 0 && errors === 0;
     setFinished({
@@ -1194,13 +1161,10 @@ export function CardsTab({
       total: runTotal,
       seconds,
     });
-    const allDone = ok && deferred === 0;
-    if (allDone) setSelfPopup({ sent, total: runTotal, confirmed, seconds });
-    const desc = `${sent}/${runTotal} ✓ · ${rejected} ✗ · ${errors} ⚠${retried ? ` · ⟳ ${retried}` : ""}${resent ? ` · +⟳ ${resent}` : ""} · ✓✓${confirmed}${awaiting ? ` · ⏳ ${awaiting}` : ""}${deferred ? ` · ${deferred} ${tr("cardsSelfLeft")}` : ""} · ${seconds}s`;
-    if (allDone) {
+    if (ok) setSelfPopup({ sent, total: runTotal, confirmed, seconds });
+    const desc = `${sent}/${runTotal} ✓ · ${rejected} ✗ · ${errors} ⚠${retried ? ` · ⟳ ${retried}` : ""}${resent ? ` · +⟳ ${resent}` : ""} · ✓✓${confirmed}${awaiting ? ` · ⏳ ${awaiting}` : ""} · ${seconds}s`;
+    if (ok) {
       toast.success(tr("cardsComplete"), { description: desc });
-    } else if (ok) {
-      toast(tr("cardsSelfPartial"), { description: desc });
     } else {
       toast(abort ? tr("cardsStopped") : tr("cardsComplete"), { description: desc });
     }
@@ -1428,11 +1392,6 @@ export function CardsTab({
           </div>
         ) : null}
         {self?.error ? <p className="mb-3 text-xs text-amber">⚠ {self.error}</p> : null}
-        {self && self.pending + self.live >= INBOX_SAFE ? (
-          <p className="mb-3 text-xs text-amber">
-            ⚠ {self.pending + self.live}/{INBOX_BOX_CAP} · {tr("cardsSelfFull")}
-          </p>
-        ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="ghost" disabled={!acct || running || selfBusy} onClick={analyzeSelf}>
