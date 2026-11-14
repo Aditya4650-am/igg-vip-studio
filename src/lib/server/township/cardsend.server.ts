@@ -7,7 +7,7 @@
  * the game client uses — `POST /api/1/SendBox` with a framed body — so this
  * module is the one place that speaks it, and the UI drives it send-by-send.
  *
- * Three deliberate choices, all proven against the live server:
+ * Four deliberate choices, all proven against the live server:
  *
  * - **One process per request** (`scripts/township/api_call.py`), exactly how
  *   `desban.server.ts` already runs `fetch_city.py`. The frame codec lives in
@@ -16,12 +16,16 @@
  *   any sender (probe: unowned `card_151` → 200 `{"result":{}}`), so there is
  *   no inventory parser here on purpose — the catalog in `cards.server.ts` is
  *   the complete sendable set.
- * - **403 is a retry, not a failure.** Bursts get a transient
+ * - **403 is a retry, not a failure.** The client can
+ *   get a transient
  *   `{"error":{"code":"Forbidden"}}` from the anti-abuse layer (~1 in 10 at
  *   0 ms spacing, none at 800 ms in a 10-shot run), and the very next request
  *   goes through. `sendCard` retries it with backoff; a genuine auth refusal
  *   (`Wrong parameter`, HTTP 401) is *not* retried — retrying cannot fix a
  *   token.
+ * - **The event is read, not hardcoded.** `col_id` / `col_et` come from the
+ *   save's own `CardCollections_*` window (`activeCardCollection`), so a
+ *   Playrix rotation cannot silently kill every send — see `CardCollection`.
  *
  * `result` classifies the outcome: `{}` = the box was accepted and is in the
  * friend's inbox, `null` = the recipient id does not exist and the box was
@@ -33,7 +37,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { decodeLocalInfoBase64, parseLocalFriends, parseOwnMeta } from "./desban.server";
+import { decodeLocalInfoBase64, fetchCityXml, parseLocalFriends, parseOwnMeta } from "./desban.server";
 import { CARD_IDS } from "./cards.server";
 
 export type CardFriend = { id: string; name: string; level: number };
@@ -54,17 +58,55 @@ export type CardAccount = {
   boxes: number;
   checkedAt: number;
   checkError: string | null;
+  /** The collection event sends currently carry, read from a save (see resolve). */
+  col: CardCollection | null;
+  /** When `col` was last resolved — re-resolving is throttled inside a loop. */
+  colAt: number;
 };
 
 /**
- * The collection event the box belongs to, copied byte-for-byte from a real
- * send captured from the game client (`col_id` + `col_et` = the event's end).
- * The API accepts other values too (stale `col_et` → 200), so these are kept
- * as named constants: when the game rotates the card event, this is the one
- * place to update.
+ * The event a SendBox box belongs to: `col_id` is the collection number and
+ * `col_et` its end. Both are **read out of the save**, never guessed —
+ * Playrix rotates the collection (CardCollections_7 → _8 on 2026-11-13, the
+ * exact moment every client's card sends started failing), and a `col_id` the
+ * server no longer knows makes it refuse SendBox outright. A value hardcoded
+ * here is a time bomb; TWN shipped this same fix for this same failure.
  */
-const CARD_COL_ID = "7";
-const CARD_COL_ET = 1794560400;
+export type CardCollection = { colId: string; colEt: number };
+
+/** Throttle for re-resolving inside a send loop — one FetchCity per 5 min max. */
+const COL_RERESOLVE_MS = 5 * 60_000;
+
+function nowSec() {
+  return Math.floor(Date.now() / 1000);
+}
+
+/**
+ * The newest `CardCollections_*` event a save declares: its `collectionId`
+ * (falling back to the number in `configId`) and its `endTime`. A document can
+ * hold several archived windows — the largest `endTime` is the one open now
+ * (measured: collection 7 ends exactly where collection 8 begins, 1794560400).
+ * Null when the save declares none.
+ */
+export function activeCardCollection(xml: string): CardCollection | null {
+  let best: CardCollection | null = null;
+  const re = /value="CardCollections_(\d+)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null) {
+    const suffix = m[1];
+    const win = xml.slice(m.index, m.index + 1200);
+    const et =
+      win.match(/name="endTime"[^>]*value="(\d+)"/)?.[1] ??
+      win.match(/value="(\d+)"[^>]*name="endTime"/)?.[1];
+    if (!suffix || !et) continue;
+    const colId =
+      win.match(/value="collectionId"[\s\S]{0,160}?name="second"[^>]*value="(\d+)"/)?.[1] ??
+      suffix;
+    const col = { colId, colEt: Number(et) };
+    if (!best || col.colEt > best.colEt) best = col;
+  }
+  return best;
+}
 
 /** Retry budget for the transient 403; each attempt waits `RETRY_BACKOFF_MS`. */
 const RETRY_403_ATTEMPTS = 2;
@@ -270,13 +312,56 @@ function ownIdentity(xml: string, cityId: string, fallbackName: string) {
 }
 
 /**
+ * Resolve the collection a box must carry: the save this session holds first
+ * (no spawn — exactly what the device has), then Playrix's own copy of our
+ * city, which covers a session with no save loaded and a save pulled before
+ * the rotation. Returns the freshest pair found and `null` only when both
+ * sources fail. Called at Refresh and, throttled, when a send loop meets an
+ * ended window.
+ */
+async function resolveCardCollection(
+  token: string,
+  sessionId: string,
+  acc: Pick<CardAccount, "cityId" | "bver" | "fver">,
+): Promise<CardCollection | null> {
+  const now = nowSec();
+  let stale: CardCollection | null = null;
+  try {
+    // Dynamic import: `studio.server.ts` must not become a static dependency
+    // of this module (its session map is its own; this only reads).
+    const { sessionSaveXml } = await import("../studio.server");
+    const xml = sessionSaveXml(token, sessionId);
+    const col = xml ? activeCardCollection(xml) : null;
+    if (col) {
+      if (col.colEt > now) return col;
+      stale = col;
+    }
+  } catch {
+    /* no session save on this session — FetchCity below is the fallback */
+  }
+  try {
+    const xml = await fetchCityXml(acc.cityId, acc.bver, acc.fver);
+    const col = activeCardCollection(xml);
+    if (col) {
+      if (col.colEt > now) return col;
+      stale = stale ?? col;
+    }
+  } catch {
+    /* keep whatever the save gave us */
+  }
+  return stale;
+}
+
+/**
  * Load the account for the Cards tab: decode the LocalInfo the client just
  * pulled, take the API token and roster from it, then confirm the token with
  * a real CheckCity so the tab shows *before* the first send whether the
  * credentials work, what the city is called, and how many boxes are waiting.
+ * The active card collection is resolved here too, so the first send never
+ * pays for it.
  */
 export async function loadCardInfo(
-  _token: string,
+  token: string,
   sessionId: string,
   b64: string,
 ): Promise<CardLoadResult> {
@@ -310,6 +395,8 @@ export async function loadCardInfo(
     boxes: prev?.boxes ?? 0,
     checkedAt: 0,
     checkError: null,
+    col: prev?.col ?? null,
+    colAt: 0,
   };
   if (!acc.bver || !acc.fver) {
     throw new Error("LocalInfo không chứa version game (bver/FVer) — mở Township rồi Refresh.");
@@ -338,6 +425,12 @@ export async function loadCardInfo(
     acc.checkError = e instanceof Error ? e.message : String(e);
   }
 
+  // Resolve the event window before the account goes live: a fresh save gives
+  // it for free, a stale or missing one costs one FetchCity here rather than
+  // a failed first send.
+  acc.col = (await resolveCardCollection(token, sessionId, acc)) ?? acc.col;
+  acc.colAt = acc.col && acc.col.colEt > nowSec() ? Date.now() : 0;
+
   accounts.set(sessionId, acc);
   return { ...publicView(acc), cardIds: CARD_IDS };
 }
@@ -357,7 +450,7 @@ export type SendOutcome = {
  * send is visible in the log and a stop button means stop.
  */
 export async function sendCard(
-  _token: string,
+  token: string,
   sessionId: string,
   toCityId: string,
   cardId: string,
@@ -369,12 +462,31 @@ export async function sendCard(
     throw new Error(`Cards: id bạn gửi không hợp lệ (${toCityId}).`);
   }
 
+  // The box must name the collection that is open *now*: Playrix rotates it
+  // (CardCollections_7 → _8 on 2026-11-13) and SendBox is refused outright
+  // for a col_id the server no longer knows — that refusal is what stopped
+  // every client's sends. Re-resolve when the window has ended or nothing was
+  // found, throttled so a long loop cannot spawn FetchCity per card.
+  if (!acc.col || acc.col.colEt <= nowSec()) {
+    if (Date.now() - acc.colAt >= COL_RERESOLVE_MS) {
+      acc.colAt = Date.now();
+      const fresh = await resolveCardCollection(token, sessionId, acc).catch(() => null);
+      if (fresh) acc.col = fresh;
+    }
+  }
+  if (!acc.col) {
+    throw new Error("Chưa đọc được bộ sưu tập đang mở — Load save của bạn rồi bấm Refresh.");
+  }
+  const col = acc.col;
+  const staleHint =
+    col.colEt <= nowSec() ? " — bộ sưu tập trong save đã hết hạn, mở Township rồi bấm Refresh" : "";
+
   const box = {
     afg: 3,
     box_type: "collections_send_card",
     card_id: cardId,
-    col_et: CARD_COL_ET,
-    col_id: CARD_COL_ID,
+    col_et: col.colEt,
+    col_id: col.colId,
     friend_type: "send_friend",
     from: { city_id: acc.cityId, friend_city_name: acc.name, pic: acc.pic },
     seed: String(10000 + Math.floor(Math.random() * 90000)),
@@ -394,7 +506,7 @@ export async function sendCard(
         return { status: "sent", http: 200, retried };
       }
       if (result === null) {
-        return { status: "rejected", http: 200, retried };
+        return { status: "rejected", http: 200, retried, detail: staleHint || undefined };
       }
       // 200 with an unexpected shape — report it rather than call it a send.
       return { status: "error", http: 200, detail: JSON.stringify(r.resp).slice(0, 160), retried };
@@ -421,7 +533,7 @@ export async function sendCard(
       return {
         status: "error",
         http,
-        detail: "Bị chặn tạm (403) sau khi thử lại — tăng delay",
+        detail: "Bị chặn tạm (403) sau khi thử lại — tăng delay" + staleHint,
         retried,
       };
     }

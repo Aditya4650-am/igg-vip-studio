@@ -111,6 +111,19 @@ function requireSession(sessionId: string, token: string): Session {
   return s;
 }
 
+/**
+ * The save text this session holds, for a read-only consumer that needs one
+ * fact out of it and must not mutate anything. The Cards tab reads the active
+ * card collection window from here — LocalInfo has no event window at all, and
+ * guessing the collection is what stopped every client's card sends when
+ * Playrix rotated `CardCollections_7 → _8`. Null when the session carries no
+ * save; throws only for a bad token/session pair.
+ */
+export function sessionSaveXml(token: string, sessionId: string): string | null {
+  const s = requireSession(sessionId, token);
+  return s.rawXml ?? s.loadedXml;
+}
+
 export function catalogs() {
   return publicCatalogs();
 }
