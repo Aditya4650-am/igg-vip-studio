@@ -817,6 +817,75 @@ test("regata accepts a record cloned from the save's own archived week, and only
   assert.throws(() => assertRegattaSafe(xml, future), /regatta/i, "our own timestamps are still checked");
 });
 
+test("a record cloned back onto a list that is offering its id again is never written", () => {
+  // Reported on Start after joining a co-op: `regatta-pool-conflict:
+  // match3_create_bonus_lightning_3, regatta-pool-conflict:
+  // match3_create_bonus_rocket_999`. The gate is right and the writer was not:
+  // `regattaTemplates()` reads the whole document (an archived week is the only
+  // proof an id's values are the game's own), but a new co-op's week puts ids
+  // an archived week completed back on its `<FreeTask>` / `<TakenTask>` /
+  // `<Member taskId>` lists — and cloning one then writes a completed record
+  // that is *still being offered*, a shape with 0 occurrences in every block
+  // of the corpus. The filter in `injectRegata` must drop that template, so a
+  // batch the tool writes can never mint a key the save did not arrive with.
+  const now = Math.floor(Date.now() / 1000);
+  const start = now - 3 * 86400;
+  const done = start + 600;
+  const id = "match3_combine_bonus_any_999";
+  const record =
+    `<MyOldTask id="${id}" type="match3" user="JqpjJQ9lom" num="6" ver="54" ` +
+    `score="150" regataCash="19" need="100" have="100" target="combine_bonus_any" ` +
+    `anlNumber="3" anlLimit="15" takenCounter="9" ` +
+    `takeTime="${done}" completeTime="${done + 60}" realEndTime="${done + 120}" endTime="${done + 120}"/>`;
+  const archive =
+    `<PrevRegata id="532" startTime="${now - 16 * 86400}" endTime="${now - 4 * 86400}" season="108" week="4">` +
+    record +
+    `</PrevRegata>`;
+  // The save after a co-op join: the old week is archived, the new week's live
+  // block still offers the id that week completed (slot 6 of greenWeekSave).
+  const xml = greenWeekSave().replace("<Regata ", archive + "<Regata ");
+  assert.match(xml, new RegExp(`<FreeTask id="${id}"`), "the live week really does re-offer the archived id");
+
+  // (a) The gate still refuses a push that clones it back into the live block —
+  // the rule itself is untouched; only the writer learned to avoid it.
+  const clash = xml.replace("</Regata>", record + "</Regata>");
+  assert.throws(
+    () => assertRegattaSafe(xml, clash),
+    new RegExp(`regatta-pool-conflict:${id}`),
+    "a completed id still offered must still be refused",
+  );
+
+  // (b) The save stays fully usable: the badge and the reason read the same
+  // filtered source the push does, so the card cannot offer a push that fails.
+  assert.equal(inspectRegatta(xml, 12).reason, "ok", "the conflict in the archive must not deaden the week");
+
+  // (c) The batch lands and writes nothing the lists are holding — the
+  // conflicting id is never cloned, every other record is ordinary.
+  const out = injectRegata(xml, 12);
+  wellFormed(out);
+  // The live block only — the archived record is still in `<PrevRegata>` and is
+  // not part of this batch.
+  const liveInner = /<Regata\b[^>]*>([\s\S]*?)<\/Regata>/.exec(out)![1]!;
+  const recs = [...liveInner.matchAll(/<MyOldTask\b[^>]*?\/?>/g)].map((m) => m[0]);
+  assert.equal(recs.length, 12, "the requested batch lands");
+  assert.ok(
+    !recs.some((r) => attrsOf(r).get("id") === id),
+    "the archived record whose id is being offered again must not be cloned",
+  );
+  const listed = new Set([
+    ...[...liveInner.matchAll(/<FreeTask\b[^>]*\bid="([^"]*)"/g)].map((m) => m[1]!),
+    ...[...liveInner.matchAll(/<TakenTask\b[^>]*\bid="([^"]*)"/g)].map((m) => m[1]!),
+    ...[...liveInner.matchAll(/<Member\b[^>]*?\btaskId="([^"]*)"/g)].map((m) => m[1]!),
+  ]);
+  for (const r of recs) assert.ok(!listed.has(attrsOf(r).get("id")!), `${r} must not be an id the week is offering`);
+
+  // (d) …and that is exactly what keeps the gate green: no new keys at all.
+  assert.doesNotThrow(
+    () => assertRegattaSafe(xml, out),
+    "a batch that avoids the pool must pass every gate",
+  );
+});
+
 test("the regatta push gate refuses a lifetime counter with no records behind it", () => {
   // The file the 10-point tutorial-task ban arrived in
   // (`mGameInfo.current-14.xml`): `RegataTasksCompleted=77` over zero

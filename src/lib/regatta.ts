@@ -75,6 +75,19 @@ export const BOT_DEFAULT_TASKS = 100;
 export const BOT_LOAD_MS = 20_000;
 
 /**
+ * Minimum gap between two *automatic* Sync Co-op pulls.
+ *
+ * The card re-reads itself when the Bot sub-tab is opened and whenever the
+ * window regains focus — which is the moment a co-op joined in game shows up —
+ * but focus fires on every click back from the emulator, and each read is a
+ * full save pull plus a server round trip. Four seconds is long enough that
+ * alt-tabbing in and out cannot queue them, short enough that a join is on the
+ * card before the user has finished reading it. Manual Refresh is never
+ * throttled: it is the button somebody pressed on purpose.
+ */
+export const BOT_SYNC_MIN_MS = 4_000;
+
+/**
  * How many completions may land in one rolling day.
  *
  * 17 is not this repo's guess — it is **the game's own daily quota**, read off

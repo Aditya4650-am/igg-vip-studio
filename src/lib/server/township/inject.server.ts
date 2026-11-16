@@ -850,6 +850,62 @@ function rewriteFreeTasks(inner: string, free: Map<number, string>): string {
 }
 
 /**
+ * Clone templates this save may actually write into its **live** block.
+ *
+ * `regattaTemplates()` reads the whole document on purpose — a `<PrevRegata>`
+ * record is the only proof an id's `score` / `regataCash` / `need` are the
+ * game's own — but a template may only be cloned when doing so does not hand
+ * the push gate a key the save did not already carry.
+ *
+ * The case that needed it: joining a co-op swaps the live `<Regata>` for that
+ * co-op's week, and the new week's `<FreeTask>` / `<TakenTask>` /
+ * `<Member taskId>` lists can name ids an archived week completed long ago.
+ * Cloning one of those writes a completed record that is *still offered* —
+ * exactly `regatta-pool-conflict:<id>`, zero occurrences in every block of the
+ * corpus and a shape a server reads for free. Reported on Start after a co-op
+ * join (`match3_create_bonus_lightning_3`, `match3_create_bonus_rocket_999`).
+ *
+ * The exception is this repo's loaded-vs-pushed rule applied at the writer:
+ * when the live block **already** holds a record for that id the key is
+ * present on arrival too, so dropping the template would refuse a save for a
+ * shape it arrived with — the hostage-taking that has been removed every time
+ * it has been found. When nothing survives the filter the batch falls through
+ * to `regattaSyntheticTasks`, which already excludes every listed id.
+ */
+function usableCloneTemplates(text: string): string[] {
+  const templates = regattaTemplates(text);
+  const block = regattaBlock(text);
+  if (!block) return templates;
+  const inner = block.inner;
+
+  // Every id the live block is holding on a list right now: our own offer, a
+  // clanmate's take, a roster slot. A completed record may be on none of them.
+  const listed = new Set<string>();
+  for (const m of inner.matchAll(/<FreeTask\b[^>]*\bid="([^"]*)"/gi)) listed.add(m[1]!);
+  for (const m of inner.matchAll(/<TakenTask\b[^>]*\bid="([^"]*)"/gi)) listed.add(m[1]!);
+  for (const m of inner.matchAll(/<Member\b[^>]*?\btaskId="([^"]*)"/gi)) listed.add(m[1]!);
+  if (!listed.size) return templates;
+
+  const recorded = new Set<string>();
+  for (const m of inner.matchAll(/<MyOldTask\b[^>]*?\bid="([^"]*)"/gi)) recorded.add(m[1]!);
+  const stated = regattaStatedNeeds(inner);
+
+  return templates.filter((tag) => {
+    const a = tagAttrs(tag);
+    const id = attrValue(a, "id");
+    if (id === null || !listed.has(id)) return true;
+    // Not listed, or the live block already claims it — see the doc comment.
+    if (!recorded.has(id)) return false;
+    // …and the record the block already holds has to agree with the row the
+    // id is sitting on, or cloning it would mint `regatta-need:<id>` instead.
+    const statedNeed = stated.get(id);
+    if (statedNeed === undefined) return true;
+    const need = attrValue(a, "need");
+    return need !== null && /^\d+$/.test(need) && Number(need) === statedNeed;
+  });
+}
+
+/**
  * The records this save can be topped up from: a completed record to clone if
  * it has one, otherwise its own offer list. The distinction matters to the
  * injector alone — a fresh block has no `takenCounter` to continue from, so its
@@ -863,8 +919,15 @@ function regattaSources(text: string, want: number): {
   free: Map<number, string>;
   synthetic: boolean;
 } {
-  const templates = regattaTemplates(text);
-  if (templates.length) return { tags: templates, free: new Map(), synthetic: false };
+  const block = regattaBlock(text);
+  const templates = usableCloneTemplates(text);
+  // The plan is built here too, not only in `injectRegata`, so the badge and
+  // the push stay one decision: templates that cannot name a slot for every
+  // record are no more usable than templates the pool forbids, and the
+  // synthesized path is what either refusal falls through to.
+  if (templates.length && (!block || regattaClonePlan(block.inner, templates, want))) {
+    return { tags: templates, free: new Map(), synthetic: false };
+  }
   const { records, free } = regattaSyntheticTasks(text, want);
   return { tags: records, free, synthetic: records.length > 0 };
 }

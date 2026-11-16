@@ -298,6 +298,44 @@ test("bot regatta is its own sub-tab: rounds of 100, no league presets, stop on 
   assert.ok(dict.includes('botRoundsLine: "{rounds} round(s) · Limit: {limit} tasks per round"'), "en must carry the round line");
 });
 
+test("the Sync Co-op card re-reads itself when a co-op is joined in game", () => {
+  // Reported: after joining a different co-op the card still showed the old
+  // one until Refresh was pressed by hand. The card is only as fresh as its
+  // last pull, so it now pulls on entering the Bot sub-tab and whenever the
+  // window regains focus — the moment a join in the game has happened — while
+  // a floor keeps alt-tabbing from queueing a full save pull every few seconds.
+  const tsx = read("../components/studio-app.tsx");
+  const tab = tsx.slice(tsx.indexOf('{tab === "regatta" &&'), tsx.indexOf('{tab === "barn" &&'));
+  const dict = read("i18n.ts");
+  const reg = read("regatta.ts");
+
+  assert.ok(tab.includes("syncCoop({ auto: true })"), "entering the Bot sub-tab must read the device on its own");
+  assert.ok(
+    /window\.addEventListener\("focus"/.test(tsx),
+    "coming back from the game must re-read the card",
+  );
+  assert.match(
+    reg,
+    /export const BOT_SYNC_MIN_MS = 4_000;/,
+    "automatic pulls need a floor between them, in the browser-safe module",
+  );
+  assert.ok(tsx.includes("BOT_SYNC_MIN_MS"), "the sync must actually use that floor");
+  assert.ok(tab.includes("onClick={() => void syncCoop()}"), "manual Refresh is still the button, never throttled");
+
+  // Auto is a read, not a run: no global busy spinner and no log line unless
+  // the co-op actually changed — quiet unless there is news.
+  const sync = tsx.slice(tsx.indexOf("const syncCoop"), tsx.indexOf("botAutoSyncRef.current ="));
+  assert.ok(sync.length > 0, "could not locate syncCoop");
+  assert.ok(!sync.includes("setBusy("), "an automatic read must not spin the whole studio busy");
+
+  // The card says how old its number is, so "the co-op changed" is never a
+  // guess — in both master dictionaries (the 18 locale packs are Partial).
+  assert.ok(dict.includes('botSynced: "Đã đọc: {t}"'), "vi must carry the read stamp");
+  assert.ok(dict.includes('botSynced: "Read: {t}"'), "en must carry the read stamp");
+  assert.ok(dict.includes("botSyncedNever:"), "and the never-read line");
+  assert.ok(tab.includes("botSynced"), "the card must render the stamp");
+});
+
 test("the copy is never gated, and no age banner is drawn over it", () => {
   const tab = read("../components/studio-app.tsx");
   const server = read("server/studio.server.ts");

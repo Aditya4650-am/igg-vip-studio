@@ -15,7 +15,7 @@ import { isDeviceId, mintDeviceId, normalizeDeviceId } from "@/lib/device-id";
 import { AVATAR_MAX, avatarEmoji, avatarGroupId, avatarIconPath, avatarsInRange, type Group, type Item } from "@/lib/catalogs";
 import { MUSEUM_IDS, artifactEmoji, artifactIconPath, museumLabel } from "@/lib/museum";
 import { iconForBarn, iconForDecorLabel, iconForGem, iconForGroup, iconForItemLabel, iconForProfileLabel, iconForSkin, iconForStat, iconForSticker, iconForUpgradeLabel, iconForZoo } from "@/lib/game-icon-map";
-import { REGATTA_MAX_TASKS, REGATTA_DEFAULT_TASKS, BOT_DEFAULT_TASKS, BOT_LOAD_MS, BOT_MAX_TASKS, BOT_ROUND_MAX, regattaReason, type RegattaReason } from "@/lib/regatta";
+import { REGATTA_MAX_TASKS, REGATTA_DEFAULT_TASKS, BOT_DEFAULT_TASKS, BOT_LOAD_MS, BOT_MAX_TASKS, BOT_ROUND_MAX, BOT_SYNC_MIN_MS, regattaReason, type RegattaReason } from "@/lib/regatta";
 import { BLOOM_TOKENS_DEFAULT, BLOOM_TOKENS_MAX } from "@/lib/events";
 import {
   connectLoad,
@@ -1311,11 +1311,20 @@ export function StudioApp() {
   const [botPoints, setBotPoints] = useState(0);
   const [botLog, setBotLog] = useState<BotLine[]>([]);
   const [botStartedAt, setBotStartedAt] = useState<number | null>(null);
+  // When the card last read the device, so "the co-op changed" is never a
+  // guess: the panel says how old the number above it is.
+  const [botSynced, setBotSynced] = useState("");
+  const [botSyncing, setBotSyncing] = useState(false);
   // Refs, not state, for anything the loop reads mid-run: a state update is
   // not visible to the closure that is already awaiting it.
   const botStopRef = useRef(false);
   const botRunRef = useRef(false);
   const botLogRef = useRef<BotLine[]>([]);
+  // One sync at a time, and a floor between automatic ones: the focus listener
+  // fires on every return to the window and each sync is a full save pull.
+  const botSyncRunRef = useRef(false);
+  const botSyncAtRef = useRef(0);
+  const botAutoSyncRef = useRef<() => void>(() => {});
   // The message of the last refusal, so the bot can put the real reason in
   // its own log instead of a generic "push failed".
   const saveErrRef = useRef("");
@@ -2106,14 +2115,19 @@ export function StudioApp() {
   /** Re-pull the device save and re-read it, so the tiles show what the game
    *  kept rather than what this tool wrote. `null` means the device could not
    *  be read — never "nothing changed". */
-  const botRead = async (): Promise<{ current: number; doneScore: number } | null> => {
+  const botRead = async (): Promise<{
+    current: number;
+    doneScore: number;
+    coop: { id: string; name: string; tag: string; members: string; league: string } | null;
+  } | null> => {
     const native = nativeBridge();
     if (!native || !device || !token || !session) return null;
     try {
       const fresh = await native.pull(device);
       const s = await refreshOwn({ data: { token, sessionId: session.sessionId, saveB64: fresh.b64 } });
       applySnap(s, catalogs?.profile);
-      return { current: s.regattaInfo.current, doneScore: s.regattaInfo.doneScore };
+      setBotSynced(botStamp());
+      return { current: s.regattaInfo.current, doneScore: s.regattaInfo.doneScore, coop: s.regattaInfo.coop };
     } catch {
       return null;
     }
@@ -2136,27 +2150,61 @@ export function StudioApp() {
     botStopRef.current = true;
   };
 
-  /** The Sync Co-op card's own button: re-pull and show what the save says. */
-  const syncCoop = async () => {
+  /** The Sync Co-op card's own button: re-pull and show what the save says.
+   *
+   *  `auto` is the same pull without the ceremony — no toast, no global busy
+   *  spinner, no log line unless the co-op actually changed — used when the
+   *  Bot sub-tab is opened and whenever the window regains focus. Joining a
+   *  different co-op in game is exactly the case where the card would
+   *  otherwise sit on the previous one until somebody pressed Refresh. */
+  const syncCoop = async (opts?: { auto?: boolean }) => {
+    const auto = opts?.auto === true;
     if (!token || !session) return;
     const native = nativeBridge();
     if (!native || !device) {
-      toast.error(tr("botNoDevice"));
+      if (!auto) toast.error(tr("botNoDevice"));
       return;
     }
-    setBusy(true);
+    if (botSyncRunRef.current || botRunRef.current) return;
+    if (auto && Date.now() - botSyncAtRef.current < BOT_SYNC_MIN_MS) return;
+    botSyncRunRef.current = true;
+    setBotSyncing(true);
+    if (auto) botSyncAtRef.current = Date.now();
+    const before = session.regattaInfo.coop?.id ?? "";
     try {
       const fresh = await native.pull(device);
       const s = await refreshOwn({ data: { token, sessionId: session.sessionId, saveB64: fresh.b64 } });
       applySnap(s, catalogs?.profile);
+      setBotSynced(botStamp());
       const coop = s.regattaInfo.coop;
-      botSay(coop ? `${tr("botSync")} · ${coop.name} ${coop.tag} · ${tr("botCoopMembers")} ${coop.members}` : tr("botCoopNone"), "ok");
+      // A silent sync that found the same co-op says nothing; one that found a
+      // different one (or a first one) is the whole point of the auto path.
+      if (!auto || (coop?.id ?? "") !== before) {
+        botSay(
+          coop ? `${tr("botSync")} · ${coop.name} ${coop.tag} · ${tr("botCoopMembers")} ${coop.members}` : tr("botCoopNone"),
+          "ok",
+        );
+      }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : tr("nothing"));
+      if (!auto) toast.error(e instanceof Error ? e.message : tr("nothing"));
     } finally {
-      setBusy(false);
+      botSyncRunRef.current = false;
+      setBotSyncing(false);
     }
   };
+  botAutoSyncRef.current = () => {
+    if (tab === "regatta" && regattaView === "bot") void syncCoop({ auto: true });
+  };
+
+  // Coming back from the game is when a co-op join has happened: the card
+  // re-reads itself rather than waiting to be told. The handler lives in a ref
+  // so this listener is registered once, and the throttle above keeps a window
+  // that is clicked in and out of from pulling the save every few seconds.
+  useEffect(() => {
+    const onFocus = () => botAutoSyncRef.current();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
 
   const startBot = async () => {
     if (botRunRef.current) return;
@@ -2195,6 +2243,11 @@ export function StudioApp() {
     if (first) {
       baseScore = first.doneScore;
       lastCurrent = first.current;
+      // Which co-op this run is about to push into, read fresh rather than
+      // from the snapshot the tab was opened with — a join that happened in
+      // the meantime is what the log has to name.
+      const coop = first.coop;
+      botSay(coop ? `${tr("botSync")} · ${coop.name} ${coop.tag}` : tr("botCoopNone"), coop ? "ok" : "err");
     }
 
     let done = 0;
@@ -3632,7 +3685,14 @@ export function StudioApp() {
                       <button
                         type="button"
                         aria-pressed={regattaView === "bot"}
-                        onClick={() => setRegattaView("bot")}
+                        onClick={() => {
+                          setRegattaView("bot");
+                          // The card is only as fresh as its last pull, so
+                          // entering the Bot view reads the device on its own:
+                          // a co-op joined in game appears without anyone
+                          // having to press Refresh first.
+                          void syncCoop({ auto: true });
+                        }}
                         className={cn(
                           "flex-1 rounded-lg px-3 py-1.5 text-xs font-bold tracking-wide transition-all duration-150",
                           regattaView === "bot"
@@ -3742,15 +3802,19 @@ export function StudioApp() {
                           />
                           {tr("botSync")}
                         </h3>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="ml-auto"
-                          disabled={busy || botRun}
-                          onClick={() => void syncCoop()}
-                        >
-                          {tr("botRefresh")}
-                        </Button>
+                        <span className="ml-auto flex items-center gap-2">
+                          <span className="text-[10px] font-medium text-muted tabular-nums">
+                            {botSynced ? tr("botSynced").replace("{t}", botSynced) : tr("botSyncedNever")}
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={busy || botRun || botSyncing}
+                            onClick={() => void syncCoop()}
+                          >
+                            {tr("botRefresh")}
+                          </Button>
+                        </span>
                       </div>
 
                       {botCoop ? (
