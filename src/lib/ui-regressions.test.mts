@@ -250,6 +250,54 @@ test("the regatta count is how many tasks to add, so nothing can say the week is
   assert.ok(dict.includes('regattaCount: "Tasks to add"'), "en must call it the number to add");
 });
 
+test("bot regatta is its own sub-tab: rounds of 100, no league presets, stop on a refusal", () => {
+  const tsx = read("../components/studio-app.tsx");
+  const tab = tsx.slice(tsx.indexOf('{tab === "regatta" &&'), tsx.indexOf('{tab === "barn" &&'));
+  assert.ok(tab.length > 0, "could not locate the regatta tab markup");
+  const dict = read("i18n.ts");
+
+  // Two views behind one switch, and the batch button keeps the gate it had.
+  assert.ok(tab.includes("regattaView"), "the Regatta tab must expose the sub-tab switch");
+  assert.ok(/disabled=\{busy \|\| pendingRegatta\}/.test(tab), "the batch button keeps its own gate");
+
+  // Start waits on a run already in flight and nothing else — never on the
+  // week's state, which is exactly the gating that was asked to go.
+  assert.ok(/disabled=\{busy \|\| botRun\}/.test(tab), "Start must only wait on a run already in flight");
+  assert.ok(!/disabled=\{[^}]*regattaState/.test(tab), "the bot must not be gated on the week's state");
+
+  // One round is 100 and a whole run is 1..777. Both live in the browser-safe
+  // module so the field, the round line and the loop cannot drift apart, and
+  // the line the user reads has to be derived from the constant rather than
+  // typing "100" a second time.
+  const reg = read("regatta.ts");
+  assert.match(reg, /export const BOT_ROUND_MAX = 100;/, "a round is capped at 100 tasks");
+  assert.match(reg, /export const BOT_MAX_TASKS = 777;/, "a run is capped at 777 tasks");
+  assert.ok(tab.includes("BOT_ROUND_MAX"), "the round line must be derived from the constant");
+
+  // No league presets — the Wood / Copper / Steel / Silver / Gold picker was
+  // rejected outright, so none of those words may reach this tab.
+  for (const league of ["Wood", "Copper", "Steel", "Silver", "Gold"]) {
+    assert.ok(!tab.includes(league), `${league} must not appear as a league preset`);
+  }
+
+  // A round is an ordinary push, and the run stops on the first refusal
+  // instead of pushing the same batch into a save the gates already turned
+  // down — which is what `save()` returning a boolean exists for.
+  const bot = tsx.slice(tsx.indexOf("const startBot"), tsx.indexOf("const applyAvaRange"));
+  assert.ok(bot.length > 0, "could not locate the bot loop");
+  assert.ok(/const ok = await save\(\{ regatta: \{ tasks: add \} \}\);/.test(bot), "a round must be an ordinary push");
+  assert.ok(/if \(!ok\) \{/.test(bot), "the loop must stop on a refusal");
+  assert.ok(bot.includes("saveErrRef.current"), "and log the refusal's own message");
+  assert.ok(/Promise<boolean>/.test(tsx), "save must report whether the push left the machine");
+
+  // Every string the panel renders, in both master dictionaries.
+  for (const key of ["regattaSegAdd", "regattaSegBot", "botSync", "botStart", "botStop", "botStatCoop", "botLogEmpty"]) {
+    assert.ok(dict.includes(`${key}: "`), `i18n must define ${key}`);
+  }
+  assert.ok(dict.includes('botRoundsLine: "{rounds} vòng · Giới hạn: {limit} task mỗi vòng"'), "vi must carry the round line");
+  assert.ok(dict.includes('botRoundsLine: "{rounds} round(s) · Limit: {limit} tasks per round"'), "en must carry the round line");
+});
+
 test("the copy is never gated, and no age banner is drawn over it", () => {
   const tab = read("../components/studio-app.tsx");
   const server = read("server/studio.server.ts");

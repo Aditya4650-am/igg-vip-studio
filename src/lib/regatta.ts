@@ -45,6 +45,36 @@ export const REGATTA_MAX_TASKS = 9999;
 export const REGATTA_DEFAULT_TASKS = 12;
 
 /**
+ * Bot Regatta — one round of the run.
+ *
+ * The reference tool's own-account mode does not push a week in one go: it
+ * splits the total into rounds of at most **100** tasks and re-reads the save
+ * between them. 100 is a per-*push* ceiling (one batch the injector writes and
+ * one game restart carries), not a rule about how many tasks a week may hold —
+ * `REGATTA_MAX_TASKS` is still the only bound on a single batch, and the daily
+ * spacing is still the only bound on a day.
+ */
+export const BOT_ROUND_MAX = 100;
+
+/** The whole run's ceiling: 1..777 tasks, the range the reference tool offers. */
+export const BOT_MAX_TASKS = 777;
+
+/** What the field starts at — one full round. */
+export const BOT_DEFAULT_TASKS = 100;
+
+/**
+ * How long a round waits after its push before re-reading the save.
+ *
+ * `push()` force-stops the game, writes `mGameInfo.xml` and relaunches, so the
+ * file we can pull straight away is the one we just wrote — it says nothing
+ * about whether the client *kept* it. The reading that matters is the one
+ * taken after the game has loaded and synced, which is also the only place a
+ * refusal by the server becomes visible at all. 20 s is a cold start plus a
+ * sync on a mid-range emulator; the wait is interruptible by Stop.
+ */
+export const BOT_LOAD_MS = 20_000;
+
+/**
  * How many completions may land in one rolling day.
  *
  * 17 is not this repo's guess — it is **the game's own daily quota**, read off

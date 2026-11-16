@@ -460,6 +460,15 @@ export interface RegattaState {
   pool: number;
   /** Mean score of the tasks already in the block (what the badge shows). */
   avgScore: number;
+  /** Sum of `score` over the records in the block — the points this save's own
+   *  regatta actually holds. Read only; the co-op's leaderboard number is
+   *  `<Regata score>` and is never written by this tool. */
+  doneScore: number;
+  /** The block's own headline numbers, read off `<Regata ...>`. Display only. */
+  regattaMeta: { id: string; season: string; week: string; score: number; clanId: string } | null;
+  /** The co-op this save belongs to, read off `<MyClan ...>`. `null` when the
+   *  save declares no co-op (an empty `id` means the same thing). */
+  coop: { id: string; name: string; tag: string; members: string; league: string } | null;
   /** What new tasks would be attributed to. */
   user: string;
   window: { start: number; end: number } | null;
@@ -523,6 +532,26 @@ function regattaBlock(text: string): { attrs: string; inner: string; close: stri
   const self = text.match(/<Regata\b([^>]*?)\/>/i);
   if (self) return { attrs: self[1]!, inner: "", close: null };
   return null;
+}
+
+/** The five fields of `<MyClan ...>` the Bot Regatta card shows. */
+function readClan(text: string): { id: string; name: string; tag: string; members: string; league: string } | null {
+  const m = text.match(/<MyClan\b([^>]*?)\/?>/i);
+  if (!m) return null;
+  const a = m[1] ?? "";
+  const id = attrValue(a, "id") ?? "";
+  // An empty `id` is how a save that is not in a co-op declares it — the tag
+  // itself still ships with every attribute present and blank.
+  if (!id) return null;
+  const dec = (v: string | null) =>
+    (v ?? "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  return {
+    id,
+    name: dec(attrValue(a, "name")),
+    tag: dec(attrValue(a, "tag")),
+    members: attrValue(a, "mCount") ?? "",
+    league: attrValue(a, "league") ?? "",
+  };
 }
 
 function regattaWindow(attrs: string): { start: number; end: number } | null {
@@ -989,7 +1018,7 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
   const pool = regattaPool(text);
   const user = resolveRegataUser(text);
   const block = regattaBlock(text);
-  const base = { templates: sources.tags.length, pool, avgScore: 0, user, window: null };
+  const base = { templates: sources.tags.length, pool, avgScore: 0, doneScore: 0, user, window: null, coop: readClan(text), regattaMeta: null };
   if (!block)
     return { ...base, reason: "no_active_regatta", active: false, current: 0, lastDone: 0, quota: REGATTA_MAX_PER_DAY };
 
@@ -1006,6 +1035,17 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
   const quota = regattaDailyQuota(regattaTaskQuota(block.inner));
   const scores = [...block.inner.matchAll(/<MyOldTask\b[^>]*\bscore="(\d+)"/g)].map((m) => Number(m[1]));
   const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+  // The points this save's own regatta holds, and the block's headline numbers.
+  // Both are read and shown; neither is ever written — `<Regata score>` is the
+  // clan leaderboard number Playrix keeps server-side (see AGENTS.md).
+  const doneScore = scores.reduce((a, b) => a + b, 0);
+  const regattaMeta = {
+    id: attrValue(block.attrs, "id") ?? "",
+    season: attrValue(block.attrs, "season") ?? "",
+    week: attrValue(block.attrs, "week") ?? "",
+    score: Number(attrValue(block.attrs, "score") ?? 0) || 0,
+    clanId: attrValue(block.attrs, "clanId") ?? "",
+  };
   const active = !!win && now >= win.start + REGATTA_MIN_WINDOW_AGE && now <= win.end;
   // Exactly what `injectRegata` will decide for this batch size, in the same
   // order — now shared with the tab, which re-runs it for the count the user
@@ -1038,6 +1078,9 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
     templates: sources.tags.length,
     pool,
     avgScore,
+    doneScore,
+    regattaMeta,
+    coop: readClan(text),
     user,
     window: win,
   };

@@ -15,7 +15,7 @@ import { isDeviceId, mintDeviceId, normalizeDeviceId } from "@/lib/device-id";
 import { AVATAR_MAX, avatarEmoji, avatarGroupId, avatarIconPath, avatarsInRange, type Group, type Item } from "@/lib/catalogs";
 import { MUSEUM_IDS, artifactEmoji, artifactIconPath, museumLabel } from "@/lib/museum";
 import { iconForBarn, iconForDecorLabel, iconForGem, iconForGroup, iconForItemLabel, iconForProfileLabel, iconForSkin, iconForStat, iconForSticker, iconForUpgradeLabel, iconForZoo } from "@/lib/game-icon-map";
-import { REGATTA_MAX_TASKS, REGATTA_DEFAULT_TASKS, regattaReason, type RegattaReason } from "@/lib/regatta";
+import { REGATTA_MAX_TASKS, REGATTA_DEFAULT_TASKS, BOT_DEFAULT_TASKS, BOT_LOAD_MS, BOT_MAX_TASKS, BOT_ROUND_MAX, regattaReason, type RegattaReason } from "@/lib/regatta";
 import { BLOOM_TOKENS_DEFAULT, BLOOM_TOKENS_MAX } from "@/lib/events";
 import {
   connectLoad,
@@ -43,6 +43,11 @@ type Catalogs = Awaited<ReturnType<typeof getCatalogs>>;
 type UnbanMode = "inicial" | "completo" | "novo";
 type LicenseSnap = Awaited<ReturnType<typeof verifyLicense>>["license"];
 type Sheet = "none" | "feedback";
+
+/** One line of the Bot Regatta console: a local clock stamp, the message, and
+ *  an optional tone so a refusal or a lost round reads differently from a
+ *  round that landed. */
+type BotLine = { t: string; msg: string; tone?: "ok" | "err" };
 
 type NativeBridge = {
   devices: () => Promise<{ id: string; label: string }[]>;
@@ -1293,6 +1298,27 @@ export function StudioApp() {
   // the batch refuses rather than compressing a week's worth of completions
   // onto one or two days.
   const [regattaTasks, setRegattaTasks] = useState(REGATTA_DEFAULT_TASKS);
+  // ---- Bot Regatta (its own sub-tab inside Regatta) ------------------------
+  // Everything below is isolated to the bot: nothing else in the studio reads
+  // or writes it. The run is a loop of ordinary pushes — round N queues a
+  // batch, `save()` force-stops/writes/relaunches, the bot waits for the game
+  // to load and sync, re-pulls, and only then reads what actually survived.
+  const [regattaView, setRegattaView] = useState<"add" | "bot">("add");
+  const [botTotal, setBotTotal] = useState(BOT_DEFAULT_TASKS);
+  const [botRun, setBotRun] = useState(false);
+  const [botDone, setBotDone] = useState(0);
+  const [botRounds, setBotRounds] = useState(0);
+  const [botPoints, setBotPoints] = useState(0);
+  const [botLog, setBotLog] = useState<BotLine[]>([]);
+  const [botStartedAt, setBotStartedAt] = useState<number | null>(null);
+  // Refs, not state, for anything the loop reads mid-run: a state update is
+  // not visible to the closure that is already awaiting it.
+  const botStopRef = useRef(false);
+  const botRunRef = useRef(false);
+  const botLogRef = useRef<BotLine[]>([]);
+  // The message of the last refusal, so the bot can put the real reason in
+  // its own log instead of a generic "push failed".
+  const saveErrRef = useRef("");
   const [pendingSeason, setPendingSeason] = useState(false);
   const [pendingBloom, setPendingBloom] = useState(false);
   // Frozen Fortune (`DragonNest` in game data) is the same wallet mechanism,
@@ -1773,8 +1799,15 @@ export function StudioApp() {
   // press: `{ bloom: 500 }` means "this push adds 500 Bloom tokens" whether or
   // not the queue flag was set first. Every other caller passes nothing and
   // behaves exactly as before — queued state decides the payload.
-  const save = useCallback(async (opts?: { bloom?: number; frozen?: number }) => {
-    if (!token || !session) return;
+  // Returns `true` only when the push actually left the machine. Bot Regatta
+  // drives this in a loop and stops on the first `false`, so a gate refusal
+  // must be distinguishable from a round that landed — hence the boolean and
+  // `saveErrRef`, which carries the refusal's own message for the bot's log.
+  const save = useCallback(async (opts?: { bloom?: number; frozen?: number; regatta?: { tasks: number } }): Promise<boolean> => {
+    if (!token || !session) return false;
+    // The bot queues its own batch without touching `pendingRegatta`: React
+    // state would not be visible to the very call that sets it.
+    const forceRegatta = opts?.regatta;
     setBusy(true);
     try {
       // The stage only advances once its push has actually succeeded, so a
@@ -1873,6 +1906,7 @@ export function StudioApp() {
         museumSel.size > 0 ||
         Object.keys(changedBarn).length > 0 ||
         pendingRegatta ||
+        forceRegatta !== undefined ||
         pendingSeason ||
         opts?.bloom !== undefined ||
         opts?.frozen !== undefined ||
@@ -1904,7 +1938,7 @@ export function StudioApp() {
           }
         }
         setPendingUnban(null);
-        return;
+        return true;
       }
 
       const r = await saveAll({
@@ -1923,8 +1957,8 @@ export function StudioApp() {
           museum: museumSel.size ? [...museumSel] : undefined,
           barnUpgrades: barnTier && barnTier !== activeSession.barn.upgrades ? barnTier : undefined,
           barnItems: Object.keys(changedBarn).length ? changedBarn : undefined,
-          regatta: pendingRegatta,
-          regattaTasks: pendingRegatta ? regattaTasks : undefined,
+          regatta: pendingRegatta || forceRegatta !== undefined,
+          regattaTasks: forceRegatta ? forceRegatta.tasks : pendingRegatta ? regattaTasks : undefined,
           season: pendingSeason,
           bloomTokens: opts?.bloom ?? (pendingBloom ? bloomTokens : undefined),
           frozenTokens: opts?.frozen ?? (pendingFrozen ? frozenTokens : undefined),
@@ -1980,8 +2014,14 @@ export function StudioApp() {
       setPendingUpgradeFactory(false);
       setPendingUpgradeTrain(false);
       setPendingUpgradeIsland(false);
+      saveErrRef.current = "";
+      return true;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : tr("nothing"));
+      // The message is kept as well as shown: the bot's log has to name the
+      // rule that refused, not just "the push failed".
+      saveErrRef.current = e instanceof Error ? e.message : tr("nothing");
+      toast.error(saveErrRef.current);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -2022,6 +2062,15 @@ export function StudioApp() {
       )
     : "no_active_regatta";
 
+  // The Bot Regatta card's own read-outs, resolved once so the markup never
+  // has to re-narrow a nullable session deep inside the JSX.
+  const botCoop = session?.regattaInfo.coop ?? null;
+  const botMeta = session?.regattaInfo.regattaMeta ?? null;
+  const botElapsed = botStartedAt ? Math.max(0, Math.floor((nowTick - botStartedAt) / 1000)) : 0;
+  const botClock = `${String(Math.floor(botElapsed / 60)).padStart(2, "0")}:${String(botElapsed % 60).padStart(2, "0")}`;
+  const botPct = botTotal > 0 ? Math.min(100, Math.round((botDone / botTotal) * 100)) : 0;
+  const botRoundsPlanned = Math.ceil(botTotal / BOT_ROUND_MAX);
+
   const tool = (kind: "regatta" | "season" | "bloom" | "frozen") => {
     if (kind === "regatta") {
       setPendingRegatta(true);
@@ -2035,6 +2084,169 @@ export function StudioApp() {
     } else {
       setPendingSeason(true);
       toast.success(tr("toastSeasonQueued"));
+    }
+  };
+
+  // ---- Bot Regatta -------------------------------------------------------
+  // One round = one ordinary push. `save()` force-stops the game, writes
+  // mGameInfo.xml and relaunches it, so nothing here has to drive the device
+  // itself — the bot only has to wait for the client to come back, re-read the
+  // save, and decide whether the round actually survived.
+  const botStamp = () => {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  };
+
+  const botSay = (msg: string, tone?: "ok" | "err") => {
+    botLogRef.current = [...botLogRef.current, { t: botStamp(), msg, tone }].slice(-300);
+    setBotLog(botLogRef.current);
+  };
+
+  /** Re-pull the device save and re-read it, so the tiles show what the game
+   *  kept rather than what this tool wrote. `null` means the device could not
+   *  be read — never "nothing changed". */
+  const botRead = async (): Promise<{ current: number; doneScore: number } | null> => {
+    const native = nativeBridge();
+    if (!native || !device || !token || !session) return null;
+    try {
+      const fresh = await native.pull(device);
+      const s = await refreshOwn({ data: { token, sessionId: session.sessionId, saveB64: fresh.b64 } });
+      applySnap(s, catalogs?.profile);
+      return { current: s.regattaInfo.current, doneScore: s.regattaInfo.doneScore };
+    } catch {
+      return null;
+    }
+  };
+
+  /** An interruptible wait: Stop has to end a round that is only waiting on
+   *  the game, not just one that is mid-push. */
+  const botWait = async (ms: number): Promise<boolean> => {
+    let left = ms;
+    while (left > 0) {
+      if (botStopRef.current) return false;
+      const slice = Math.min(250, left);
+      await new Promise((resolve) => window.setTimeout(resolve, slice));
+      left -= slice;
+    }
+    return !botStopRef.current;
+  };
+
+  const stopBot = () => {
+    botStopRef.current = true;
+  };
+
+  /** The Sync Co-op card's own button: re-pull and show what the save says. */
+  const syncCoop = async () => {
+    if (!token || !session) return;
+    const native = nativeBridge();
+    if (!native || !device) {
+      toast.error(tr("botNoDevice"));
+      return;
+    }
+    setBusy(true);
+    try {
+      const fresh = await native.pull(device);
+      const s = await refreshOwn({ data: { token, sessionId: session.sessionId, saveB64: fresh.b64 } });
+      applySnap(s, catalogs?.profile);
+      const coop = s.regattaInfo.coop;
+      botSay(coop ? `${tr("botSync")} · ${coop.name} ${coop.tag} · ${tr("botCoopMembers")} ${coop.members}` : tr("botCoopNone"), "ok");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : tr("nothing"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startBot = async () => {
+    if (botRunRef.current) return;
+    if (!token || !session) return;
+    const native = nativeBridge();
+    if (!native || !device) {
+      toast.error(tr("botNoDevice"));
+      return;
+    }
+    const total = Math.max(1, Math.min(BOT_MAX_TASKS, Math.floor(Number(botTotal) || 0)));
+    const planned = Math.ceil(total / BOT_ROUND_MAX);
+    const line = (key: keyof Dict, vars: Record<string, string | number>) => {
+      let s = tr(key);
+      for (const [k, v] of Object.entries(vars)) s = s.replace(`{${k}}`, String(v));
+      return s;
+    };
+
+    botStopRef.current = false;
+    botRunRef.current = true;
+    setBotRun(true);
+    setBotDone(0);
+    setBotRounds(0);
+    setBotPoints(0);
+    setBotStartedAt(Date.now());
+    botLogRef.current = [];
+    setBotLog([]);
+    botSay(line("botStartLog", { total, rounds: planned }), "ok");
+
+    // The run's baseline, read fresh rather than taken from the last snapshot:
+    // POINTS is the delta of the save's own points across the whole run, so it
+    // has to start from the save as it sits on the device right now.
+    let points = 0;
+    let baseScore = session.regattaInfo.doneScore;
+    let lastCurrent = session.regattaInfo.current;
+    const first = await botRead();
+    if (first) {
+      baseScore = first.doneScore;
+      lastCurrent = first.current;
+    }
+
+    let done = 0;
+    let rounds = 0;
+    try {
+      while (done < total) {
+        if (botStopRef.current) {
+          botSay(tr("botStopLog"), "err");
+          break;
+        }
+        const add = Math.min(BOT_ROUND_MAX, total - done);
+        rounds += 1;
+        setBotRounds(rounds);
+
+        // Abort on the first refusal. Carrying on would push the same batch
+        // into a save the gates have already turned down, round after round.
+        const ok = await save({ regatta: { tasks: add } });
+        if (!ok) {
+          botSay(line("botFailLog", { r: rounds, err: saveErrRef.current || tr("nothing") }), "err");
+          break;
+        }
+        done += add;
+        setBotDone(done);
+
+        botSay(line("botWaitLog", { r: rounds }));
+        const stillGoing = await botWait(BOT_LOAD_MS);
+        if (!stillGoing) {
+          botSay(tr("botStopLog"), "err");
+          break;
+        }
+
+        const read = await botRead();
+        if (!read) {
+          botSay(line("botRoundNoRead", { r: rounds, n: planned, add }));
+          continue;
+        }
+        if (read.current <= lastCurrent) {
+          // The push left the machine but the client did not keep it — the
+          // shape a server-side rejection produces. Pushing again into the
+          // same wall only repeats it.
+          botSay(line("botLostLog", { r: rounds }), "err");
+          break;
+        }
+        lastCurrent = read.current;
+        points = read.doneScore - baseScore;
+        setBotPoints(points);
+        botSay(line("botRoundLog", { r: rounds, n: planned, add, pts: points, score: read.doneScore }), "ok");
+      }
+      if (done >= total) botSay(line("botDoneLog", { tasks: done, rounds, pts: points }), "ok");
+    } finally {
+      botRunRef.current = false;
+      setBotRun(false);
     }
   };
 
@@ -3401,6 +3613,39 @@ export function StudioApp() {
 
                 {tab === "regatta" && (
                   <div className="space-y-3">
+                    {/* Two views, one tab: the batch button the tab has always
+                        had, and the bot. The switch itself gates nothing. */}
+                    <div className="flex gap-1 rounded-xl border border-white/5 bg-[#0a0f1c] p-1">
+                      <button
+                        type="button"
+                        aria-pressed={regattaView === "add"}
+                        onClick={() => setRegattaView("add")}
+                        className={cn(
+                          "flex-1 rounded-lg px-3 py-1.5 text-xs font-bold tracking-wide transition-all duration-150",
+                          regattaView === "add"
+                            ? "bg-cyan/15 text-cyan shadow-[0_0_10px_rgba(34,211,238,0.18)]"
+                            : "text-muted hover:text-fg",
+                        )}
+                      >
+                        {tr("regattaSegAdd")}
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={regattaView === "bot"}
+                        onClick={() => setRegattaView("bot")}
+                        className={cn(
+                          "flex-1 rounded-lg px-3 py-1.5 text-xs font-bold tracking-wide transition-all duration-150",
+                          regattaView === "bot"
+                            ? "bg-purple/20 text-purple shadow-[0_0_10px_rgba(167,139,250,0.2)]"
+                            : "text-muted hover:text-fg",
+                        )}
+                      >
+                        {tr("regattaSegBot")}
+                      </button>
+                    </div>
+
+                    {regattaView === "add" ? (
+                      <>
                     <section className="panel">
                       <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-cyan uppercase">
                         <img
@@ -3482,6 +3727,169 @@ export function StudioApp() {
                         ) : null}
                       </div>
                     </section>
+                      </>
+                    ) : (
+                      <>
+                    {/* ---- Bot Regatta -------------------------------------- */}
+                    <section className="panel">
+                      <div className="mb-3 flex items-center gap-2">
+                        <h3 className="flex items-center gap-2 text-xs font-bold tracking-wider text-cyan uppercase">
+                          <img
+                            src="/events/Regatta_Points.png"
+                            alt=""
+                            className="size-4 shrink-0 object-contain drop-shadow-sm"
+                            draggable={false}
+                          />
+                          {tr("botSync")}
+                        </h3>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="ml-auto"
+                          disabled={busy || botRun}
+                          onClick={() => void syncCoop()}
+                        >
+                          {tr("botRefresh")}
+                        </Button>
+                      </div>
+
+                      {botCoop ? (
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          {(
+                            [
+                              [tr("botCoopName"), `${botCoop.name} ${botCoop.tag}`.trim()],
+                              [tr("botCoopMembers"), botCoop.members || "—"],
+                              [tr("botCoopLeague"), botCoop.league || "—"],
+                              [tr("botWeek"), botMeta ? `${botMeta.season} · ${botMeta.week}` : "—"],
+                            ] as [string, string][]
+                          ).map(([label, value]) => (
+                            <div key={label} className="rounded-xl border border-white/5 bg-[#0a0f1c] px-3 py-2">
+                              <div className="text-[10px] font-bold tracking-wider text-muted uppercase">{label}</div>
+                              <div className="mt-0.5 truncate text-sm font-bold text-fg" title={value}>
+                                {value}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted">{tr("botCoopNone")}</p>
+                      )}
+                    </section>
+
+                    <section className="panel">
+                      <h3 className="mb-3 flex items-center gap-2 text-xs font-bold tracking-wider text-amber uppercase">
+                        <img
+                          src="/events/Regatta_Points.png"
+                          alt=""
+                          className="size-4 shrink-0 object-contain drop-shadow-sm"
+                          draggable={false}
+                        />
+                        {tr("botTasks")}
+                      </h3>
+
+                      <div className="flex flex-wrap items-center gap-3">
+                        <input
+                          className="field field-qty"
+                          inputMode="numeric"
+                          aria-label={tr("botTasks")}
+                          value={botTotal}
+                          onChange={(e) => {
+                            const raw = Number(e.target.value.replace(/[^\d]/g, ""));
+                            setBotTotal(raw > 0 ? Math.min(BOT_MAX_TASKS, raw) : 0);
+                          }}
+                        />
+                        <span className="text-xs text-muted tabular-nums">
+                          {tr("botRoundsLine")
+                            .replace("{rounds}", String(botRoundsPlanned))
+                            .replace("{limit}", String(BOT_ROUND_MAX))}
+                        </span>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          className="tool-action tool-action--regatta"
+                          variant="purple"
+                          disabled={busy || botRun}
+                          onClick={() => void startBot()}
+                        >
+                          <img
+                            src="/events/Regatta_Points.png"
+                            alt=""
+                            className="size-4 shrink-0 object-contain drop-shadow-sm"
+                            draggable={false}
+                          />
+                          {tr("botStart")}
+                        </Button>
+                        {botRun ? (
+                          <Button size="sm" variant="ghost" onClick={stopBot}>
+                            {tr("botStop")}
+                          </Button>
+                        ) : null}
+                      </div>
+
+                      {/* Progress — the run's own, not the week's. */}
+                      <div className="mt-3 flex items-center justify-between text-[11px] font-bold tabular-nums">
+                        <span className="text-muted">
+                          {botDone} / {botTotal}
+                        </span>
+                        <span className="text-cyan">{botPct}%</span>
+                      </div>
+                      <div className="mt-1 h-2.5 overflow-hidden rounded-full bg-black/50 shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)]">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-cyan to-purple transition-[width] duration-300 shadow-[0_0_10px_rgba(56,189,248,0.35)]"
+                          style={{ width: `${botPct}%` }}
+                        />
+                      </div>
+
+                      {/* Five read-outs. POINTS is the delta of the save's own
+                          points across the run; CO-OP SCORE is `<Regata score>`
+                          shown, never written. */}
+                      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
+                        {(
+                          [
+                            [tr("botStatTasks"), `${botDone}/${botTotal}`],
+                            [tr("botStatPoints"), `+${botPoints}`],
+                            [tr("botStatCoop"), botMeta ? String(botMeta.score) : "—"],
+                            [tr("botStatTime"), botClock],
+                            [tr("botStatAvg"), String(botRounds > 0 ? Math.round(botPoints / botRounds) : 0)],
+                          ] as [string, string][]
+                        ).map(([label, value]) => (
+                          <div key={label} className="rounded-xl border border-white/5 bg-[#0a0f1c] px-3 py-2">
+                            <div className="text-[10px] font-bold tracking-wider text-muted uppercase">{label}</div>
+                            <div className="mt-0.5 text-sm font-bold text-fg tabular-nums">{value}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Timestamped console — every round, in order. */}
+                      <div className="mt-3 overflow-hidden rounded-xl border border-white/5 bg-[#0a0f1c]">
+                        <div className="flex items-center gap-2 border-b border-white/5 px-3 py-2">
+                          <span className="text-[10px] font-bold tracking-wider text-muted uppercase">{tr("botLog")}</span>
+                          {botRun ? (
+                            <span className="state-badge rounded-full bg-purple/15 px-2 py-0.5 text-[10px] text-purple">
+                              {tr("botStart")}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="max-h-52 space-y-1 overflow-y-auto p-3 font-mono text-[11px] leading-relaxed">
+                          {botLog.length === 0 ? (
+                            <p className="text-muted">{tr("botLogEmpty")}</p>
+                          ) : (
+                            botLog.map((l, i) => (
+                              <div key={`${l.t}-${i}`} className="flex items-start gap-2">
+                                <span className="shrink-0 text-muted tabular-nums">{l.t}</span>
+                                <span className={cn(l.tone === "err" ? "text-danger" : l.tone === "ok" ? "text-ok" : "text-muted")}>
+                                  {l.msg}
+                                </span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </section>
+                      </>
+                    )}
                   </div>
                 )}
 
