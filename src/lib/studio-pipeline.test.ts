@@ -2691,56 +2691,6 @@ test("profile: the Penguin frame is offered with the artwork a real save carries
   );
 });
 
-test("profile: a pushed frame is worn only when MyFrame says so", async () => {
-  // The report: *"my penguin frame not shows in game"*. Unlocking writes
-  // `UnlockedFrames` (the base64 ids the account owns); the game draws the
-  // profile from `<Var name="MyFrame" v="frame_12"/>` — a *name*, measured as
-  // frame_04 / frame_08 / frame_12 in real saves. A tool that only unlocks
-  // cannot make anything appear, so the two have to be written separately.
-  const { frameWearName, isFrameWearName } = await import("./profile-wear.ts");
-  assert.equal(frameWearName("Frame 12", 11), "frame_12", "a numbered label carries its own name");
-  assert.equal(frameWearName("Penguin", 17), "frame_18", "a named frame falls back to its catalog position");
-  assert.equal(isFrameWearName("frame_18"), true);
-  assert.equal(isFrameWearName("VEdYLhJsAnc9Gy0tFgIwCCM="), false, "a catalog id is never a worn name");
-
-  const xml =
-    '<?xml version="1.0" encoding="utf-8"?><Global><Var name="cityId" v="MECITY1" t="s"/>' +
-    '<Var name="MyFrame" v="frame_12" t="s"/>' +
-    '<DataElem name="PlayerProfile" type="Data"><DataElem name="Configs" type="Data">' +
-    '<DataElem name="UnlockedFrames" type="s" value="VFBKNx5FUig9Gy0tFgIwCCM="/>' +
-    "</DataElem></DataElem></Global>";
-  const s = studio.connectLoad(
-    token,
-    "test-device",
-    undefined,
-    undefined,
-    Buffer.from(xml).toString("base64"),
-  );
-  const { publicCatalogs } = await import("./server/catalogs.server.ts");
-  const penguin = publicCatalogs().profile
-    .find((g) => g.id === "Frames")!
-    .items.find((i) => i.label === "Penguin")!;
-
-  // Unlocking changes the list and nothing else.
-  const unlocked = studio.applySave({ token, sessionId: s.sessionId, profile: { Frames: [penguin.id] } });
-  const afterUnlock = Buffer.from(unlocked.fileB64!, "base64").toString("utf8");
-  assert.match(afterUnlock, /name="MyFrame"\s+v="frame_12"/, "an unlock never changes what is worn");
-  assert.ok(afterUnlock.includes("VEdYLhJsAnc9Gy0tFgIwCCM="), "the frame really is owned");
-
-  // Wearing is its own write, and it is what the game renders.
-  const worn = studio.applySave({ token, sessionId: s.sessionId, wearFrame: "frame_18" });
-  const afterWear = Buffer.from(worn.fileB64!, "base64").toString("utf8");
-  assert.match(afterWear, /name="MyFrame"\s+v="frame_18"/, "the worn frame must reach the save");
-  assert.ok(worn.parts.includes("wear-frame_18"), "the push reports the frame it wore");
-
-  // A catalog id or anything else is refused rather than written: MyFrame is a
-  // name, and a save carrying an id there reads as no frame at all.
-  assert.throws(
-    () => studio.applySave({ token, sessionId: s.sessionId, wearFrame: "VEdYLhJsAnc9Gy0tFgIwCCM=" }),
-    /Khung/,
-  );
-});
-
 test("profile: every game-40.0.1 label resolves to artwork that ships on disk", () => {
   const shipped = new Set(readdirSync("public/game-icons"));
   // The 40.0.1 additions (badges 17/18, frame 17, titles 21-28, style Pumpkin)

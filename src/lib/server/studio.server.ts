@@ -5,7 +5,7 @@ import {
   decryptStream,
   postProcessDecrypt,
 } from "./township/crypto.server";
-import { applyStatChanges, parseStats, readAnyVar, STAT_ALIASES, writeVar } from "./township/vars.server";
+import { applyStatChanges, parseStats, readAnyVar, STAT_ALIASES } from "./township/vars.server";
 import { shellErrorMessage } from "./township/save-decode.server";
 import { findUnbalancedTag } from "./township/xml-edit.server";
 import { applyBarnCapacity, applyBarnItems, barnInfo, ensureBarnCapacity } from "./township/barn.server";
@@ -420,10 +420,6 @@ export type SavePayload = {
   sessionId: string;
   stats?: Record<string, string>;
   profile?: Record<string, string[]>;
-  /** The frame the account should *wear*, in the save's own name form
-   *  (`frame_12`, `frame_18`). Unlocking an id only adds it to
-   *  `UnlockedFrames`; this is what makes it show on the profile. */
-  wearFrame?: string;
   avatars?: string[];
   skins?: Record<string, string[]>;
   items?: Record<string, number>;
@@ -626,15 +622,6 @@ function applySaveEdits(p: SavePayload) {
     for (const [g, ids] of Object.entries(revealed.profile)) s.profile[g] = mergeUnique(s.profile[g] ?? [], ids);
     s.rawXml = injectProfile(s.rawXml, revealed.profile);
     parts.push("profile");
-  }
-  if (p.wearFrame) {
-    // Unlocking and wearing are two different fields, and the game reads only
-    // `MyFrame` for what is displayed. The name form is the save's own
-    // (`frame_12`), never the catalog id, so anything else is refused here
-    // rather than written into a profile the game would render as none.
-    if (!/^frame_\d{1,3}$/.test(p.wearFrame)) throw new Error("Khung không hợp lệ");
-    s.rawXml = writeVar(s.rawXml, "MyFrame", p.wearFrame);
-    parts.push(`wear-${p.wearFrame}`);
   }
   if (revealed.avatars.length) {
     s.avatars = mergeUnique(s.avatars, revealed.avatars);

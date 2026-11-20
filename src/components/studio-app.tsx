@@ -15,7 +15,6 @@ import { isDeviceId, mintDeviceId, normalizeDeviceId } from "@/lib/device-id";
 import { AVATAR_MAX, avatarEmoji, avatarGroupId, avatarIconPath, avatarsInRange, type Group, type Item } from "@/lib/catalogs";
 import { MUSEUM_IDS, artifactEmoji, artifactIconPath, museumLabel } from "@/lib/museum";
 import { iconForBarn, iconForDecorLabel, iconForGem, iconForGroup, iconForItemLabel, iconForProfileLabel, iconForSkin, iconForStat, iconForSticker, iconForUpgradeLabel, iconForZoo } from "@/lib/game-icon-map";
-import { frameWearName } from "@/lib/profile-wear";
 import { REGATTA_MAX_TASKS, REGATTA_DEFAULT_TASKS, BOT_DEFAULT_TASKS, BOT_LOAD_MS, BOT_MAX_TASKS, BOT_ROUND_MAX, BOT_SYNC_MIN_MS, regattaReason, type RegattaReason } from "@/lib/regatta";
 import { BLOOM_TOKENS_DEFAULT, BLOOM_TOKENS_MAX } from "@/lib/events";
 import {
@@ -1285,10 +1284,6 @@ export function StudioApp() {
   const [barnShowAll, setBarnShowAll] = useState(false);
 
   const profileSel = useSetMap();
-  // Which frame the profile *wears* (`frame_12`). Unlocking an id only adds it
-  // to `UnlockedFrames`; the game draws the profile from `MyFrame`, so without
-  // this a pushed frame exists in the list and shows nowhere.
-  const [wearFrame, setWearFrame] = useState("");
   const avatarSel = useSetMap();
   const skinSel = useSetMap();
   const itemSel = useSetMap();
@@ -1912,7 +1907,6 @@ export function StudioApp() {
       const hasOtherChanges =
         Object.keys(changedStats).length > 0 ||
         hasProfileChanges ||
-        wearFrame !== "" ||
         avatarSel.count > 0 ||
         skinSel.count > 0 ||
         itemSel.count > 0 ||
@@ -1963,7 +1957,6 @@ export function StudioApp() {
           sessionId: activeSession.sessionId,
           stats: Object.keys(changedStats).length ? changedStats : undefined,
           profile: profileDelta,
-          wearFrame: wearFrame || undefined,
           avatars: Object.values(avatarSel.asRecord()).flat(),
           skins: skinSel.asRecord(),
           items: Object.fromEntries(itemIds.map((id) => [id, qty])),
@@ -3092,30 +3085,6 @@ export function StudioApp() {
                         toneClass={groupTone(g.id, i)}
                       />
                     ))}
-                    {(() => {
-                      // Unlocking a frame and wearing it are two fields: the
-                      // game draws the profile from `MyFrame`, so a frame that
-                      // was only unlocked shows in the list and nowhere else.
-                      const frames = catalogs.profile.find((g) => g.id === "Frames");
-                      if (!frames) return null;
-                      return (
-                        <label className="field-label">
-                          {tr("wearFrame")}
-                          <select
-                            className="field mt-2"
-                            value={wearFrame}
-                            onChange={(e) => setWearFrame(e.target.value)}
-                          >
-                            <option value="">{tr("wearFrameNone")}</option>
-                            {frames.items.map((it, i) => (
-                              <option key={it.id} value={frameWearName(it.label, i)}>
-                                {it.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      );
-                    })()}
                   </div>
                 )}
 
