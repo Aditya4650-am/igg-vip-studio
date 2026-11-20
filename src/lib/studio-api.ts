@@ -66,6 +66,9 @@ const saveSchema = z.object({
   sessionId: z.string(),
   stats: z.record(z.string(), z.string()).optional(),
   profile: z.record(z.string(), z.array(z.string())).optional(),
+  // The name form the save wears (`frame_12`), never a catalog id: the game
+  // reads only `MyFrame` for what is displayed on the profile.
+  wearFrame: z.string().regex(/^frame_\d{1,3}$/).optional(),
   avatars: z.array(z.string()).optional(),
   skins: z.record(z.string(), z.array(z.string())).optional(),
   items: z.record(z.string(), z.number()).optional(),
