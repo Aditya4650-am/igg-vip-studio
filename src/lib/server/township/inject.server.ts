@@ -4,7 +4,8 @@ import {
   REGATTA_MAX_TASKS,
   REGATTA_MIN_WINDOW_AGE,
   regattaDailyQuota,
-  regattaMinGap,
+  regattaDayCap,
+  regattaDensityGap,
   regattaReason,
   regattaWant,
   type RegattaReason,
@@ -454,6 +455,13 @@ export interface RegattaState {
    *  game has ever shown — the game's daily task limit, and therefore the
    *  number of gaps per rolling day a batch is allowed to have. */
   quota: number;
+  /** How many more completions this save may add **right now** without
+   *  crossing its own daily envelope (worst rolling 24 h at `2 * quota`,
+   *  counting what is already on record and what the batch would add, with
+   *  new records never closer than `regattaDensityGap(2 * quota)`). 0 means
+   *  the next push would be refused `day_full`; the tab passes this straight
+   *  to `regattaReason` so badge and push stay one decision. */
+  dayRoom: number;
   /** Records usable as templates anywhere in the save. */
   templates: number;
   /** Distinct <FreeTask> ids the game is offering. */
@@ -484,6 +492,22 @@ const REGATTA_ERR = {
   no_template:
     "Save chưa có task regatta thật nào để chép, và không có task nào trong pool đủ dữ liệu thật (need/score/type) để dựng. Không tạo task giả.",
 } as const;
+
+/**
+ * The daily-envelope refusal, in the same Vietnamese convention as the two
+ * above. It names the save's own `TaskQuota`, the `2 * quota` envelope and how
+ * many tasks still fit — the numbers the user needs to act on, not a rule
+ * stated as fact. The count itself is the game's: at quota 15 the game blocks
+ * task 16 until the reset, so anything well past 2x quota in a rolling day is
+ * a state the server never writes, and it is the shape the ban report carried
+ * (200 completions against a quota of 15, round 2 crammed into 55 seconds).
+ */
+function regattaDayFullErr(room: number, quota: number, cap: number, gap: number): string {
+  const gapMin = Math.max(1, Math.round(gap / 60));
+  return room <= 0
+    ? `Save đã dùng hết chỗ task trong 24 giờ theo chính quota của nó (TaskQuota ${quota}, tối đa ${cap}/24 giờ) hoặc chưa đủ ${gapMin} phút so với task trước - không thêm task lúc này. Vượt quota mỗi ngày là trạng thái server tự chặn và là shape đã gây ban, nên tool giữ save trong khoảng đó. Đợi cửa sổ 24 giờ trôi qua rồi thử lại.`
+    : `Chỉ còn ${room} task được thêm lúc này: quota của save (TaskQuota ${quota}) cho tối đa ${cap} task trong 24 giờ qua và save đã dùng phần còn lại. Nhập ${room} hoặc ít hơn, hoặc đợi cửa sổ 24 giờ trôi qua.`;
+}
 
 /**
  * Every field a real completed task carries, measured on untouched reference
@@ -1069,6 +1093,106 @@ function regattaClonePlan(
 /** Read-only status so the UI can say *why* a save cannot take tasks before
  *  the user presses anything. Mirrors `injectRegata`'s checks exactly for the
  *  batch size it is given, and never throws. */
+/**
+ * How many more completions a block may receive right now, and the placement
+ * those records would take.
+ *
+ * The envelope is the measured one: **any rolling 24 h may hold at most
+ * `2 * quota` completions** — a real block tops out at 21 against a quota of 11
+ * (the reset sits off the UTC day, so a window can straddle two), while the
+ * save behind the ban report held **200 against a quota of 15** and round 2
+ * of that run crammed 101 records into 55 seconds with 45 identical
+ * timestamps. Two rules, both derived from the save's own `TaskQuota`:
+ *
+ * - a rolling day may hold at most `cap = 2 * quota` completions, counting
+ *   what is already on record **and** what the batch would add;
+ * - new records sit `gap = regattaDensityGap(cap)` seconds apart, so the batch
+ *   cannot pile up even on its own, and never closer than that to the block's
+ *   own newest completion.
+ *
+ * Placement is **anchored at the recent end**: record `i` of a batch of `k` is
+ * dated `hi - (k - 1 - i) * gap`, which is as late as the rules allow. Anchoring
+ * at `lastDone + gap` instead looked equivalent, but is not: a save already
+ * holding an over-cap day would then always get its first record parked inside
+ * the last 24 h of that pile, so every `k` would fail the cap check and the
+ * feature would stay refused **forever**, even a year later. Packing to the
+ * recent end lets the batch move away from the pile as time passes, so room
+ * opens again the way it should.
+ *
+ * The largest fitting `k` is searched downward from `min(cap, kSpan)` and each
+ * candidate is checked against the real combined timeline, so the answer is
+ * exact rather than a formula the emitter could disagree with — this is the
+ * one planner both `injectRegata` (which writes) and `inspectRegatta` (which
+ * tells the tab) run.
+ */
+interface RegattaDayPlan {
+  /** How many records fit; 0 means the push must refuse `day_full`. */
+  room: number;
+  /** The save's own quota, clamped — what the refusal message names. */
+  quota: number;
+  /** `2 * quota`, the rolling-day envelope. */
+  cap: number;
+  /** The spacing new records sit at. */
+  gap: number;
+  /** Where a batch of `room` records would start (ascending from here to `hi`). */
+  lo: number;
+  /** Where the newest record of the batch lands: `min(win.end, now - 1)`. */
+  hi: number;
+}
+
+/** Largest number of records any rolling 86400 s window holds in `ts`
+ *  (ascending). O(n) two-pointer. */
+function worstRolling24(ts: number[]): number {
+  let worst = 0;
+  let left = 0;
+  for (let right = 0; right < ts.length; right++) {
+    while (ts[right]! - ts[left]! > 86400) left++;
+    const n = right - left + 1;
+    if (n > worst) worst = n;
+  }
+  return worst;
+}
+
+function regattaDayPlan(
+  block: { attrs: string; inner: string },
+  win: { start: number; end: number },
+  now: number,
+): RegattaDayPlan {
+  const quota = regattaDailyQuota(regattaTaskQuota(block.inner));
+  const cap = regattaDayCap(quota);
+  const gap = regattaDensityGap(cap);
+  const hi = Math.min(win.end, now - 1);
+  const times = [...block.inner.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)]
+    .map((m) => Number(m[1]))
+    .filter((t) => Number.isFinite(t))
+    .sort((a, b) => a - b);
+  const lastDone = times.length ? times[times.length - 1]! : 0;
+  // Newest completion first: a batch may not start before it, nor within
+  // `gap` of it. With no record on file the batch is free to sit anywhere in
+  // the window, but never before the block's own start.
+  const floorT = Math.min(win.start + 2, hi);
+  const after = lastDone > 0 ? lastDone + gap : floorT;
+  // Records land at `hi - (k-1-i)*gap`, so the oldest of them is
+  // `hi - (k-1)*gap`; the batch fits before now iff that is >= `after`.
+  const kSpan = hi >= after ? Math.floor((hi - after) / gap) + 1 : 0;
+  const maxK = Math.min(cap, kSpan);
+  for (let k = maxK; k >= 1; k--) {
+    const planned: number[] = [];
+    for (let i = 0; i < k; i++) planned.push(hi - (k - 1 - i) * gap);
+    // Only old records that can share a window with a new one count here —
+    // the ones since `lo0 - 86400`. That is what stops a pile from long ago
+    // from holding the room at 0 forever: its own windows are the save's
+    // pre-existing condition, not something this batch can or should change,
+    // and a window with no new record in it is untouched by the push either
+    // way. The check is a diff rule like every other gate: the tool only has
+    // to avoid *adding* to a window that would cross the cap.
+    const lo0 = planned[0]!;
+    if (worstRolling24(times.filter((t) => t >= lo0 - 86400).concat(planned)) <= cap)
+      return { room: k, quota, cap, gap, lo: lo0, hi };
+  }
+  return { room: 0, quota, cap, gap, lo: hi, hi };
+}
+
 export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): RegattaState {
   const text = asText(xml).replace(/^\uFEFF/, "");
   // A save with no completed record to clone is no longer automatically a
@@ -1083,7 +1207,7 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
   const block = regattaBlock(text);
   const base = { templates: sources.tags.length, pool, avgScore: 0, doneScore: 0, user, window: null, coop: readClan(text), regattaMeta: null };
   if (!block)
-    return { ...base, reason: "no_active_regatta", active: false, current: 0, lastDone: 0, quota: REGATTA_MAX_PER_DAY };
+    return { ...base, reason: "no_active_regatta", active: false, current: 0, lastDone: 0, quota: REGATTA_MAX_PER_DAY, dayRoom: 0 };
 
   const win = regattaWindow(block.attrs);
   const now = Math.floor(Date.now() / 1000);
@@ -1096,6 +1220,12 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
   // constant: `TaskQuota` is the game's own "Today's Tasks: 4/17" counter and
   // it is what every record's `anlLimit` mirrors (5/5 real saves).
   const quota = regattaDailyQuota(regattaTaskQuota(block.inner));
+  // How many more completions fit in this save's own daily envelope right now,
+  // from the same planner `injectRegata` runs — so the `day_full` the tab may
+  // show is the `day_full` the push would throw, for the count the user
+  // actually picked.
+  const day = win ? regattaDayPlan(block, win, now) : null;
+  const dayRoom = day ? day.room : 0;
   const scores = [...block.inner.matchAll(/<MyOldTask\b[^>]*\bscore="(\d+)"/g)].map((m) => Number(m[1]));
   const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
   // The points this save's own regatta holds, and the block's headline numbers.
@@ -1113,7 +1243,7 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
   // Exactly what `injectRegata` will decide for this batch size, in the same
   // order — now shared with the tab, which re-runs it for the count the user
   // actually picked instead of trusting this default-12 answer.
-  const reason = regattaReason({ window: win, templates: sources.tags.length, current, lastDone, quota }, nTasks, now);
+  const reason = regattaReason({ window: win, templates: sources.tags.length, current, lastDone, quota, dayRoom }, nTasks, now);
   // `regattaReason` only knows that *some* record can be built. The cloned
   // batch additionally needs a plan long enough to name a slot for every
   // record, and `injectRegata` refuses the moment that plan runs short — so
@@ -1138,6 +1268,7 @@ export function inspectRegatta(xml: string, nTasks = REGATTA_DEFAULT_TASKS): Reg
     current,
     lastDone,
     quota,
+    dayRoom,
     templates: sources.tags.length,
     pool,
     avgScore,
@@ -1243,22 +1374,29 @@ function bumpRegattaTaskVars(varsInner: string, added: number, countAfter: numbe
  *
  * With a completed record to clone, every field of a new task is copied from
  * it (`regattaTemplates`), so nothing is invented: `type`, `eventType`,
- * `target`, `need`, `have`, `score`, `regataCash` and `anlLimit` are proven to
- * reconcile with that id. With none — a green week where the counter is still
- * 0 — the block's own `<FreeTask>` offer rows are consumed instead
- * (`regattaSyntheticTasks`), each one carrying its own `num`/`ver` out with it
- * and being put back as the next measured id at `ver + 1`. In either case only
- * the offer list, the counters and the timestamps move: `<Regata score>` and
- * `scoreUpd` are never written, because they mirror the clan's own history.
+ * `target`, `need`, `have`, `score` and `regataCash` are proven to reconcile
+ * with that id, and `anlLimit` is rewritten to the **live** block's own
+ * `TaskQuota` (a template from `<PrevRegata>` carries the archive's copy).
+ * With none — a green week where the counter is still 0 — the block's own
+ * `<FreeTask>` offer rows are consumed instead (`regattaSyntheticTasks`), each
+ * one carrying its own `num`/`ver` out with it and being put back as the next
+ * measured id at `ver + 1`. In either case only the offer list, the counters
+ * and the timestamps move: `<Regata score>` and `scoreUpd` are never written,
+ * because they mirror the clan's own history.
  *
  * Refuses (rather than reporting a success the game ignores) when the save has
- * no live `<Regata>`, or an offer list that holds no id any save has ever
- * completed. Throws, so `applySave` surfaces the reason instead of ticking.
+ * no live `<Regata>`, an offer list that holds no id any save has ever
+ * completed, or a batch that would leave the save's own daily envelope —
+ * worst rolling 24 h above `2 * TaskQuota`, which is the shape a real account
+ * was banned over (200 in one day at quota 15). Throws, so `applySave`
+ * surfaces the reason instead of ticking; `inspectRegatta` answers the same
+ * three refusals in the same order through `regattaReason`, so the badge the
+ * tab shows before the press is the refusal the press would get.
  *
  * `nTasks` is **how many tasks this push adds**, not the week's target total,
- * so a save that already holds tasks still takes more and the same number may
- * be pushed again and again in one day. Nothing is refused for the count: the
- * batch is spread across whatever span the block still has.
+ * so a save that already holds tasks still takes more — as long as today's
+ * envelope has room left (`dayRoom`), which is the only thing the count is now
+ * judged against.
  */
 export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): string {
   const text0 = asText(xml).replace(/^\uFEFF/, "");
@@ -1275,6 +1413,22 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
 
   const src = regattaSources(text0, want);
   if (!src.tags.length) throw new Error(REGATTA_ERR.no_template);
+
+  // The one count-based refusal, and it is about *today*, not the week: how
+  // many completions still fit inside the save's own daily envelope (worst
+  // rolling 24 h at `2 * TaskQuota`, existing records and this batch counted
+  // together). It exists because of what a real account was banned over — 200
+  // completions in one rolling day against a quota of 15, round 2 of them
+  // crammed into 55 seconds — a state the game itself blocks (task #16 cannot
+  // be completed until the reset), so no server writes it. `regattaDayPlan` is
+  // the very planner that places the batch below, and the badge reads it
+  // through `inspectRegatta`, so what is refused here is exactly what the tab
+  // already said could not be written. It sits after `no_template` and before
+  // the clone plan's own `no_template`, matching the order `regattaReason`
+  // answers in — `window`, `templates`, `day` — so badge and push cannot
+  // name a different refusal for one save.
+  const day = regattaDayPlan(block, win, now);
+  if (want > day.room) throw new Error(regattaDayFullErr(day.room, day.quota, day.cap, day.gap));
 
   // `want` is **how many tasks this push adds**, not the week's target total.
   // Reading it as a total is what made a second push impossible: after the
@@ -1307,62 +1461,19 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
   // second identity is exactly what a server notices when it is looking.
   const user = resolveRegataUser(text0);
 
-  // Timestamps must sit inside the regatta window AND in the past. A completion
-  // dated in the future, or outside the window the server is holding, is the
-  // single easiest anomaly to spot.
-  //
-  // The range is also anchored after `lastDone`, the newest completion already
-  // in the block. The window on its own was enough for a first push, but a
-  // second one recomputed the same range and wrote a record completed *before*
-  // the one above it — 1 out-of-order record per repeat push, against 0 in
-  // every block of the corpus.
-  const lastDone = regattaLastDone(block.inner);
-  const quota = regattaDailyQuota(regattaTaskQuota(block.inner));
-  // No refusal on how much of the week has elapsed, and no dependency on the
-  // daily spacing to decide *whether* a batch may be written. The batch is
-  // spread across the whole span the block still has between its own
-  // `startTime` and now, so a regatta that opened this afternoon takes 100
-  // tasks as happily as one in its sixth day. The old rule wanted
-  // `TaskQuota`-wide gaps between records *and* all of them before now, which
-  // on day one left room for about two tasks and answered "the regatta window
-  // is too short" for anything more — arithmetic about how much of the week had
-  // passed, presented as a rule the game states.
-  //
-  // `regattaMinGap` survives only as the distance between the block's own newest
-  // completion and this batch's first, when there is that much room left: two
-  // completions a second apart is not a shape any save shows. It no longer
-  // decides whether the push happens.
-  const latest = Math.min(win.end, now - 1);
-  // Nothing may be dated before the week opened. The second floor — nothing
-  // before the block's own newest completion — is what keeps document order
-  // across repeat pushes: realEndTime is non-decreasing in document order in
-  // every block of the corpus (35/35, 14/14, 104/104), and a second push that
-  // recomputed the range from the window alone used to write a record completed
-  // *before* the one above it.
-  const floor = Math.min(win.start + 2, latest);
-  let lo = floor;
-  if (lastDone > 0) {
-    // Start just after the newest completion already on record, but never spend
-    // more than a `need`th of the room that is left on that one gap, and never
-    // less than a single second — so the batch lands *after* the record above
-    // it rather than on top of it.
-    //
-    // The offset used to be `min(minGap, room)` in full, and that is what broke
-    // a second push made the same day: with `room` (the time since the first
-    // batch's last record) below `regattaMinGap`, the whole room was consumed
-    // as the offset, `lo` landed on `latest`, the span came out at zero and
-    // **every record of the second batch sat on the same second**. Dividing the
-    // room by `need` instead spreads the batch evenly over the time that
-    // actually exists between the two pushes — which is the only place these
-    // completions may go: they may not be dated in the future, and they may
-    // not be dated before the batch above them.
-    const room = Math.max(1, latest - lastDone);
-    const share = Math.max(1, Math.floor(room / Math.max(1, need)));
-    const after = lastDone + Math.min(regattaMinGap(quota), share);
-    lo = Math.max(floor, Math.min(after, latest));
-  }
-  const hi = Math.max(lo, latest);
-  const span = Math.max(0, hi - lo);
+  // Timestamps must sit inside the regatta window AND in the past, ordered
+  // after the block's own newest completion, at least `day.gap` apart, and
+  // inside the save's daily envelope — all four decided by `regattaDayPlan`
+  // above, which has already proved `want` records fit (its `room >= want`).
+  // The placement is anchored at the recent end: record `i` is dated
+  // `day.hi - (want - 1 - i) * day.gap`. Anchoring at `lastDone + gap` would
+  // look equivalent but is not — a save already holding an over-cap day would
+  // get its first record parked inside the last 24 h of that pile every time,
+  // so it could never recover room no matter how long it waited (see the
+  // planner's own note). Packing to the recent end also keeps the newest
+  // record at `now - 1`, which is where a batch pushed *now* would read.
+  const hi = day.hi;
+  const rawQuota = regattaTaskQuota(block.inner);
 
   // `takenCounter` runs monotonically across the `MyOldTask` list of a single
   // block: a real save's archived week reads 2,3,…,37 in document order, and
@@ -1414,15 +1525,14 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
     // how far it sits past the window's own start, so it holds even in the
     // first minutes of a week instead of only after `win.start + 122`.
     //
-    // Placed by dividing the span rather than by stepping a pre-rounded gap:
-    // `floor(span / (need-1))` collapses to 0 whenever the room is shorter
-    // than the batch, which put every record on one second while seconds were
-    // still available. `floor(i * span / (need-1))` walks the whole span at
-    // once, so the smallest step it ever takes is that same rounded gap — the
-    // spacing never gets *wider*, it only stops being thrown away — and the
-    // last record lands exactly on `hi`.
-    const endTime =
-      need > 1 ? Math.min(lo + Math.floor((i * span) / (need - 1)), hi) : Math.min(lo, hi);
+    // Packed to the recent end at exactly the planner's spacing, so what
+    // `regattaDayPlan` proved to fit is what gets written: the newest record
+    // lands on `hi` (= `now - 1`) and the oldest of the batch on `day.lo`,
+    // `day.gap` apart. Ordered after the record above it (the planner only
+    // offered `want <= room`, and every planned time is >= `day.lo` >
+    // `lastDone`), strictly inside the window, strictly before now, and
+    // strictly `take < complete < realEndTime` through the headroom below.
+    const endTime = hi - (need - 1 - i) * day.gap;
     const back = Math.min(120, Math.max(1, endTime - win.start - 1));
     const complete = Math.max(win.start + 1, endTime - back);
     const take = Math.max(
@@ -1441,7 +1551,16 @@ export function injectRegata(xml: string, nTasks = REGATTA_DEFAULT_TASKS): strin
     // minted. The synthetic path already carries a real `ver` out of the offer
     // row it was cut from, so it is left alone entirely.
     if (step) tag = setTagAttr(tag, "ver", String(step.ver));
-    const anlLimit = Number(attrValue(a, "anlLimit") ?? 0);
+    // `anlLimit` mirrors the **live** block's `TaskQuota` (equal on 5/5 real
+    // saves), not the template's own copy: a template lifted from
+    // `<PrevRegata>` carries the archive's quota, which is exactly how the
+    // banned save ended up with records reading 17 inside a live block that
+    // said 15. The gate excuses an archived id from that comparison — which
+    // is why it never fired — so writing the live value is the only thing
+    // that keeps new records true to the block they land in. A save with no
+    // `TaskQuota` keeps the template's value, exactly as before.
+    if (rawQuota !== null) tag = setTagAttr(tag, "anlLimit", String(rawQuota));
+    const anlLimit = Number(attrValue(tag, "anlLimit") ?? 0);
     if (Number.isFinite(anlLimit) && anlLimit > 0) tag = setTagAttr(tag, "anlNumber", String((i % anlLimit) + 1));
     if (takenBase >= 0 && attrValue(a, "takenCounter") !== null) {
       tag = setTagAttr(tag, "takenCounter", String(takenBase + i));

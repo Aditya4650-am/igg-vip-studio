@@ -185,6 +185,7 @@ const REGATTA_REASON_KEY = {
   ok: "regattaReady",
   no_active_regatta: "regattaNoRegatta",
   no_template: "regattaNoTemplate",
+  day_full: "regattaOverQuota",
 } as const;
 
 /** Why the Events tab will (or will not) accept a token batch. Mirrors
@@ -2066,6 +2067,10 @@ export function StudioApp() {
           current: session.regattaInfo.current,
           lastDone: session.regattaInfo.lastDone,
           quota: session.regattaInfo.quota,
+          // How many tasks still fit in the save's own daily envelope, from
+          // the same planner `injectRegata` runs — so `day_full` here is the
+          // `day_full` the push would throw for this very count.
+          dayRoom: session.regattaInfo.dayRoom,
         },
         regattaTasks,
       )

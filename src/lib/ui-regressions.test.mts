@@ -240,12 +240,26 @@ test("the regatta count is how many tasks to add, so nothing can say the week is
   // The union itself, so a new reason cannot be added without a decision.
   assert.match(
     read("regatta.ts"),
-    /export type RegattaReason = "ok" \| "no_active_regatta" \| "no_template";/,
-    "`RegattaReason` may only hold the two remaining refusals plus ok",
+    /export type RegattaReason =\s*"ok" \| "no_active_regatta" \| "no_template" \| "day_full";/,
+    "`RegattaReason` may only hold the three refusals plus ok",
   );
 
   // And the label the user actually reads, in both dictionaries the tab ships.
   const dict = read("i18n.ts");
+
+  // The daily envelope is the refusal a bot round of 100 actually meets, so
+  // its label has to exist in both dictionaries and be wired to the reason.
+  assert.ok(dict.includes("regattaOverQuota:"), "vi must carry the day-full label");
+  assert.ok(/regattaOverQuota:/.test(dict.slice(dict.indexOf("const en: typeof vi"))), "en must carry it too");
+  assert.ok(
+    tsx.includes('day_full: "regattaOverQuota"'),
+    "the reason key must map day_full onto that label",
+  );
+  assert.ok(
+    tsx.includes("dayRoom: session.regattaInfo.dayRoom"),
+    "the badge must read the same room the push checks",
+  );
+
   assert.ok(dict.includes('regattaCount: "Số task cần thêm"'), "vi must call it the number to add");
   assert.ok(dict.includes('regattaCount: "Tasks to add"'), "en must call it the number to add");
 });

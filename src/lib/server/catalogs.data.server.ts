@@ -344,6 +344,10 @@ export const RAW_PROFILE: RawGroup[] = [
       {
         "id": "VEdYLhJsAnY9Gy0tFgIwCCM=",
         "label": "Frame 17"
+      },
+      {
+        "id": "VEdYLhJsAnc9Gy0tFgIwCCM=",
+        "label": "Penguin"
       }
     ]
   },

@@ -227,32 +227,41 @@ test("decoration: a save that already has a self-closing stash is updated in pla
   assert.equal((pushed.match(/<BuildingsStash/g) ?? []).length, 1);
 });
 
-test("regatta: repeated apply keeps adding, and the file stays a valid save", () => {
+test("regatta: a push fills today's envelope, and a second one refuses without moving the file", () => {
   const snap = townSession(REGATTA_SAVE);
   const first = studio.applyRegatta(token, snap.sessionId);
   balanced(first.xml!);
-  balanced(Buffer.from(first.fileB64!, "base64").toString("utf8"));
+  const pushed = Buffer.from(first.fileB64!, "base64").toString("utf8");
+  balanced(pushed);
   assert.equal(
-    (Buffer.from(first.fileB64!, "base64").toString("utf8").match(/<MyOldTask\b/g) ?? []).length,
+    (pushed.match(/<MyOldTask\b/g) ?? []).length,
     13,
     "one task the save already had plus the twelve it was asked to add",
   );
 
-  // The count is **added**, so a second run is not a no-op: this is the report
-  // that read *"i push 50 tasks it works, but if i want to push more then i
-  // can't push it shows error"* — the count used to be the week's target total,
-  // so after the first push it was full for the rest of the week. Another
-  // twelve land and the file must still be balanced.
-  const again = studio.applyRegatta(token, snap.sessionId);
-  const twice = Buffer.from(again.fileB64!, "base64").toString("utf8");
-  balanced(again.xml!);
-  balanced(twice);
-  assert.equal(
-    (twice.match(/<MyOldTask\b/g) ?? []).length,
-    25,
-    "the second run adds its own twelve on top of the thirteen",
+  // The report behind this was *"i push 50 tasks it works, but if i want to
+  // push more then i can't push it shows error"*. The count is **added**, so a
+  // second push is judged on what is left of today's envelope — and right
+  // after a batch the newest completion is a second old, so the spacing leaves
+  // no room. That refusal has to leave the session exactly as the first push
+  // left it: keeping the first batch while reporting a failure would make the
+  // next Save & push write it a second time.
+  const before = studio.exportCurrent(token, snap.sessionId).fileB64;
+  assert.throws(
+    () => studio.applyRegatta(token, snap.sessionId),
+    /TaskQuota|24 giờ|Chỉ còn/,
+    "a second push has to be refused on today's envelope, not written anyway",
   );
-  assert.notEqual(again.fileB64, first.fileB64, "the file really moved");
+  assert.equal(
+    studio.exportCurrent(token, snap.sessionId).fileB64,
+    before,
+    "a refused push must not move the file",
+  );
+  assert.equal(
+    (Buffer.from(before!, "base64").toString("utf8").match(/<MyOldTask\b/g) ?? []).length,
+    13,
+    "and the thirteen records from the first push are still the only ones",
+  );
 });
 
 test("fetch city: validates input before touching python", async () => {
@@ -2646,6 +2655,40 @@ test("profile: every frame id a real save carries stays known, and none is inven
   for (const label of ["Frame 13", "Frame 14", "Frame 15"]) {
     assert.ok(iconForProfileLabel(label), `${label} must resolve to shipped artwork`);
   }
+});
+
+test("profile: the Penguin frame is offered with the artwork a real save carries", async () => {
+  // Supplied 2026-11-20 in a save Playrix itself served
+  // (`mGameInfo.current.xml`, `<DataElem name="UnlockedFrames">`): `…Anc9…` is
+  // the next continuation of the 17-byte family the catalog already measures —
+  // Frame 12 is `…Anq9` (0x74), Frame 13 `…AnU9` (0x75), Frame 17 `…AnY9`
+  // (0x76), and this one `…Anc9` (0x77). The id comes from the save; only the
+  // label is ours, because the family carries no name in the document.
+  const frames = RAW_PROFILE.find((g) => g.id === "Frames");
+  assert.ok(frames, "the Frames group must exist");
+  const item: { id: string; label: string } | undefined = frames.items.find(
+    (i) => i.id === "VEdYLhJsAnc9Gy0tFgIwCCM=",
+  );
+  assert.ok(item, "the Penguin frame id must be in the catalog");
+  assert.equal(item.label, "Penguin", "the picker label is the name the user sees");
+
+  // The label is the only link to the artwork, and the file has to ship or the
+  // picker renders a broken image where a frame should be.
+  assert.equal(iconForProfileLabel("Penguin"), "/game-icons/Frame_Penguin.png");
+  const shipped = new Set(readdirSync("public/game-icons"));
+  assert.ok(shipped.has("Frame_Penguin.png"), "the Penguin artwork must ship with the app");
+  const png = readFileSync("public/game-icons/Frame_Penguin.png");
+  assert.equal(png[25], 6, "the icon must be RGBA, not an opaque rectangle");
+
+  // Offered, not merely known: the hidden-button list exists for frames that
+  // grant nothing when pushed, and nothing says that about this one.
+  const { publicCatalogs } = await import("./server/catalogs.server.ts");
+  const pub = publicCatalogs().profile.find((g) => g.id === "Frames");
+  assert.ok(pub, "the public Frames group must exist");
+  assert.ok(
+    pub.items.some((i) => i.label === "Penguin"),
+    "the Penguin frame must be pressable in the Frames section",
+  );
 });
 
 test("profile: every game-40.0.1 label resolves to artwork that ships on disk", () => {
