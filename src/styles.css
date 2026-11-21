@@ -4089,37 +4089,104 @@ button.premium-button:active:not(:disabled) {
 }
 
 
+
 /* ── Dashboard header artwork ─────────────────────────────────────────────
-   The Township skyline strip lives in the empty middle of the header, between
-   the brand and the status chips. Edge-masked and slightly dimmed so it reads
-   as an engraved band rather than a pasted screenshot; hidden on narrow
-   screens where there is no middle space to fill. */
+   The Township skyline strip in the empty middle of the header, between the
+   brand and the status chips. It is treated like a lit glass band rather than
+   a pasted image: edge-masked, deeply vignetted top and bottom, colour-graded
+   toward the brand's violet→cyan, framed by a thin luminous rim, with a very
+   slow pan inside the frame and one soft light sweep now and then. */
 @layer components {
   .header-art {
+    position: relative;
     flex: 1 1 auto;
     align-self: stretch;
     min-width: 3rem;
-    margin: 0.45rem 0.75rem;
-    border-radius: 0.6rem;
+    margin: 0.36rem 0.8rem;
+    border-radius: 0.7rem;
+    overflow: hidden;
+    isolation: isolate;
     pointer-events: none;
-    background-image:
-      linear-gradient(180deg, rgba(6, 11, 22, 0.34), rgba(6, 11, 22, 0.42)),
-      url("/township-strip.png");
-    background-position: center 46%;
-    background-size: cover;
-    background-repeat: no-repeat;
-    opacity: 0.78;
-    filter: saturate(1.02);
     box-shadow:
-      inset 0 0 0 1px rgba(255, 255, 255, 0.07),
-      inset 0 0 18px rgba(6, 11, 22, 0.45);
-    -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 9%, #000 91%, transparent 100%);
-    mask-image: linear-gradient(90deg, transparent 0%, #000 9%, #000 91%, transparent 100%);
+      inset 0 0 0 1px rgba(167, 139, 250, 0.22),
+      inset 0 0 22px rgba(6, 11, 22, 0.55),
+      0 0 18px rgba(56, 189, 248, 0.10);
+    -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 8%, #000 92%, transparent 100%);
+    mask-image: linear-gradient(90deg, transparent 0%, #000 8%, #000 92%, transparent 100%);
+  }
+
+  /* The artwork itself, a touch larger than the frame so the slow pan never
+     shows an edge. */
+  .header-art::before {
+    position: absolute;
+    inset: -8% -5%;
+    content: "";
+    background-image: url("/township-strip.png");
+    background-repeat: no-repeat;
+    background-size: cover;
+    background-position: 50% 46%;
+    filter: saturate(1.13) contrast(1.05) brightness(0.9);
+    animation: headerPan 68s ease-in-out infinite alternate;
+  }
+
+  /* Colour grade + vignette: the picture sinks into the header instead of
+     floating on it. */
+  .header-art::after {
+    position: absolute;
+    inset: 0;
+    content: "";
+    background:
+      linear-gradient(180deg, rgba(6, 11, 22, 0.62) 0%, rgba(6, 11, 22, 0) 32%, rgba(6, 11, 22, 0) 66%, rgba(6, 11, 22, 0.66) 100%),
+      linear-gradient(100deg, rgba(124, 58, 237, 0.30), rgba(56, 189, 248, 0.20) 60%, rgba(124, 58, 237, 0.24));
+    mix-blend-mode: soft-light;
+  }
+
+  /* One slow specular sweep across the band. */
+  .header-art-glow {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: linear-gradient(
+      104deg,
+      transparent 34%,
+      rgba(255, 255, 255, 0.20) 46%,
+      rgba(186, 230, 253, 0.14) 52%,
+      transparent 66%
+    );
+    transform: translateX(-125%);
+    animation: headerShine 12s ease-in-out infinite;
+  }
+}
+
+@keyframes headerPan {
+  from {
+    background-position: 43% 47%;
+  }
+  to {
+    background-position: 57% 43%;
+  }
+}
+
+@keyframes headerShine {
+  0%,
+  58% {
+    transform: translateX(-125%);
+  }
+  80%,
+  100% {
+    transform: translateX(125%);
   }
 }
 
 @media (max-width: 860px) {
   .header-art {
     display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .header-art::before,
+  .header-art-glow {
+    animation: none;
   }
 }
