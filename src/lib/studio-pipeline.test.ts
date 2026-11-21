@@ -901,6 +901,54 @@ test("progression: a lifetime counter and a factory level only ever go up", () =
   );
 });
 
+test("stats: a LEVEL typed in the Data Center pushes — the tab has no XP field", () => {
+  // Reported 2026-11-22: raising LEVEL refused with
+  // `level-up-without-experience:3->14`. The tab filters `experience` out of
+  // the stat grid, so a level typed there can never carry its XP with it —
+  // the one field the user came to edit was a dead button. A level edit from
+  // this path is honoured exactly as every build before `4f5a37a` was; the
+  // rule still covers every other path.
+  const doc = (lvl: string, xp: string) =>
+    `<root><Global><Var name="cityId" v="ME1" t="s"/>` +
+    `<Var name="levelup" v="${lvl}" t="i"/><Var name="experience" v="${xp}" t="i"/></Global></root>`;
+  const before = doc("3", "37");
+  const after = doc("14", "37");
+
+  // The same pair is still refused when nothing says the Data Center did it.
+  assert.throws(
+    () => assertProgressionsSafe(before, after),
+    /level-up-without-experience:3->14/,
+    "every other path must still move the XP with the level",
+  );
+  assert.deepEqual(progressionProblems(before, after, null, { levelEdited: true }), []);
+  assert.doesNotThrow(
+    () => assertProgressionsSafe(before, after, null, { levelEdited: true }),
+    "an explicit level edit is the feature",
+  );
+
+  // …and the flag does not weaken the rest of the gate.
+  const factory = (lvl: string) =>
+    `<root><Global><Var name="levelup" v="14" t="i"/><Var name="experience" v="37" t="i"/>` +
+    `<Upgrade version="4"><Factory id="bakery" level="${lvl}" slx="${(Number(lvl) ^ 32162029) >>> 0}"/></Upgrade></Global></root>`;
+  assert.throws(
+    () => assertProgressionsSafe(factory("7"), factory("6"), null, { levelEdited: true }),
+    /upgrade-level-lower:Factory:bakery:7->6/,
+  );
+});
+
+test("stats: the Data Center LEVEL field pushes through a session", () => {
+  // The plumbing that matters: `applySaveEdits` has to tell `encodeSave` this
+  // batch raised the level, or the gate fires on the very button that raised
+  // it. A save carrying both counters is required — the rule is a no-op when
+  // the save has no `experience`.
+  const save = ownSave.replace("</Global>", '<Var name="experience" v="37" t="i"/></Global>');
+  const snap = townSession(save);
+  const idOf = (key: string) => studio.catalogs().fields.find((f) => f.key === key)!.id;
+  const out = studio.applySave({ token, sessionId: snap.sessionId, stats: { [idOf("lvl")]: "43" } });
+  assert.match(out.xml!, /<Var name="levelup" v="43"/, "the level really moved");
+  assert.match(out.xml!, /<Var name="experience" v="37"/, "and the tab never touched the XP");
+});
+
 test("copy: a playtime older than the account itself must never leave this tool", () => {
   // A save declares two things about time: how long the account has existed
   // (`saveGlobalTime - TermsAcceptTime`) and how long it has been played

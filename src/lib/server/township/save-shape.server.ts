@@ -460,6 +460,7 @@ export function progressionProblems(
   loaded: string,
   pushed: string,
   donor?: string | null,
+  opts: { levelEdited?: boolean } = {},
 ): string[] {
   const out: string[] = [];
 
@@ -495,7 +496,16 @@ export function progressionProblems(
   const lvlAfter = readLevel(pushed);
   const xpBefore = readCounter(loaded, "experience");
   const xpAfter = readCounter(pushed, "experience");
+  // The Data Center exposes LEVEL but not `experience` (the field is hidden
+  // with the other counters the tab may not touch), so a level edit there can
+  // never move the XP with it. An explicit level edit is therefore honoured —
+  // exactly the behaviour every build before `4f5a37a` had, and the pair it
+  // produces was pushed on every save by `ab46f0b`, which ran without a ban.
+  // The rule still covers every other path: a restore without the donor's own
+  // level is refused above, and any edit that moves the level some other way
+  // still has to move the XP with it.
   if (
+    !opts.levelEdited &&
     lvlBefore !== null &&
     lvlAfter !== null &&
     xpBefore !== null &&
@@ -574,9 +584,14 @@ export function progressionProblems(
  * Push gate for the counters above. Runs beside the other gates in
  * `encodeSave`, so every path that ends in a push is covered.
  */
-export function assertProgressionsSafe(loaded: string, pushed: string, donor?: string | null) {
+export function assertProgressionsSafe(
+  loaded: string,
+  pushed: string,
+  donor?: string | null,
+  opts: { levelEdited?: boolean } = {},
+) {
   if (loaded === pushed) return;
-  const bad = progressionProblems(loaded, pushed, donor);
+  const bad = progressionProblems(loaded, pushed, donor, opts);
   if (!bad.length) return;
   throw new Error(
     `Không đẩy file lên máy: save sau khi sửa mang một chỉ số mà thành phố thật không bao giờ ` +

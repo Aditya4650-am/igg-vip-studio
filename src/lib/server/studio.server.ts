@@ -214,7 +214,7 @@ export function assertPushSafe(s: Session) {
   }
 }
 
-function encodeSave(s: Session): string | null {
+function encodeSave(s: Session, opts: { levelEdited?: boolean } = {}): string | null {
   if (!s.rawXml) return null;
   assertPushSafe(s);
   // Same choke point, for the card half: a feature that leaves an invariant
@@ -248,7 +248,7 @@ function encodeSave(s: Session): string | null {
     // one backwards is refused here rather than on device. The donor rides
     // along because a restore legitimately replaces our counter with the
     // friend's own — but only their exact value is excused, not any drop.
-    assertProgressionsSafe(was, now, s.friendXml);
+    assertProgressionsSafe(was, now, s.friendXml, opts);
     // Regatta's own half: a completed task is a field-by-field record the
     // game reads on upload, so the batch is checked against every invariant a
     // real save holds before any of it can leave. Same loaded-vs-pushed rule —
@@ -532,6 +532,9 @@ function applySaveEdits(p: SavePayload) {
   const prevXml = s.rawXml;
   const prevUnban = s.unban;
   const prevRegatta = s.regatta;
+  // Set when the Data Center raises LEVEL: the tab has no XP field, so the
+  // progression gate must honour that edit (see `assertProgressionsSafe`).
+  let levelEdited = false;
 
   // Apply compound operations first so every UI change is committed in one save.
   if (p.unbanMode) {
@@ -614,8 +617,14 @@ function applySaveEdits(p: SavePayload) {
   }
 
   if (Object.keys(revealed.stats).length) {
+    const lvlWas = Number(readAnyVar(s.rawXml, ["levelup"]) ?? NaN);
     s.stats = { ...s.stats, ...revealed.stats };
     s.rawXml = applyStatChanges(s.rawXml, s.stats);
+    const lvlNow = Number(readAnyVar(s.rawXml, ["levelup"]) ?? NaN);
+    // The Data Center has no XP field, so a level typed there can never carry
+    // its XP along. Recorded here so the progression gate honours the edit
+    // instead of refusing a button the tab cannot complete.
+    levelEdited = Number.isFinite(lvlWas) && Number.isFinite(lvlNow) && lvlNow > lvlWas;
     parts.push("stats");
   }
   if (Object.keys(revealed.profile).length) {
@@ -767,7 +776,7 @@ function applySaveEdits(p: SavePayload) {
   if (malformed) throw new Error(`Save XML không hợp lệ (${malformed}) — hủy để tránh hỏng file`);
   let fileB64: string | null;
   try {
-    fileB64 = encodeSave(s);
+    fileB64 = encodeSave(s, { levelEdited });
   } catch (e) {
     // The push gate refused this file. Undo the edit and leave the log clean
     // so the session stays usable instead of failing the same way forever.
