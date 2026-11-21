@@ -2745,6 +2745,7 @@ export function StudioApp() {
           IGG <span className="text-primary">VIP TOOL</span>
         </p>
         <span className="header-art" aria-hidden="true">
+          <span className="header-art-photo" />
           <span className="header-art-glow" />
         </span>
         <div className="header-statuses ml-auto flex items-center gap-1">

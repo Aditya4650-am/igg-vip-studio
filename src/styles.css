@@ -4115,18 +4115,31 @@ button.premium-button:active:not(:disabled) {
     mask-image: linear-gradient(90deg, transparent 0%, #000 8%, #000 92%, transparent 100%);
   }
 
-  /* The artwork itself, a touch larger than the frame so the slow pan never
-     shows an edge. */
+  /* Soft filler: the same picture, covered and blurred, so the band is full
+     width without ever cutting the sharp copy. */
   .header-art::before {
     position: absolute;
-    inset: -8% -5%;
+    inset: -16% -6%;
+    z-index: 0;
     content: "";
     background-image: url("/township-strip.png");
     background-repeat: no-repeat;
     background-size: cover;
     background-position: 50% 46%;
-    filter: saturate(1.13) contrast(1.05) brightness(0.9);
+    filter: blur(16px) saturate(1.25) brightness(0.5);
     animation: headerPan 68s ease-in-out infinite alternate;
+  }
+
+  /* The artwork itself: fitted to the band's height, centred, never cropped. */
+  .header-art-photo {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background-image: url("/township-strip.png");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: auto 100%;
+    filter: drop-shadow(0 4px 12px rgba(3, 8, 18, 0.55));
   }
 
   /* Colour grade + vignette: the picture sinks into the header instead of
@@ -4134,6 +4147,7 @@ button.premium-button:active:not(:disabled) {
   .header-art::after {
     position: absolute;
     inset: 0;
+    z-index: 2;
     content: "";
     background:
       linear-gradient(180deg, rgba(6, 11, 22, 0.62) 0%, rgba(6, 11, 22, 0) 32%, rgba(6, 11, 22, 0) 66%, rgba(6, 11, 22, 0.66) 100%),
@@ -4145,7 +4159,7 @@ button.premium-button:active:not(:disabled) {
   .header-art-glow {
     position: absolute;
     inset: 0;
-    z-index: 1;
+    z-index: 3;
     background: linear-gradient(
       104deg,
       transparent 34%,
