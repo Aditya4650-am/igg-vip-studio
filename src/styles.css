@@ -4087,3 +4087,75 @@ button.premium-button:active:not(:disabled) {
     rotate: none;
   }
 }
+
+/* ── Santa's sleigh (login only) ─────────────────────────────────────────── */
+@layer components {
+  .santa-flight {
+    position: absolute;
+    top: 9%;
+    left: 0;
+    z-index: 0;
+    width: min(560px, 44vw);
+    min-width: 300px;
+    pointer-events: none;
+    user-select: none;
+    filter: drop-shadow(0 22px 30px rgba(3, 8, 18, 0.55));
+    animation: santaSweep 46s linear infinite;
+    will-change: transform;
+  }
+
+  .santa-flight-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+    animation: santaBob 3.8s ease-in-out infinite;
+  }
+
+  .santa-sparks {
+    animation: santaSparks 1.6s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes santaSweep {
+  0% {
+    transform: translate3d(-30vw, 0, 0);
+  }
+  40% {
+    transform: translate3d(126vw, 0, 0);
+  }
+  100% {
+    transform: translate3d(126vw, 0, 0);
+  }
+}
+
+@keyframes santaBob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-1.2deg);
+  }
+  50% {
+    transform: translateY(-12px) rotate(1.4deg);
+  }
+}
+
+@keyframes santaSparks {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 0.9;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .santa-flight {
+    animation: none;
+    transform: translate3d(6vw, 0, 0);
+    opacity: 0.75;
+  }
+  .santa-flight-svg,
+  .santa-sparks {
+    animation: none;
+  }
+}
