@@ -2616,7 +2616,7 @@ export function StudioApp() {
               <div>
                 <p className="kicker">{tr("loginTitle")}</p>
                 <p className="font-display text-4xl font-semibold tracking-tight sm:text-5xl">
-                  IGG <span className="login-brand-wordmark">VIP TOOL</span>
+                  IGG <span className="login-brand-wordmark login-shimmer">VIP TOOL</span>
                 </p>
               </div>
             </div>
@@ -2627,7 +2627,8 @@ export function StudioApp() {
             </ul>
           </section>
 
-          <section className="login-card w-full p-6 sm:p-8" aria-labelledby="login-heading">
+          <section className="login-card login-card--frost w-full p-6 sm:p-8" aria-labelledby="login-heading">
+            <span className="login-card-frost" aria-hidden="true" />
             <header className="login-card-heading gate-in flex items-start gap-3">
               <span className="login-card-mark"><Mark className="size-7" /></span>
               <div className="min-w-0">

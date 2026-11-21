@@ -183,6 +183,26 @@ export function Snowfall({ variant = "scene" }: { variant?: "scene" | "app" } = 
       raf = window.requestAnimationFrame(step);
     }
 
+    // Pointer parallax for the login backdrop: the scene records the position
+    // on `main.login-scene` as two numbers and CSS does the rest (card tilt via
+    // the independent `rotate` property, so no animation is overridden).
+    const scene = canvas.closest(".login-scene") as HTMLElement | null;
+    const parallax = !reduced && !!scene && window.matchMedia("(hover: hover)").matches;
+    const onPointerMove = (e: PointerEvent) => {
+      const r = scene!.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      scene!.style.setProperty("--tilt-x", (((e.clientX - r.left) / r.width) * 2 - 1).toFixed(3));
+      scene!.style.setProperty("--tilt-y", (((e.clientY - r.top) / r.height) * 2 - 1).toFixed(3));
+    };
+    const onPointerLeave = () => {
+      scene?.style.setProperty("--tilt-x", "0");
+      scene?.style.setProperty("--tilt-y", "0");
+    };
+    if (parallax) {
+      scene!.addEventListener("pointermove", onPointerMove);
+      scene!.addEventListener("pointerleave", onPointerLeave);
+    }
+
     const onResize = () => {
       resize();
       if (reduced) draw(performance.now());
@@ -204,6 +224,10 @@ export function Snowfall({ variant = "scene" }: { variant?: "scene" | "app" } = 
       window.cancelAnimationFrame(raf);
       window.removeEventListener("resize", onResize);
       document.removeEventListener("visibilitychange", onVisibility);
+      if (parallax) {
+        scene?.removeEventListener("pointermove", onPointerMove);
+        scene?.removeEventListener("pointerleave", onPointerLeave);
+      }
     };
   }, [variant]);
 
@@ -230,6 +254,7 @@ export function WinterScene() {
       <div className="winter-stars" />
       <div className="winter-bloom" />
       <div className="winter-bokeh" />
+      <div className="winter-lights" />
       <svg className="winter-crystal" viewBox="0 0 200 200" aria-hidden="true">
         <g stroke="rgba(186, 230, 253, 0.85)" strokeWidth="1.35" fill="none" strokeLinecap="round">
           {[0, 60, 120, 180, 240, 300].map((a) => (
