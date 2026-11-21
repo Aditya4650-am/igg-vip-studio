@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { OwnerHub } from "@/components/owner-hub";
 import { CardsTab } from "@/components/cards-tab";
+import { WinterScene, Snowfall } from "@/components/winter-scene";
 import { cn } from "@/lib/utils";
 import { LANGS, isLang, t, type Lang, type Dict } from "@/lib/i18n";
 import { isDeviceId, mintDeviceId, normalizeDeviceId } from "@/lib/device-id";
@@ -2604,6 +2605,7 @@ export function StudioApp() {
   if (!token) {
     return (
       <main className="login-scene relative min-h-dvh px-4 py-8 sm:px-8">
+        <WinterScene />
         <div className="login-language absolute top-4 right-4 z-10">
           <LangSwitch lang={lang} onChange={setLangPersist} />
         </div>
@@ -2738,6 +2740,7 @@ export function StudioApp() {
 
   return (
     <div className="app-root flex min-h-dvh flex-col">
+      <Snowfall variant="app" />
       <header className="app-header sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
         <span className="header-logo"><Mark className="size-7" /></span>
         <p className="header-brand font-display font-semibold tracking-tight">

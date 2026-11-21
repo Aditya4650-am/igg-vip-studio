@@ -3734,3 +3734,207 @@ button.premium-button:active:not(:disabled) {
   }
 }
 
+
+/* ── Winter scene (login dashboard only) ───────────────────────────────────
+   A layered night sky behind the sign-in card: deep midnight gradient, two
+   aurora ribbons, a star field, a soft bloom, a snow ridge and the falling
+   crystal canvas drawn by `winter-scene.tsx`. `z-index: -1` keeps it behind
+   every child of `.login-scene` (which is `isolation: isolate`) without
+   changing one pixel of the layout. */
+@layer components {
+  .winter-scene {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .winter-sky {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 70% 55% at 50% -12%, #14356b 0%, transparent 62%),
+      radial-gradient(ellipse 50% 45% at 88% 22%, #16305c 0%, transparent 70%),
+      linear-gradient(180deg, #050a16 0%, #071228 34%, #081733 58%, #050b19 82%, #03060e 100%);
+  }
+
+  .winter-aurora {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(78px);
+    mix-blend-mode: screen;
+    opacity: 0.72;
+    will-change: transform;
+  }
+  .winter-aurora--one {
+    top: -14%;
+    left: -12%;
+    width: 62%;
+    height: 52%;
+    background: radial-gradient(closest-side, rgba(34, 211, 238, 0.34), transparent 72%);
+    animation: winterDrift 26s ease-in-out infinite alternate;
+  }
+  .winter-aurora--two {
+    top: 4%;
+    right: -16%;
+    width: 58%;
+    height: 58%;
+    background: radial-gradient(closest-side, rgba(139, 92, 246, 0.30), transparent 74%);
+    animation: winterDrift 32s ease-in-out infinite alternate-reverse;
+  }
+
+  .winter-stars {
+    position: absolute;
+    inset: 0;
+    opacity: 0.55;
+    background-image:
+      radial-gradient(1.4px 1.4px at 12% 18%, rgba(255, 255, 255, 0.9) 50%, transparent 51%),
+      radial-gradient(1.2px 1.2px at 28% 9%, rgba(226, 245, 255, 0.8) 50%, transparent 51%),
+      radial-gradient(1.6px 1.6px at 46% 26%, rgba(255, 255, 255, 0.75) 50%, transparent 51%),
+      radial-gradient(1.1px 1.1px at 63% 12%, rgba(219, 234, 254, 0.8) 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 78% 30%, rgba(255, 255, 255, 0.7) 50%, transparent 51%),
+      radial-gradient(1.2px 1.2px at 88% 8%, rgba(224, 242, 254, 0.85) 50%, transparent 51%),
+      radial-gradient(1.3px 1.3px at 5% 42%, rgba(255, 255, 255, 0.6) 50%, transparent 51%),
+      radial-gradient(1.1px 1.1px at 36% 48%, rgba(224, 242, 254, 0.55) 50%, transparent 51%);
+    animation: winterTwinkle 7s ease-in-out infinite alternate;
+  }
+
+  /* A cold light bloom under the sign-in card, so the panel reads as glass on
+     snow rather than a flat rectangle. */
+  .winter-bloom {
+    position: absolute;
+    top: 4%;
+    right: -2%;
+    width: 58%;
+    height: 80%;
+    background:
+      radial-gradient(ellipse at 52% 38%, rgba(125, 211, 252, 0.26), transparent 62%),
+      radial-gradient(ellipse at 48% 64%, rgba(167, 139, 250, 0.22), transparent 66%);
+    filter: blur(42px);
+  }
+
+  /* Out-of-focus near flakes: the depth cue that keeps the falling crystals
+     reading as "in front of" the aurora rather than painted on it. */
+  .winter-bokeh {
+    position: absolute;
+    inset: 0;
+    opacity: 0.55;
+    filter: blur(1.5px);
+    background-image:
+      radial-gradient(circle at 17% 30%, rgba(219, 234, 254, 0.22) 0 6px, transparent 7px),
+      radial-gradient(circle at 73% 16%, rgba(191, 219, 254, 0.20) 0 9px, transparent 10px),
+      radial-gradient(circle at 41% 62%, rgba(224, 242, 254, 0.16) 0 13px, transparent 14px),
+      radial-gradient(circle at 88% 58%, rgba(147, 197, 253, 0.18) 0 7px, transparent 8px),
+      radial-gradient(circle at 7% 76%, rgba(191, 219, 254, 0.14) 0 11px, transparent 12px),
+      radial-gradient(circle at 58% 88%, rgba(224, 242, 254, 0.12) 0 8px, transparent 9px);
+  }
+
+  .winter-ridge {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: min(46vh, 430px);
+    display: block;
+  }
+
+  .winter-frost {
+    position: absolute;
+    inset: 0;
+    opacity: 0.5;
+    background-image:
+      repeating-linear-gradient(102deg, rgba(186, 230, 253, 0.07) 0 1px, transparent 1px 26px),
+      repeating-linear-gradient(96deg, rgba(224, 242, 254, 0.05) 0 2px, transparent 2px 64px);
+    -webkit-mask-image: linear-gradient(180deg, transparent, #000 42%, #000 100%);
+    mask-image: linear-gradient(180deg, transparent, #000 42%, #000 100%);
+  }
+
+  /* The glacier itself: one large, slow-turning crystal behind the panel. */
+  .winter-crystal {
+    position: absolute;
+    top: 0;
+    right: -9%;
+    width: min(70vh, 720px);
+    aspect-ratio: 1;
+    opacity: 0.17;
+    filter: drop-shadow(0 0 28px rgba(125, 211, 252, 0.4));
+    animation: winterCrystalTurn 160s linear infinite;
+  }
+
+  .winter-haze {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 30vh;
+    background: linear-gradient(180deg, transparent, rgba(8, 18, 38, 0.55) 58%, rgba(3, 7, 16, 0.9));
+    filter: blur(2px);
+  }
+
+  .winter-snow {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  .winter-vignette {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 82% 78% at 50% 42%, transparent 52%, rgba(2, 6, 14, 0.55) 100%),
+      linear-gradient(180deg, rgba(2, 6, 14, 0.35), transparent 22%);
+  }
+
+  /* Dashboard fall: the same crystals, sparse and small, in front of the page
+     but under the sticky header (z-20) and every dialog. Never intercepts a
+     click — the whole canvas is pointer-events: none. */
+  .app-snow {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 10;
+    pointer-events: none;
+    user-select: none;
+  }
+}
+
+@keyframes winterDrift {
+  from {
+    transform: translate3d(-2%, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(4%, 3%, 0) scale(1.08);
+  }
+}
+
+@keyframes winterTwinkle {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 0.7;
+  }
+}
+
+@keyframes winterCrystalTurn {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .winter-aurora,
+  .winter-stars,
+  .winter-crystal {
+    animation: none;
+  }
+}
