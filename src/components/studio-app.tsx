@@ -2,7 +2,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProper
 import {
   ChevronDown,
   LoaderCircle,
-  Sparkles,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -1254,7 +1253,6 @@ export function StudioApp() {
   const [deviceId, setDeviceId] = useState("VIP-LOCAL");
   const [copied, setCopied] = useState(false);
   const [sheet, setSheet] = useState<Sheet>("none");
-  const [freshRelease, setFreshRelease] = useState<{ version: string; notes: string; downloadUrl: string; sha256: string } | null>(null);
 
   const [devices, setDevices] = useState<{ id: string; label: string }[]>([]);
   const [device, setDevice] = useState("");
@@ -1559,7 +1557,6 @@ export function StudioApp() {
         try {
           if (localStorage.getItem(marker) === "done") return;
         } catch {}
-        setFreshRelease(r);
         if (native && r.downloadUrl && r.sha256) {
           try {
             const result = await native.installUpdate(r);
@@ -2799,36 +2796,6 @@ export function StudioApp() {
 
       {view !== "control" ? (
       <>
-      {freshRelease ? (
-        <div className="update-banner flex shrink-0 items-center gap-3 px-4 py-2">
-          <Sparkles className="size-4 shrink-0 text-amber" />
-          <p className="min-w-0 flex-1 truncate text-sm">
-            <span className="font-semibold text-amber">{tr("updateReady")} {freshRelease.version}</span>
-            <span className="hidden text-muted sm:inline"> · {freshRelease.notes}</span>
-          </p>
-          <Button
-            size="sm"
-            variant="amber"
-            onClick={async () => {
-              const native = nativeBridge();
-              if (native && freshRelease.downloadUrl && freshRelease.sha256) {
-                try {
-                  await native.installUpdate(freshRelease);
-                  return;
-                } catch (e) {
-                  toast.error(e instanceof Error ? e.message : tr("updateFailed"));
-                  return;
-                }
-              }
-              try { sessionStorage.setItem("igg-vip-ver", freshRelease.version); } catch {}
-              window.location.reload();
-            }}
-          >
-            {tr("updateApply")}
-          </Button>
-        </div>
-      ) : null}
-
       <div className="console-shell app-workspace">
         <aside className="app-sidebar flex shrink-0 flex-col gap-4 rounded-lg p-4 lg:gap-5">
           <div className="sidebar-device-block">
