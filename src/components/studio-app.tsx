@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { OwnerHub } from "@/components/owner-hub";
 import { CardsTab } from "@/components/cards-tab";
 import { WinterScene, Snowfall } from "@/components/winter-scene";
-import { SantaFlight } from "@/components/santa-flight";
 import { cn } from "@/lib/utils";
 import { LANGS, isLang, t, type Lang, type Dict } from "@/lib/i18n";
 import { isDeviceId, mintDeviceId, normalizeDeviceId } from "@/lib/device-id";
@@ -2607,7 +2606,6 @@ export function StudioApp() {
     return (
       <main className="login-scene relative min-h-dvh px-4 py-8 sm:px-8">
         <WinterScene />
-        <SantaFlight />
         <div className="login-language absolute top-4 right-4 z-10">
           <LangSwitch lang={lang} onChange={setLangPersist} />
         </div>
