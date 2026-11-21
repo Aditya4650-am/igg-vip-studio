@@ -2744,6 +2744,7 @@ export function StudioApp() {
         <p className="header-brand font-display font-semibold tracking-tight">
           IGG <span className="text-primary">VIP TOOL</span>
         </p>
+        <span className="header-art" aria-hidden="true" />
         <div className="header-statuses ml-auto flex items-center gap-1">
           {license ? (
             <span className="status-chip status-chip--license inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-kicker font-semibold tracking-wide uppercase">
