@@ -26,14 +26,10 @@ export function Snowfall({ variant = "scene" }: { variant?: "scene" | "app" } = 
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     // ---- snowflake sprites -------------------------------------------------
-    // Two shapes, each drawn once per size so the frame loop only blits:
-    //  - `crystal` — the reference photo: six arms, two pairs of side branches
-    //    and a tip accent, stroked white over an ice-blue glow;
-    //  - `star` — the glacier star: six diamond blades out of a bright core
-    //    with a spike between each pair, filled white → glacial cyan.
-    // They alternate in the fall, so the field reads as snow rather than one
-    // repeated sprite.
-    const makeSprite = (size: number, kind: "crystal" | "star") => {
+    // One sprite per size and drawn once, so the frame loop only blits. The
+    // shape is the reference crystal: six arms, two pairs of side branches and
+    // a small tip accent, stroked in white over an ice-blue glow.
+    const makeSprite = (size: number) => {
       const px = Math.ceil(size * 2.4);
       const c = document.createElement("canvas");
       c.width = px;
@@ -47,41 +43,6 @@ export function Snowfall({ variant = "scene" }: { variant?: "scene" | "app" } = 
       g.lineJoin = "round";
       g.shadowColor = "rgba(125, 211, 252, 0.95)";
       g.shadowBlur = r * 0.9;
-
-      if (kind === "star") {
-        // Ice blades: white at the core, glacial cyan at the points.
-        const blade = g.createLinearGradient(0, 0, 0, -r);
-        blade.addColorStop(0, "rgba(255, 255, 255, 0.98)");
-        blade.addColorStop(0.45, "rgba(198, 236, 255, 0.94)");
-        blade.addColorStop(1, "rgba(92, 188, 255, 0.78)");
-        for (let i = 0; i < 6; i++) {
-          g.save();
-          g.rotate((Math.PI / 3) * i);
-          g.beginPath();
-          g.moveTo(0, 0);
-          g.lineTo(-r * 0.17, -r * 0.42);
-          g.lineTo(0, -r);
-          g.lineTo(r * 0.17, -r * 0.42);
-          g.closePath();
-          g.fillStyle = blade;
-          g.fill();
-          // The spike between two blades is what makes it a glacier star
-          // rather than a plain compass point.
-          g.beginPath();
-          g.moveTo(0, -r * 0.34);
-          g.lineTo(r * 0.1, -r * 0.58);
-          g.lineTo(0, -r * 0.72);
-          g.closePath();
-          g.fillStyle = "rgba(186, 230, 253, 0.78)";
-          g.fill();
-          g.restore();
-        }
-        g.beginPath();
-        g.arc(0, 0, Math.max(1, r * 0.12), 0, Math.PI * 2);
-        g.fillStyle = "rgba(255, 255, 255, 0.96)";
-        g.fill();
-        return c;
-      }
 
       const arm = () => {
         g.beginPath();
@@ -131,15 +92,12 @@ export function Snowfall({ variant = "scene" }: { variant?: "scene" | "app" } = 
     };
 
     const SIZES = light ? [5, 7, 9, 12, 16] : [7, 10, 14, 20, 28, 38];
-    const sprites = SIZES.map(
-      (size) => [makeSprite(size, "crystal"), makeSprite(size, "star")] as const,
-    );
+    const sprites = SIZES.map((size) => makeSprite(size));
 
     type Flake = {
       x: number;
       y: number;
       size: number;
-      kind: 0 | 1;
       vy: number;
       vx: number;
       rot: number;
@@ -162,7 +120,6 @@ export function Snowfall({ variant = "scene" }: { variant?: "scene" | "app" } = 
         x: Math.random() * width,
         y: top ? -40 - Math.random() * height * 0.4 : Math.random() * height,
         size: idx,
-        kind: (Math.random() < 0.5 ? 0 : 1) as 0 | 1,
         vy: light ? 6 + depth * 14 + Math.random() * 5 : 9 + depth * 26 + Math.random() * 8,
         vx: (Math.random() - 0.5) * (light ? 5 : 8),
         rot: Math.random() * Math.PI * 2,
@@ -191,7 +148,7 @@ export function Snowfall({ variant = "scene" }: { variant?: "scene" | "app" } = 
       ctx.clearRect(0, 0, width, height);
       const t = now / 1000;
       for (const f of flakes) {
-        const sprite = sprites[f.size]?.[f.kind] ?? sprites[f.size]?.[0];
+        const sprite = sprites[f.size] ?? sprites[0];
         if (!sprite) continue;
         const x = f.x + Math.sin(t * 0.6 + f.phase) * f.sway;
         ctx.save();
