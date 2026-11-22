@@ -3244,8 +3244,8 @@ button.premium-button:active:not(:disabled) {
 
 /* Rectangular banner well for named Styles/Themes (premium, no crop) */
 .app-root .chip-asset-banner {
-  width: 4.5rem !important;   /* 72px rectangular frame */
-  height: 2.5rem !important;
+  width: 7.5rem !important;   /* 120px: the wordmark needs the width to be legible */
+  height: 3rem !important;
   border-radius: 0.55rem !important;
   padding: 0.26rem !important;
   border: 1px solid rgba(167, 139, 250, 0.4) !important;
@@ -3648,8 +3648,8 @@ button.premium-button:active:not(:disabled) {
    ══════════════════════════════════════════════════════════════════ */
 
 .app-root .chip-asset {
-  width: 2.85rem !important;   /* 46px outer well */
-  height: 2.85rem !important;
+  width: 3.05rem !important;   /* 49px outer well */
+  height: 3.05rem !important;
   border-radius: 0.65rem !important;
   padding: 0.22rem !important;
   border: 1px solid rgba(167, 139, 250, 0.38) !important;
@@ -3663,8 +3663,8 @@ button.premium-button:active:not(:disabled) {
 .app-root .chip-asset-img {
   width: 100% !important;
   height: 100% !important;
-  max-width: 2.5rem !important;   /* 40px artwork — full badge/frame/title */
-  max-height: 2.5rem !important;
+  max-width: 2.7rem !important;   /* 43px artwork — full badge/frame/title */
+  max-height: 2.7rem !important;
   object-fit: contain !important;  /* contain, never cover — nothing is cut */
   object-position: center !important;
 }
