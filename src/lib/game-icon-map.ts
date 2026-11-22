@@ -133,6 +133,7 @@ export const GAME_ICON_MAP = {
     "Title 9": "/game-icons/Title_9.png",
     "Festival": "/game-icons/Style_Festival_Banner.png",
     "Pumpkin": "/game-icons/Style_Pumpkin.png",
+    "Xmas": "/game-icons/Style_Xmas.png",
     "Cooking": "/game-icons/Style_Cooking.png",
     "Easter": "/game-icons/Style_Easter.png",
     "Neon": "/game-icons/Style_Neon.png",

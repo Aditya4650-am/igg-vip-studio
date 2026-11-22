@@ -389,6 +389,10 @@ export const RAW_PROFILE: RawGroup[] = [
       {
         "id": "pumpkin",
         "label": "Pumpkin"
+      },
+      {
+        "id": "xmas_ts",
+        "label": "Xmas"
       }
     ]
   },
