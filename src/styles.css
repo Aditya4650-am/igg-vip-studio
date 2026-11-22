@@ -4204,3 +4204,21 @@ button.premium-button:active:not(:disabled) {
     animation: none;
   }
 }
+
+/* Name-style artwork is a wide wordmark; give it a wide well so the letters are
+   readable in the Profile tab instead of a sliver inside a square. */
+@layer components {
+  .chip-asset--wide {
+    width: 5.9rem;
+    height: 2.75rem;
+    padding: 0.22rem 0.3rem;
+    border-radius: 0.55rem;
+  }
+
+  .chip-asset--wide .chip-asset-img {
+    width: auto;
+    height: auto;
+    max-width: 5.3rem;
+    max-height: 2.15rem;
+  }
+}

@@ -139,7 +139,6 @@ export const GAME_ICON_MAP = {
     "Neon": "/game-icons/Style_Neon.png",
     "Underwater Violet": "/game-icons/Style_Underwater_Violet.png",
     "Gold": "/game-icons/Style_Gold.png",
-    "Bubble": "/game-icons/Soap_Bubbles.png",
     "Train": "/game-icons/Style_Train.png",
 
     // Orders group — the 4 ore tokens, artwork supplied to public/events.

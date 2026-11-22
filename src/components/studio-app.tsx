@@ -1056,6 +1056,9 @@ const Chip = memo(function Chip({
   avatar?: boolean;
 }) {
   const fallback = emoji || "✦";
+  // Name-style artwork is a wide wordmark (four-plus to one), so it needs a
+  // wide well; inside a square one it shrinks to a sliver nobody can read.
+  const wideArt = !!iconSrc && /\/style_/i.test(iconSrc);
   return (
     <button
       type="button"
@@ -1078,7 +1081,12 @@ const Chip = memo(function Chip({
       </span>
       {iconSrc ? (
         <span
-          className={cn("chip-asset", avatar && "chip-asset-avatar", banner && "chip-asset-banner")}
+          className={cn(
+            "chip-asset",
+            avatar && "chip-asset-avatar",
+            banner && "chip-asset-banner",
+            wideArt && "chip-asset--wide",
+          )}
           aria-hidden="true"
         >
           <img
