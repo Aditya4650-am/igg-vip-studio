@@ -31,6 +31,7 @@ import {
   isTownUnchanged,
   maxBuildingsStash,
   maxFragments,
+  parseGameFriends,
   parseInvitedFriends,
   parseLocalFriends,
   parseOwnMeta,
@@ -345,7 +346,7 @@ export function connectLoad(token: string, device: string, _saveXml?: string, _p
       : null;
     const stats = parseStats(opened.xml);
     const barn = barnInfo(opened.xml);
-    const friends = parseInvitedFriends(opened.xml);
+    const friends = parseGameFriends(opened.xml);
     const ownMeta = parseOwnMeta(opened.xml);
     const s: Session = {
       id: sessionId,
@@ -822,7 +823,7 @@ export function refreshBarn(token: string, sessionId: string) {
 export function loadFriends(token: string, sessionId: string) {
   const s = requireSession(sessionId, token);
   if (!s.rawXml) throw new Error("Load a real mGameInfo save before refreshing friends");
-  s.friends = parseInvitedFriends(s.rawXml);
+  s.friends = parseGameFriends(s.rawXml);
   s.log.push(`Friends refreshed: ${s.friends.length}`);
   return snapshot(s);
 }

@@ -8,7 +8,7 @@ process.env.IGG_VIP_URL = "";
 const studio = await import("./server/studio.server.ts");
 const { verifyLicenseKey } = await import("./server/license.server.ts");
 const { findUnbalancedTag } = await import("./server/township/xml-edit.server.ts");
-const { assertNoForeignIdentity, applyDesban, assertCoopIdentityKept, cloneDecorOnly } = await import("./server/township/desban.server.ts");
+const { assertNoForeignIdentity, applyDesban, assertCoopIdentityKept, cloneDecorOnly, parseGameFriends } = await import("./server/township/desban.server.ts");
 const { avatarEmoji, avatarIconPath, AVATAR_EMOJIS, AVATAR_ICON_MAX, AVATAR_MAX } =
   await import("./catalogs.ts");
 const { iconForBarn } = await import("./game-icon-map.ts");
@@ -2820,4 +2820,37 @@ test("profile: a save wearing a newly measured frame is not refused by the shape
     [],
     "every frame id measured in a real save must be a known id",
   );
+});
+
+test("friends: the in-game list is read from the save, not only the invite block", () => {
+  // A real save keeps the player's friends in <FollowedFriendIds>, and the
+  // invite block is empty on most accounts — reading only that (or only
+  // LocalInfo's platform roster) is why a scan showed no real friends.
+  const save =
+    `<root><Global><Var name="cityId" v="ME00000000"/>` +
+    `<FollowedFriendIds>` +
+    `<friend id="hao123" city_name="hao"/>` +
+    `<friend id="APtown1" city_name="AP Town"/>` +
+    `</FollowedFriendIds>` +
+    `<FriendIds><friend id="snowy99" city_name="snowy"/></FriendIds>` +
+    `<InvitedFriends/>` +
+    `</Global></root>`;
+  assert.deepEqual(
+    parseGameFriends(save).map((f) => [f.id, f.name, f.type]),
+    [
+      ["hao123", "hao", "friend"],
+      ["APtown1", "AP Town", "friend"],
+      ["snowy99", "snowy", "friend"],
+    ],
+  );
+
+  // A pending request stays a request; the same id is never listed twice.
+  const withRequest = save.replace(
+    "<InvitedFriends/>",
+    '<InvitedFriends><friend id="hao123" city_name="hao"/><friend id="newbie1" city_name="new"/></InvitedFriends>',
+  );
+  const all = parseGameFriends(withRequest);
+  assert.equal(all.filter((f) => f.id === "hao123").length, 1, "one entry per friend id");
+  assert.equal(all.find((f) => f.id === "newbie1")?.type, "request");
+  assert.deepEqual(parseGameFriends("<root><Global/></root>"), [], "no list, no friends");
 });

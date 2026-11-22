@@ -37,7 +37,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { decodeLocalInfoBase64, fetchCityXml, parseLocalFriends, parseOwnMeta } from "./desban.server";
+import { decodeLocalInfoBase64, fetchCityXml, parseGameFriends, parseLocalFriends, parseOwnMeta } from "./desban.server";
 import { CARD_IDS } from "./cards.server";
 
 export type CardFriend = { id: string; name: string; level: number };
@@ -364,6 +364,7 @@ export async function loadCardInfo(
   token: string,
   sessionId: string,
   b64: string,
+  saveXml?: string | null,
 ): Promise<CardLoadResult> {
   const xml = decodeLocalInfoBase64(b64);
   const meta = parseOwnMeta(xml);
@@ -377,9 +378,31 @@ export async function loadCardInfo(
     throw new Error("LocalInfo không chứa cityId — kiểm tra lại bản save đang mở.");
   }
 
-  const friends: CardFriend[] = parseLocalFriends(xml)
-    .map((f) => ({ id: f.id, name: f.name, level: f.level }))
-    .filter((f) => f.id !== meta.cityId);
+  // The game's own friend list lives in the save (`<FollowedFriendIds>`), and
+  // LocalInfo carries the platform roster. Either one alone is incomplete —
+  // reading only LocalInfo is why the tab showed a friend list that did not
+  // match the game. Merge both, save first so the in-game names win.
+  const fromSave = (saveXml ? parseGameFriends(saveXml) : []).map((f) => ({
+    id: f.id,
+    name: f.name,
+    level: f.level,
+  }));
+  const fromLocal = parseLocalFriends(xml).map((f) => ({ id: f.id, name: f.name, level: f.level }));
+  const merged = new Map<string, CardFriend>();
+  for (const f of [...fromSave, ...fromLocal]) {
+    if (!f.id || f.id === meta.cityId) continue;
+    const prev = merged.get(f.id);
+    if (!prev) {
+      merged.set(f.id, f);
+      continue;
+    }
+    merged.set(f.id, {
+      id: f.id,
+      name: prev.name && prev.name !== prev.id ? prev.name : f.name,
+      level: prev.level || f.level,
+    });
+  }
+  const friends: CardFriend[] = [...merged.values()];
 
   const prev = accounts.get(sessionId);
   const ident = ownIdentity(xml, meta.cityId, prev?.name ?? "");

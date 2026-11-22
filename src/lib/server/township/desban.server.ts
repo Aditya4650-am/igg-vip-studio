@@ -1102,6 +1102,37 @@ function attrFirst(attrs: Record<string, string>, names: string[]): string {
   return "";
 }
 
+/**
+ * The friends the game itself lists in `mGameInfo.xml`.
+ *
+ * A real save keeps them in `<FollowedFriendIds><friend id="…" city_name="…"/>`
+ * — that is the in-game friend list, and it is the one the player sees. It is
+ * **not** `InvitedFriends` (pending requests) and **not** LocalInfo (the
+ * platform's own roster), which is why reading either of those alone shows a
+ * friend list that does not match the game.
+ */
+export function parseGameFriends(xml: string): Friend[] {
+  const out = new Map<string, Friend>();
+  const blocks = ["FollowedFriendIds", "FriendIds", "InvitedFriends"];
+  for (const block of blocks) {
+    const body = xml.match(new RegExp(`<${block}\\b[^>]*>([\\s\\S]*?)</${block}>`, "i"))?.[1] ?? "";
+    for (const m of body.matchAll(/<([A-Za-z_][A-Za-z0-9_.:-]*)\b[^>]*>/g)) {
+      const attrs = parseAttrs(m[0]!);
+      const id = attrFirst(attrs, ["city_id", "cityid", "id", "fromid"]);
+      if (!/^[A-Za-z0-9]+$/.test(id) || out.has(id)) continue;
+      const name = attrFirst(attrs, ["city_name", "cityname", "name", "displayname", "playername", "nickname", "nick"]);
+      const levelRaw = attrFirst(attrs, ["level", "citylevel", "playerlevel"]);
+      out.set(id, {
+        id,
+        name: name || id,
+        level: /^\d+$/.test(levelRaw) ? Number(levelRaw) : 0,
+        type: block === "InvitedFriends" ? "request" : "friend",
+      });
+    }
+  }
+  return [...out.values()];
+}
+
 export function parseInvitedFriends(xml: string): Friend[] {
   const out: Friend[] = [];
   const block = xml.match(/<InvitedFriends\b[^>]*>([\s\S]*?)<\/InvitedFriends>/i)?.[1] ?? "";

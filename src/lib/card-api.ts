@@ -13,7 +13,10 @@ export const cardsLoadInfo = createServerFn({ method: "POST" })
     const { requireToken } = await import("./server/license.server");
     requireToken(data.token);
     const { loadCardInfo } = await import("./server/township/cardsend.server");
-    return loadCardInfo(data.token, data.sessionId, data.b64);
+    const { sessionSaveXml } = await import("./server/studio.server");
+    // The in-game friend list is in the save; LocalInfo alone shows the
+    // platform roster, which is why the tab looked empty of real friends.
+    return loadCardInfo(data.token, data.sessionId, data.b64, sessionSaveXml(data.token, data.sessionId));
   });
 
 export const cardsSend = createServerFn({ method: "POST" })
