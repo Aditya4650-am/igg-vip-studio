@@ -10,6 +10,7 @@ import { shellErrorMessage } from "./township/save-decode.server";
 import { findUnbalancedTag } from "./township/xml-edit.server";
 import { applyBarnCapacity, applyBarnItems, barnInfo, ensureBarnCapacity } from "./township/barn.server";
 import { assertRegattaSafe, injectAvatars, injectItems, injectProfile, injectRegata, injectSeason, injectSkins, injectUpgradeLevels, inspectRegatta, parseProfileUnlocked, upgradeMaxLevel, discoverUpgrades, REGATTA_DEFAULT_TASKS, REGATTA_MAX_TASKS, UPGRADE_REF_CAP } from "./township/inject.server";
+import { readSeasonPassState, seasonPassOptions, swapSeasonPass } from "./township/season-pass.server";
 import { grantArtifacts } from "./township/museum.server";
 import { assertCardCollectionsSafe } from "./township/cards.server";
 import { assertProgressionsSafe, assertSaveShapeSafe, stripUnknownAvatars } from "./township/save-shape.server";
@@ -31,7 +32,6 @@ import {
   isTownUnchanged,
   maxBuildingsStash,
   maxFragments,
-  parseGameFriends,
   parseInvitedFriends,
   parseLocalFriends,
   parseOwnMeta,
@@ -77,7 +77,7 @@ export type Session = {
   decor: string[];
   barn: BarnState;
   zoo: ZooPaddock[];
-  season: { premium: boolean; score: number };
+  season: { premium: boolean; score: number; id?: string | null; theme?: string | null };
   regatta: { tasks: number; score: number } | null;
   friends: Friend[];
   friendCity: string | null;
@@ -346,7 +346,7 @@ export function connectLoad(token: string, device: string, _saveXml?: string, _p
       : null;
     const stats = parseStats(opened.xml);
     const barn = barnInfo(opened.xml);
-    const friends = parseGameFriends(opened.xml);
+    const friends = parseInvitedFriends(opened.xml);
     const ownMeta = parseOwnMeta(opened.xml);
     const s: Session = {
       id: sessionId,
@@ -368,7 +368,10 @@ export function connectLoad(token: string, device: string, _saveXml?: string, _p
       loadedXml: opened.xml.replace(/^\uFEFF/, ""),
       barn,
       zoo: discoverZoo(opened.xml),
-      season: { premium: /premium="1"/i.test(opened.xml), score: Number(opened.xml.match(/SeasonTicket[^>]*score="(\d+)"/i)?.[1] ?? 0) },
+      season: (() => {
+        const st = readSeasonPassState(opened.xml);
+        return { premium: st.premium, score: st.score, id: st.id, theme: st.theme };
+      })(),
       regatta: null,
       friends,
       friendCity: null,
@@ -444,6 +447,9 @@ export type SavePayload = {
    *  [1, BLOOM_TOKENS_MAX], never trusted from the client. */
   frozenTokens?: number;
   season?: boolean;
+  /** Previous Golden Pass season id (see `SEASON_PASSES`). Swaps the active
+   *  `<SeasonTicket>` to that season and opens it at its full score. */
+  seasonPass?: string;
   unbanMode?: "inicial" | "completo" | "novo";
   decorFragments?: boolean;
   decorClone?: boolean;
@@ -592,6 +598,22 @@ function applySaveEdits(p: SavePayload) {
     s.rawXml = injectSeason(s.rawXml, "1", "1002");
     s.season = { premium: true, score: 1002 };
     parts.push("season-pass");
+  }
+  if (p.seasonPass) {
+    // Same rollback rule as the regatta refusal: earlier edits in this batch
+    // have already rewritten `s.rawXml`, so a swap that throws must leave the
+    // session exactly as it was or the next push applies them twice.
+    try {
+      s.rawXml = swapSeasonPass(s.rawXml, String(p.seasonPass));
+    } catch (e) {
+      s.rawXml = prevXml;
+      s.unban = prevUnban;
+      s.regatta = prevRegatta;
+      throw e;
+    }
+    const st = readSeasonPassState(s.rawXml);
+    s.season = { premium: st.premium, score: st.score, id: st.id, theme: st.theme };
+    parts.push(`pass-${p.seasonPass}`);
   }
   // Bloom & Buzz tokens. A refusal here ("save chưa có ví token") throws before
   // anything else in this batch is committed — `applySave` restores the whole
@@ -823,7 +845,7 @@ export function refreshBarn(token: string, sessionId: string) {
 export function loadFriends(token: string, sessionId: string) {
   const s = requireSession(sessionId, token);
   if (!s.rawXml) throw new Error("Load a real mGameInfo save before refreshing friends");
-  s.friends = parseGameFriends(s.rawXml);
+  s.friends = parseInvitedFriends(s.rawXml);
   s.log.push(`Friends refreshed: ${s.friends.length}`);
   return snapshot(s);
 }
@@ -1013,6 +1035,9 @@ export function snapshot(s: Session) {
       items: cloakBarnItems(s.barn.items),
     },
     season: s.season,
+    // The Golden Pass tab's Previous Pass list: the seasons this build ships
+    // content for, with the one the save is currently showing marked.
+    seasonPasses: seasonPassOptions(s.rawXml ?? ""),
     regatta: s.regatta,
     regattaInfo: inspectRegatta(s.rawXml ?? ""),
     // Bloom & Buzz wallet readout for the Events tab — a report, never a gate.

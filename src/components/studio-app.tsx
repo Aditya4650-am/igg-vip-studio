@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { OwnerHub } from "@/components/owner-hub";
 import { CardsTab } from "@/components/cards-tab";
+import { SeasonPassTab } from "@/components/season-pass-tab";
 import { WinterScene, Snowfall } from "@/components/winter-scene";
 import { cn } from "@/lib/utils";
 import { LANGS, isLang, t, type Lang, type Dict } from "@/lib/i18n";
@@ -37,7 +38,7 @@ import {
   restoreFreshStart,
 } from "@/lib/studio-api";
 
-type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "regatta" | "barn" | "museum" | "zoo" | "upgrades" | "cards" | "newgame" | "events";
+type Tab = "data" | "profile" | "avatars" | "skins" | "unban" | "decor" | "sticker" | "items" | "regatta" | "season" | "barn" | "museum" | "zoo" | "upgrades" | "cards" | "newgame" | "events";
 type SessionSnap = Awaited<ReturnType<typeof connectLoad>>;
 type Catalogs = Awaited<ReturnType<typeof getCatalogs>>;
 type UnbanMode = "inicial" | "completo" | "novo";
@@ -136,7 +137,7 @@ function downloadText(name: string, text: string) {
 // tabs keep their exact positions and only the second row gains a member.
 // "events" is appended last for the same reason: it adds a slot to the second
 // row without moving any tab that already exists.
-const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "regatta", "barn", "museum", "zoo", "upgrades", "cards", "newgame", "events"];
+const TABS: Tab[] = ["data", "profile", "avatars", "skins", "unban", "decor", "sticker", "items", "regatta", "season", "barn", "museum", "zoo", "upgrades", "cards", "newgame", "events"];
 // Premium tab bar: 8 primary slots + a "More" overflow for the rest, so
 // labels never compress or wrap. Derived from TABS — one source of truth.
 const PRIMARY_TABS: Tab[] = TABS.slice(0, 8);
@@ -151,6 +152,7 @@ const TAB_KEY: Record<Tab, keyof Dict> = {
   sticker: "tabSticker",
   items: "tabItems",
   regatta: "regatta",
+  season: "seasonTab",
   barn: "tabBarn",
   museum: "tabMuseum",
   zoo: "tabZoo",
@@ -169,6 +171,7 @@ const TAB_EMOJI: Record<Tab, string> = {
   sticker: "💬",
   items: "📦",
   regatta: "⛵",
+  season: "🎟️",
   barn: "🌾",
   museum: "🏛️",
   zoo: "🐾",
@@ -1337,6 +1340,10 @@ export function StudioApp() {
   // its own log instead of a generic "push failed".
   const saveErrRef = useRef("");
   const [pendingSeason, setPendingSeason] = useState(false);
+  // Which previous Golden Pass season this push should open at maximum. One id,
+  // because the save holds exactly one active `<SeasonTicket>` — a swap, not a
+  // list of passes.
+  const [pendingSeasonPass, setPendingSeasonPass] = useState<string | null>(null);
   const [pendingBloom, setPendingBloom] = useState(false);
   // Frozen Fortune (`DragonNest` in game data) is the same wallet mechanism,
   // so it gets its own pending flag rather than a mode on Bloom's — one card,
@@ -1763,6 +1770,7 @@ export function StudioApp() {
       setMuseumSel(new Set());
       setPendingRegatta(false);
       setPendingSeason(false);
+      setPendingSeasonPass(null);
       setPendingBloom(false);
       setPendingFrozen(false);
       setPendingUnban(null);
@@ -1796,6 +1804,7 @@ export function StudioApp() {
     profileSel.count + avatarSel.count + skinSel.count + itemSel.count + zooSel.count + decorSel.size + stickerSel.size + museumSel.size +
     upgradeFactorySel.count + upgradeTrainSel.count + upgradeIslandSel.count +
     (barnDirty ? 1 : 0) + (pendingRegatta ? 1 : 0) + (pendingSeason ? 1 : 0) + (pendingUnban ? 1 : 0) +
+    (pendingSeasonPass ? 1 : 0) +
     (pendingBloom ? 1 : 0) + (pendingFrozen ? 1 : 0) +
     (pendingDecorFragments ? 1 : 0) + (pendingDecorClone ? 1 : 0) + (pendingDecorMaxAll ? 1 : 0) +
     (pendingTownClone ? 1 : 0) +
@@ -1976,6 +1985,7 @@ export function StudioApp() {
           regatta: pendingRegatta || forceRegatta !== undefined,
           regattaTasks: forceRegatta ? forceRegatta.tasks : pendingRegatta ? regattaTasks : undefined,
           season: pendingSeason,
+          seasonPass: pendingSeasonPass ?? undefined,
           bloomTokens: opts?.bloom ?? (pendingBloom ? bloomTokens : undefined),
           frozenTokens: opts?.frozen ?? (pendingFrozen ? frozenTokens : undefined),
           unbanMode: pendingUnban ?? undefined,
@@ -2019,6 +2029,7 @@ export function StudioApp() {
       upgradeIslandSel.clear();
       setPendingRegatta(false);
       setPendingSeason(false);
+      setPendingSeasonPass(null);
       setPendingBloom(false);
       setPendingFrozen(false);
       if (unbanStage) setCopyStage((c) => Math.max(c, unbanStage));
@@ -2588,6 +2599,7 @@ export function StudioApp() {
     sticker: stickerSel.size,
     items: itemSel.count,
     regatta: pendingRegatta ? regattaTasks : 0,
+    season: pendingSeasonPass ? 1 : 0,
     barn: barnDirty ? 1 : 0,
     museum: museumSel.size,
     zoo: zooSel.count,
@@ -4262,6 +4274,20 @@ export function StudioApp() {
 
                 {tab === "cards" && (
                   <CardsTab token={token} sessionId={session.sessionId} device={device} tr={tr} />
+                )}
+
+                {tab === "season" && (
+                  <SeasonPassTab
+                    season={session.season}
+                    passes={session.seasonPasses ?? []}
+                    pending={pendingSeasonPass}
+                    busy={busy}
+                    onPick={(id) => {
+                      setPendingSeasonPass(id);
+                      toast.success(`${tr("seasonPrevQueued")} · ${id}`);
+                    }}
+                    tr={tr}
+                  />
                 )}
               </div>
             )}

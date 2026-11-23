@@ -93,6 +93,9 @@ const saveSchema = z.object({
   // payload keeps the shape it was shipped with.
   frozenTokens: z.number().int().min(1).max(100000).optional(),
   season: z.boolean().optional(),
+  // Previous Golden Pass season id; validated against `SEASON_PASSES` on the
+  // server, which refuses anything outside the seasons this build ships.
+  seasonPass: z.string().max(8).optional(),
   unbanMode: z.enum(["inicial", "completo", "novo"]).optional(),
   decorFragments: z.boolean().optional(),
   decorClone: z.boolean().optional(),
