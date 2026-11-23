@@ -304,48 +304,40 @@ test("regata mints its own counter when the live week is empty but an archive su
   assert.doesNotThrow(() => assertRegattaSafe(xml, out), "a fresh counter must pass the push gate");
 });
 
-test("regata's room comes from the save's own completions, not from how old the window is", () => {
-  // The rule this replaces refused a window opened ten minutes ago because
-  // only a couple of tasks fit between the block's start and now at the daily
-  // spacing — the removed `window_closed`, arithmetic about how much of the
-  // week had passed presented as a rule the game states. The window is no
-  // longer a reason for anything: what bounds a batch is the save's own newest
-  // completion, because two completions may not sit closer than the daily
-  // spacing, and the rolling day may never hold more than `2 * TaskQuota`.
+test("regata takes any count, on a young window too — the daily envelope no longer refuses", () => {
+  // Two refusals used to live here: `window_closed` (a week opened that
+  // afternoon could not take 20) and `day_full` (a rolling 24 h above
+  // `2 * TaskQuota` was refused). Both are gone: the count is whatever the user
+  // types. What survives is the *shape* — new records still take the safe
+  // spacing when the window holds it, and never share a second.
   const justOpened = youngRegattaSave();
-  // Its one record finished seven minutes ago, so today's envelope has no room
-  // yet — and the refusal says *that*, in the game's own numbers, instead of
-  // claiming the window is too short.
-  const state = inspectRegatta(justOpened, 20);
-  assert.equal(state.reason, "day_full");
-  assert.equal(state.dayRoom, 0);
-  assert.throws(() => injectRegata(justOpened, 20), /TaskQuota|24 giờ/);
-
-  // The same week, once its newest completion is older than the spacing, takes
-  // a batch: room comes back with time passing, not with the window growing.
-  const aged = youngRegattaSave(6 * 3600);
-  const agedStart = Number(/<Regata\b[^>]*\bstartTime="(\d+)"/.exec(aged)![1]);
-  assert.ok(inspectRegatta(aged, 5).dayRoom >= 5, "six hours of room holds five spaced tasks");
-  assert.equal(inspectRegatta(aged, 5).reason, "ok");
-  const out = injectRegata(aged, 5);
-
+  const young = inspectRegatta(justOpened, 20);
+  assert.equal(young.reason, "ok", "a young week refuses nothing");
+  assert.notEqual(young.current, undefined);
+  const out = injectRegata(justOpened, 20);
   const times = [...out.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)].map((m) => Number(m[1]));
-  assert.equal(times.length, 6, "the save's own record plus the five it was asked to add");
-  // Read the wall clock *after* the push: `injectRegata` dates every record
-  // before its own `now`, so a check against a clock taken earlier would race
-  // with the seconds the loop itself spends.
+  assert.equal(times.length, 21, "the save's own record plus the twenty it was asked to add");
   const wallNow = Math.floor(Date.now() / 1000);
-  const gap = regattaDensityGap(regattaDayCap(inspectRegatta(aged, 1).quota));
-  let prev = 0;
-  for (let i = 0; i < times.length; i++) {
-    const t = times[i]!;
-    if (i) assert.ok(t - times[i - 1]! >= gap, "two completions sat closer than the day allows");
-    assert.ok(t >= prev, "the block stays ordered while it grows");
-    assert.ok(t >= agedStart, "no completion sits before the week opened");
-    assert.ok(t < wallNow, "and none is dated in the future");
-    prev = t;
+  const start = Number(/<Regata\b[^>]*\bstartTime="(\d+)"/.exec(out)![1]);
+  for (let i = 1; i < times.length; i++) {
+    assert.ok(times[i]! - times[i - 1]! >= 1, "no two completions share a second");
   }
-  assert.doesNotThrow(() => assertRegattaSafe(aged, out), "an aged young week still passes every gate");
+  for (const t of times) {
+    assert.ok(t >= start, "no completion sits before the week opened");
+    assert.ok(t < wallNow, "and none is dated in the future");
+  }
+  assert.doesNotThrow(() => assertRegattaSafe(justOpened, out), "a young week still passes the ban gate");
+
+  // The same save, aged: spacing widens back to the safe gap on its own, so a
+  // batch is spread rather than packed whenever the window has the room.
+  const aged = youngRegattaSave(6 * 3600);
+  const agedOut = injectRegata(aged, 5);
+  const agedTimes = [...agedOut.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)].map((m) => Number(m[1]));
+  const gap = regattaDensityGap(regattaDayCap(inspectRegatta(aged, 1).quota));
+  for (let i = 1; i < agedTimes.length; i++) {
+    assert.ok(agedTimes[i]! - agedTimes[i - 1]! >= gap, "an aged week keeps the full safe gap");
+  }
+  assert.doesNotThrow(() => assertRegattaSafe(aged, agedOut), "an aged young week still passes every gate");
 });
 
 test("regata counts how many tasks to add, so a save already holding some still takes more", () => {
@@ -362,18 +354,20 @@ test("regata counts how many tasks to add, so a save already holding some still 
     "the save's own record plus the one more it was asked for",
   );
 
-  // Whatever is typed, a week is never asked to hold more than the largest
-  // real week on record (73, measured in `<PrevRegata>`). The only blocks
-  // bigger than that anywhere in the corpus are the old fabricator's 105.
-  // All that survives is a bound large enough that a stray digit cannot ask
-  // the injector to emit a million records — and, above it, today's own
-  // envelope, which is what actually bounds a push.
+  // Whatever is typed, a week takes it: the daily envelope no longer refuses a
+  // batch, and the only bound left on the number is the typo guard that stops a
+  // stray digit from asking for a million records.
   assert.equal(regattaWant(9999), REGATTA_MAX_TASKS);
-  const room = inspectRegatta(full, 1).dayRoom;
-  assert.equal(room, 2 * REGATTA_MAX_PER_DAY, "a save stating no TaskQuota is held to the game's own 17");
-  assert.equal(inspectRegatta(full, room).reason, "ok", "today's whole envelope is still pressable");
-  assert.equal(inspectRegatta(full, REGATTA_MAX_TASKS).reason, "day_full", "a thousand tasks in one day is not a count the game can reach");
-  assert.throws(() => injectRegata(full, REGATTA_MAX_TASKS), /TaskQuota|24 giờ/);
+  assert.equal(inspectRegatta(full, 1).reason, "ok");
+  assert.equal(inspectRegatta(full, 2 * REGATTA_MAX_PER_DAY).reason, "ok", "a whole day's envelope is pressable");
+  assert.equal(inspectRegatta(full, REGATTA_MAX_TASKS).reason, "ok", "and so is a thousand tasks");
+  const big = injectRegata(full, 300);
+  assert.equal(
+    (big.match(/<MyOldTask\b/g) ?? []).length,
+    301,
+    "the batch the user typed is the batch that lands",
+  );
+  assert.doesNotThrow(() => assertRegattaSafe(full, big), "and the ban gate still accepts the shape");
 });
 
 // <Regata>'s own <Vars> counts the records in that same block. Measured on all
@@ -1022,39 +1016,31 @@ test("regata never dates a completion before the ones already in the block", () 
   assert.doesNotThrow(() => assertRegattaSafe(xml, out), "an ordered batch must pass the gate");
 });
 
-test("regata fills today's envelope and refuses the next task, instead of piling one day high", () => {
+test("regata spreads a batch far past the old daily envelope instead of refusing it", () => {
   // The fabricator's output was 105 records all landing on **one** calendar
-  // day; the save behind the ban report held 200 completions in a rolling day
-  // against its own `TaskQuota` of 15, and round 2 crammed 101 of them into 55
-  // seconds. A rolling day may hold at most `2 * quota` (the measured envelope:
-  // a real block tops out at 21 against a quota of 11, because the reset sits
-  // off the UTC day), spaced `regattaDensityGap` apart — so the count no real
-  // save can reach is the one refused, with the number that does fit named.
+  // day, and the save behind the ban report held 200 completions in a rolling
+  // day against its own `TaskQuota` of 15. That refusal is gone (2026-11-24):
+  // the count is taken as typed. What survives is the shape — records still aim
+  // for `regattaDensityGap(2 * quota)` and never share a second, so a large
+  // batch is spread out rather than piled onto one day.
   const xml = liveRegattaSave();
   const quota = inspectRegatta(xml, 1).quota;
   const cap = regattaDayCap(quota);
-  const gap = regattaDensityGap(cap);
-  const room = inspectRegatta(xml, 1).dayRoom;
-  assert.equal(room, cap, "an untouched day leaves the whole envelope free");
-  assert.equal(inspectRegatta(xml, room).reason, "ok", "the envelope itself is pressable");
-  assert.equal(inspectRegatta(xml, room + 1).reason, "day_full", "one past the envelope is not");
-  assert.throws(() => injectRegata(xml, room + 1), /TaskQuota|24 giờ/, "the push refuses what the badge refuses");
+  const over = cap + 1;
 
-  const out = injectRegata(xml, room);
+  assert.equal(inspectRegatta(xml, over).reason, "ok", "one past the old envelope is still pressable");
+
+  const out = injectRegata(xml, over);
   const times = [...out.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)].map((m) => Number(m[1]));
-  assert.equal(times.length, room + 1, "the save's own record plus the whole envelope");
+  assert.equal(times.length, over + 1, "the save's own record plus every task asked for");
   const winStart = Number(/<Regata\b[^>]*\bstartTime="(\d+)"/.exec(xml)![1]);
   const now = Math.floor(Date.now() / 1000);
-  let busiest = 1;
-  for (let i = 0, j = 0; i < times.length; i++) {
-    if (i) assert.ok(times[i]! - times[i - 1]! >= gap, `two completions sat ${times[i]! - times[i - 1]!}s apart`);
-    while (times[i]! - times[j]! >= 86400) j++;
-    busiest = Math.max(busiest, i - j + 1);
+  for (let i = 0; i < times.length; i++) {
+    if (i) assert.ok(times[i]! > times[i - 1]!, "no two completions share a second");
     assert.ok(times[i]! >= winStart, "no completion sits before the week opened");
     assert.ok(times[i]! < now, "and none is dated in the future");
   }
-  assert.ok(busiest <= cap, `a rolling day took ${busiest} of the ${cap} the save's quota allows`);
-  assert.doesNotThrow(() => assertRegattaSafe(xml, out), "a full-envelope batch passes every gate");
+  assert.doesNotThrow(() => assertRegattaSafe(xml, out), "a batch past the old envelope passes every gate");
 });
 
 test("the daily quota is the game's own number, read out of the save", () => {
@@ -1079,32 +1065,19 @@ test("the daily quota is the game's own number, read out of the save", () => {
   const times = (xml: string) =>
     [...xml.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)].map((m) => Number(m[1])).sort((a, b) => a - b);
 
-  // The quota sets both the envelope and the spacing: at quota 17 a rolling
-  // day may hold 34 completions, at quota 9 it holds 18 — so a batch above
-  // that is refused, and the number that fits is what both the badge and the
-  // refusal name. The boundaries this replaces — 68 ok / 69 `window_closed` at
-  // quota 17, 36 / 37 at quota 9 — were the window running out at the single-
-  // reset spacing, which is the same arithmetic that told a save whose regatta
-  // opened that afternoon that its window was too short.
-  assert.equal(inspectRegatta(none, 1).dayRoom, 2 * REGATTA_MAX_PER_DAY, "quota 17 leaves 34 in a rolling day");
-  assert.equal(inspectRegatta(at("9"), 1).dayRoom, 18, "a save stating quota 9 leaves 18");
-  assert.equal(inspectRegatta(none, 100).reason, "day_full", "100 in one day is not a state a quota-17 save can reach");
-  assert.equal(inspectRegatta(at("9"), 100).reason, "day_full", "nor one a quota-9 save can");
-  assert.throws(() => injectRegata(at("9"), 100), /TaskQuota 9/, "the push names the save's own quota");
+  // The quota still sets the spacing a batch **aims** for — a save at quota 9
+  // gets a wider gap than one at 17 — but it no longer refuses anything. That
+  // is the whole difference: the number is a shape guard, not a limit.
+  assert.equal(inspectRegatta(none, 100).reason, "ok", "100 in one day is taken as typed");
+  assert.equal(inspectRegatta(at("9"), 100).reason, "ok", "and so is 100 on a quota-9 save");
 
-  // What it writes obeys its own quota rather than merely claiming to.
+  // What it writes still honours the spacing its own quota asks for.
   const low = times(injectRegata(at("9"), 18));
   assert.equal(low.length, 19, "the quota-9 batch really is written (one record was already there)");
   const gap = regattaDensityGap(regattaDayCap(9));
   for (let i = 1; i < low.length; i++) {
     assert.ok(low[i]! - low[i - 1]! >= gap, "two completions sat closer than a quota-9 day allows");
   }
-  let busiestRolling = 0;
-  for (let i = 0, j = 0; i < low.length; i++) {
-    while (low[i]! - low[j]! >= 86400) j++;
-    busiestRolling = Math.max(busiestRolling, i - j + 1);
-  }
-  assert.ok(busiestRolling <= 18, `a rolling day took ${busiestRolling} of the 18 a quota-9 day allows`);
 });
 
 test("regatta takes any count the window can hold — the ceiling is a typo guard, not a rule", () => {
@@ -1120,26 +1093,22 @@ test("regatta takes any count the window can hold — the ceiling is a typo guar
   assert.equal(regattaWant(100), 100, "100 is taken as typed");
   assert.equal(regattaWant(REGATTA_MAX_TASKS + 1), REGATTA_MAX_TASKS, "a typo still cannot ask for a million");
 
-  // The count is still taken as typed — no snap-back, no paragraph of prose
-  // about a limit nobody asked for. What bounds a push is the save's own
-  // daily envelope, and the badge already names that number, so a count past
-  // it is refused with "only N fit" instead of being written anyway.
+  // The count is taken as typed — no snap-back, no paragraph of prose about a
+  // limit nobody asked for, and no daily-envelope refusal either: the only
+  // bound left is the typo guard above.
   const xml = liveRegattaSave();
-  const cap = regattaDayCap(inspectRegatta(xml, 1).quota);
-  const gap = regattaDensityGap(cap);
-  assert.equal(inspectRegatta(xml, cap).reason, "ok", "the whole envelope is open to the batch");
-  assert.equal(inspectRegatta(xml, cap + 1).reason, "day_full", "one past the envelope is not");
+  assert.equal(inspectRegatta(xml, REGATTA_MAX_TASKS).reason, "ok", "even the typo ceiling is pressable");
 
-  const out = injectRegata(xml, cap);
+  const out = injectRegata(xml, 300);
   assert.equal(
     (out.match(/<MyOldTask\b/g) ?? []).length,
-    cap + 1,
-    "the whole envelope added on top of the save's own record",
+    301,
+    "three hundred tasks land on top of the save's own record",
   );
-  const times = [...out.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)].map((m) => Number(m[1])).sort((a, b) => a - b);
+  const times = [...out.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)].map((m) => Number(m[1]));
   const now = Math.floor(Date.now() / 1000);
   for (let i = 0; i < times.length; i++) {
-    if (i) assert.ok(times[i]! - times[i - 1]! >= gap, "two completions sat closer than a day allows");
+    if (i) assert.ok(times[i]! > times[i - 1]!, "no two completions share a second");
     assert.ok(times[i]! < now, "a completion must never be dated in the future");
   }
 });
@@ -1175,23 +1144,16 @@ test("regatta takes every count today's envelope holds, and refuses the next —
   ];
   for (const [name, xml] of fixtures) {
     const already = (xml.match(/<MyOldTask\b/g) ?? []).length;
-    const state = inspectRegatta(xml, 1);
-    const room = state.dayRoom;
-    assert.ok(
-      room <= regattaDayCap(state.quota),
-      `${name}: room may never exceed the save's own 2x quota envelope`,
-    );
-    assert.ok(room >= 0, `${name}: room is a count, never negative`);
-
-    // Every count inside the reported room is pressable, writes exactly that
-    // many records, and keeps the three things a server reads without history.
-    for (let n = 1; n <= room; n++) {
+    // Every count, small and far past the old daily envelope, is pressable and
+    // writes exactly that many records. The three refusals that used to live
+    // here (window too short, already full, today's envelope crossed) are gone.
+    for (const n of [1, 2, 5, 12, 20, 50, 100]) {
       assert.equal(inspectRegatta(xml, n).reason, "ok", `${name}: ${n} must be pressable`);
       const out = injectRegata(xml, n);
       assert.equal(
         (out.match(/<MyOldTask\b/g) ?? []).length,
         already + n,
-        `${name}: ${n} asked but ${((out.match(/<MyOldTask\b/g) ?? []).length)} written`,
+        `${name}: ${n} asked but ${(out.match(/<MyOldTask\b/g) ?? []).length} written`,
       );
       const winStart = Number(/<Regata\b[^>]*\bstartTime="(\d+)"/.exec(xml)![1]);
       const winEnd = Number(/<Regata\b[^>]*\bendTime="(\d+)"/.exec(xml)![1]);
@@ -1208,11 +1170,6 @@ test("regatta takes every count today's envelope holds, and refuses the next —
       }
       assert.doesNotThrow(() => assertRegattaSafe(xml, out), `${name} ${n}: every gate must stay green`);
     }
-
-    // …and the next one is refused with the numbers, never written anyway.
-    const over = room + 1;
-    assert.equal(inspectRegatta(xml, over).reason, "day_full", `${name}: ${over} is past today's envelope`);
-    assert.throws(() => injectRegata(xml, over), /TaskQuota|24 giờ/, `${name}: the push must refuse what the badge refuses`);
   }
 });
 
@@ -1239,46 +1196,43 @@ test("a second push takes what today's envelope still holds, and refuses the res
     "</Regata></Global>";
 
   // A short while after the first push of the day: one record, finished an hour
-  // ago. The spacing says one more fits — the next one may sit `gap` later and
-  // still be before now — and 50 does not.
+  // ago. Fifty more used to be refused here ("only one fits"); it is now taken
+  // as typed and spread across the seconds the block has left.
   const xml = xmlAt(now - 3600);
-  const state = inspectRegatta(xml, 50);
-  assert.equal(state.dayRoom, 1, "an hour since the last completion leaves room for exactly one");
-  assert.equal(state.reason, "day_full", "fifty is more than the day still holds");
-  assert.throws(() => injectRegata(xml, 50), /Chỉ còn 1 task/, "the refusal names how many fit");
+  assert.equal(inspectRegatta(xml, 50).reason, "ok", "fifty is a count, not a refusal");
 
-  const one = injectRegata(xml, 1);
-  const oneTimes = [...one.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)].map((m) => Number(m[1]));
-  assert.equal(oneTimes.length, 2, "the one more it was asked for really is written");
-  assert.ok(oneTimes[1]! > oneTimes[0]!, "and lands after the record the block already held");
-  assert.doesNotThrow(() => assertRegattaSafe(xml, one), "a one-task repeat push stays clean through the gate");
+  const many = injectRegata(xml, 50);
+  const manyTimes = [...many.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)].map((m) => Number(m[1]));
+  assert.equal(manyTimes.length, 51, "the record the block held plus all fifty");
+  for (let i = 1; i < manyTimes.length; i++) {
+    assert.ok(manyTimes[i]! > manyTimes[i - 1]!, "ordered, and no two share a second");
+  }
+  const wallNow = Math.floor(Date.now() / 1000);
+  for (const t of manyTimes) assert.ok(t >= start && t < wallNow, "inside the window and never in the future");
+  assert.doesNotThrow(() => assertRegattaSafe(xml, many), "a large repeat push stays clean through the gate");
 
-  // Once the pile is old enough the same save takes a whole batch again: room
-  // recovers with time, it is never a permanent lock.
+  // And a small batch on the same save still takes the safe spacing when the
+  // block has the room for it.
   const later = xmlAt(now - 10 * 3600);
-  const room = inspectRegatta(later, 1).dayRoom;
-  assert.ok(room >= 8, `ten hours of room must hold a batch, got ${room}`);
-  assert.equal(inspectRegatta(later, room).reason, "ok");
-  assert.equal(inspectRegatta(later, room + 1).reason, "day_full");
-
+  const room = 8;
   const batch = injectRegata(later, room);
   const times = [...batch.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)].map((m) => Number(m[1]));
   assert.equal(times.length, room + 1, "the batch lands on top of the record the block already held");
   const gap = regattaDensityGap(regattaDayCap(inspectRegatta(later, 1).quota));
   const now2 = Math.floor(Date.now() / 1000);
   for (let i = 1; i < times.length; i++) {
-    assert.ok(times[i]! - times[i - 1]! >= gap, "two completions sat closer than the day allows");
+    assert.ok(times[i]! - times[i - 1]! >= gap, "ten hours of room still gets the full safe gap");
     assert.ok(times[i]! >= start && times[i]! < now2, "ordered, inside the window and never in the future");
   }
   assert.doesNotThrow(() => assertRegattaSafe(later, batch), "a batch after the pile ages must stay clean");
 });
 
-test("regatta refuses the day the banned run produced, and opens again once that pile ages", () => {
+test("regatta adds to an existing pile without refusing, and the gate still decides the shape", () => {
   // The save behind the ban report held 200 live completions inside one
-  // rolling day against its own `TaskQuota` of 15, with round 2 cramming 101
-  // of them into 55 seconds. That is not a count to pace differently — the
-  // game blocks task #16 until the reset, so the state is one the server never
-  // writes, and this tool must refuse to add to it.
+  // rolling day against its own `TaskQuota` of 15. That is a shape worth
+  // refusing only if *this tool* writes it; the count itself is no longer
+  // refused, so a save that already carries a pile still takes a batch — placed
+  // after its newest record, in distinct seconds, and judged by the ban gate.
   const now = Math.floor(Date.now() / 1000);
   const start = now - 4 * 86400;
   const end = now + 3 * 86400;
@@ -1299,27 +1253,27 @@ test("regatta refuses the day the banned run produced, and opens again once that
     pile(30, base) +
     "</Regata></Global>";
 
-  // Thirty completions inside the newest minutes is already past `2 * 15`, so
-  // nothing fits and the refusal names the save's own quota and envelope.
+  // Thirty completions inside the newest minutes no longer blocks the next one.
   const today = save(now - 600);
   const state = inspectRegatta(today, 1);
   assert.equal(state.quota, 15, "the save's own quota is what governs, not a constant");
-  assert.equal(state.dayRoom, 0, "a day already past its envelope has no room left");
-  assert.equal(state.reason, "day_full");
-  assert.throws(() => injectRegata(today, 1), /TaskQuota 15/);
+  assert.equal(state.reason, "ok", "a pile already on file is not a reason to refuse");
+  const one = injectRegata(today, 1);
+  const oneTimes = [...one.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)].map((m) => Number(m[1]));
+  assert.equal(oneTimes.length, 31, "one more lands on top of the thirty");
+  assert.ok(oneTimes[30]! > oneTimes[29]!, "after the pile's newest record, never before it");
+  assert.doesNotThrow(() => assertRegattaSafe(today, one), "the gate still decides the shape");
 
-  // The same pile two days older shares no rolling window with anything a
-  // batch would write (placement packs to the recent end), so the envelope is
-  // free again — the refusal is about *adding to* an impossible day, never a
-  // permanent lock on the save.
+  // An older pile takes a whole batch: the batch packs to the recent end, away
+  // from the pile, so it shares no rolling day with it.
   const aged = save(now - 2 * 86400);
-  const room = inspectRegatta(aged, 1).dayRoom;
-  assert.equal(room, 2 * 15, "two days on, the whole 2x quota envelope is free");
-  assert.equal(inspectRegatta(aged, room).reason, "ok");
-  assert.equal(inspectRegatta(aged, room + 1).reason, "day_full", "and the envelope still binds");
-  const out = injectRegata(aged, room);
-  assert.equal((out.match(/<MyOldTask\b/g) ?? []).length, 30 + room, "the aged pile plus the whole envelope");
-  assert.doesNotThrow(() => assertRegattaSafe(aged, out), "a batch beside an old pile stays clean through the gate");
+  const batch = injectRegata(aged, 40);
+  const times = [...batch.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)].map((m) => Number(m[1]));
+  assert.equal(times.length, 70, "the aged pile plus every task asked for");
+  const wallNow = Math.floor(Date.now() / 1000);
+  for (let i = 1; i < times.length; i++) assert.ok(times[i]! > times[i - 1]!, "ordered, distinct seconds");
+  for (const t of times) assert.ok(t >= start && t < wallNow, "inside the window and never in the future");
+  assert.doesNotThrow(() => assertRegattaSafe(aged, batch), "a batch beside an old pile stays clean through the gate");
 });
 
 test("a cloned record takes the live block's TaskQuota, never the archive's", () => {

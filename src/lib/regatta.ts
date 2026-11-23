@@ -206,15 +206,17 @@ export const REGATTA_MIN_WINDOW_AGE = 3;
  * Both are gone: a batch is accepted whenever the block exists, has been open
  * for a few seconds, and holds a record to copy.
  *
- * `day_full` is the one refusal about *today*, and it was added after an
- * account was banned for pushing 200 completions into a single rolling day
- * against its own `TaskQuota` of 15 — the game blocks task #16 per reset, so
- * anything past ~2x quota in a day is a state the server itself never writes.
- * It refuses a batch only when it would cross that envelope (see
- * `regattaDayCap`); `inspectRegatta` computes the exact room from the save, so
- * the badge and the push stay one decision as always.
+ * `day_full` used to refuse a batch that would cross a rolling-24 h envelope
+ * (`2 * TaskQuota`), because an account was banned for pushing 200 completions
+ * into one day. It is **gone as of 2026-11-24**: the count is whatever the user
+ * types and the push never answers with a limit. What stayed is the *shape*
+ * guard the envelope was protecting — new records still sit at the safe
+ * spacing whenever the window has room for it (see `regattaDensityGap`), they
+ * never share a second, and `assertRegattaSafe` still refuses a record the game
+ * could not have written. Removing the refusal removed a limit; it did not
+ * remove the ban gate.
  */
-export type RegattaReason = "ok" | "no_active_regatta" | "no_template" | "day_full";
+export type RegattaReason = "ok" | "no_active_regatta" | "no_template";
 
 /** The `<Regata>` window: `startTime` / `endTime` read off the block. */
 export interface RegattaWindow {
@@ -246,7 +248,7 @@ export function regattaWant(nTasks: number): number {
  * it is no longer read here.
  */
 export function regattaReason(
-  state: { window: RegattaWindow | null; templates: number; current: number; lastDone?: number; quota?: number; dayRoom?: number },
+  state: { window: RegattaWindow | null; templates: number; current: number; lastDone?: number; quota?: number },
   nTasks: number = REGATTA_DEFAULT_TASKS,
   now: number = Math.floor(Date.now() / 1000),
 ): RegattaReason {
@@ -256,16 +258,8 @@ export function regattaReason(
   // server checks for first. The three-second age is `REGATTA_MIN_WINDOW_AGE`.
   if (!win || now < win.start + REGATTA_MIN_WINDOW_AGE || now > win.end) return "no_active_regatta";
   if (!state.templates) return "no_template";
-  // How many tasks this save may still add right now, computed from the save
-  // itself by `inspectRegatta` (the same planner `injectRegata` runs), so the
-  // badge refuses exactly the batch the push would refuse as `day_full`. A
-  // caller that supplies no room (a bare reason check in a test) gates nothing,
-  // which keeps this function the count-independent answer it became in
-  // 2026-10-05 for every other refusal.
-  if (regattaWant(nTasks) > (state.dayRoom ?? Infinity)) return "day_full";
-  // No other check. The count may not be read as a weekly total — that is what
-  // answered `already_full` to every second push — and the only day-based
-  // refusal above is the game's own daily envelope, not a limit this tool
-  // chose.
+  // No count check, by design: the number is how many tasks to add, and a
+  // batch is never refused for being large. Spacing is handled by the
+  // injector (`regattaSpreadPlan`) and the ban gate by `assertRegattaSafe`.
   return "ok";
 }

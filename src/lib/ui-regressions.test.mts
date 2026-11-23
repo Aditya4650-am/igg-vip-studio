@@ -237,27 +237,27 @@ test("the regatta count is how many tasks to add, so nothing can say the week is
   assert.ok(!tsx.includes("already_full"), "the removed refusal must not be reintroduced");
   assert.ok(!read("server/township/inject.server.ts").includes("already_full:"), "nor its error string");
 
-  // The union itself, so a new reason cannot be added without a decision.
+  // The union itself, so a new reason cannot be added without a decision. The
+  // daily-envelope refusal (`day_full`) was removed on 2026-11-24 — a count is
+  // taken as typed — so the union holds only the two things the block itself
+  // can be missing.
   assert.match(
     read("regatta.ts"),
-    /export type RegattaReason =\s*"ok" \| "no_active_regatta" \| "no_template" \| "day_full";/,
-    "`RegattaReason` may only hold the three refusals plus ok",
+    /export type RegattaReason =\s*"ok" \| "no_active_regatta" \| "no_template";/,
+    "`RegattaReason` may only hold the block refusals plus ok",
   );
 
   // And the label the user actually reads, in both dictionaries the tab ships.
   const dict = read("i18n.ts");
 
-  // The daily envelope is the refusal a bot round of 100 actually meets, so
-  // its label has to exist in both dictionaries and be wired to the reason.
-  assert.ok(dict.includes("regattaOverQuota:"), "vi must carry the day-full label");
-  assert.ok(/regattaOverQuota:/.test(dict.slice(dict.indexOf("const en: typeof vi"))), "en must carry it too");
+  // No count-based refusal may come back: not the reason, not its key, not the
+  // badge's room read-out.
+  assert.ok(!tsx.includes("day_full"), "the removed day-full refusal must not return");
+  assert.ok(!tsx.includes("regattaOverQuota:"), "nor its label be wired back into the tab");
+  assert.ok(!tsx.includes("dayRoom"), "nor the badge read a daily room");
   assert.ok(
-    tsx.includes('day_full: "regattaOverQuota"'),
-    "the reason key must map day_full onto that label",
-  );
-  assert.ok(
-    tsx.includes("dayRoom: session.regattaInfo.dayRoom"),
-    "the badge must read the same room the push checks",
+    !read("server/township/inject.server.ts").includes("regattaDayFullErr"),
+    "nor the refusal helper survive in the server",
   );
 
   assert.ok(dict.includes('regattaCount: "Số task cần thêm"'), "vi must call it the number to add");

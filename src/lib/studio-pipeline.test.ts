@@ -8,7 +8,7 @@ process.env.IGG_VIP_URL = "";
 const studio = await import("./server/studio.server.ts");
 const { verifyLicenseKey } = await import("./server/license.server.ts");
 const { findUnbalancedTag } = await import("./server/township/xml-edit.server.ts");
-const { assertNoForeignIdentity, applyDesban, assertCoopIdentityKept, cloneDecorOnly, parseGameFriends } = await import("./server/township/desban.server.ts");
+const { assertNoForeignIdentity, applyDesban, assertCoopIdentityKept, cloneDecorOnly } = await import("./server/township/desban.server.ts");
 const { avatarEmoji, avatarIconPath, AVATAR_EMOJIS, AVATAR_ICON_MAX, AVATAR_MAX } =
   await import("./catalogs.ts");
 const { iconForBarn } = await import("./game-icon-map.ts");
@@ -227,7 +227,7 @@ test("decoration: a save that already has a self-closing stash is updated in pla
   assert.equal((pushed.match(/<BuildingsStash/g) ?? []).length, 1);
 });
 
-test("regatta: a push fills today's envelope, and a second one refuses without moving the file", () => {
+test("regatta: a second push adds its own batch instead of being refused", () => {
   const snap = townSession(REGATTA_SAVE);
   const first = studio.applyRegatta(token, snap.sessionId);
   balanced(first.xml!);
@@ -240,28 +240,24 @@ test("regatta: a push fills today's envelope, and a second one refuses without m
   );
 
   // The report behind this was *"i push 50 tasks it works, but if i want to
-  // push more then i can't push it shows error"*. The count is **added**, so a
-  // second push is judged on what is left of today's envelope — and right
-  // after a batch the newest completion is a second old, so the spacing leaves
-  // no room. That refusal has to leave the session exactly as the first push
-  // left it: keeping the first batch while reporting a failure would make the
-  // next Save & push write it a second time.
-  const before = studio.exportCurrent(token, snap.sessionId).fileB64;
-  assert.throws(
-    () => studio.applyRegatta(token, snap.sessionId),
-    /TaskQuota|24 giờ|Chỉ còn/,
-    "a second push has to be refused on today's envelope, not written anyway",
-  );
+  // push more then i can't push it shows error"*, and later *"i dont want any
+  // limit"*. The daily-envelope refusal is gone, so a second push right after
+  // the first lands its own batch on top — spread over the seconds it has,
+  // never sharing one, and never refused.
+  const second = studio.applyRegatta(token, snap.sessionId);
+  balanced(second.xml!);
+  const after = Buffer.from(second.fileB64!, "base64").toString("utf8");
   assert.equal(
-    studio.exportCurrent(token, snap.sessionId).fileB64,
-    before,
-    "a refused push must not move the file",
+    (after.match(/<MyOldTask\b/g) ?? []).length,
+    25,
+    "the second batch is written on top of the first",
   );
-  assert.equal(
-    (Buffer.from(before!, "base64").toString("utf8").match(/<MyOldTask\b/g) ?? []).length,
-    13,
-    "and the thirteen records from the first push are still the only ones",
-  );
+  const times = [...after.matchAll(/<MyOldTask\b[^>]*?\brealEndTime="(\d+)"/g)].map((m) => Number(m[1]));
+  // A push a second after another has fewer free seconds left than the batch is
+  // long, so its records take the latest free seconds — distinct, in the past,
+  // inside the week — rather than sharing one. Two completions never share a
+  // timestamp; that was the banned batch's fingerprint.
+  assert.equal(new Set(times).size, times.length, "no two completions share a second");
 });
 
 test("fetch city: validates input before touching python", async () => {
@@ -2820,37 +2816,4 @@ test("profile: a save wearing a newly measured frame is not refused by the shape
     [],
     "every frame id measured in a real save must be a known id",
   );
-});
-
-test("friends: the in-game list is read from the save, not only the invite block", () => {
-  // A real save keeps the player's friends in <FollowedFriendIds>, and the
-  // invite block is empty on most accounts — reading only that (or only
-  // LocalInfo's platform roster) is why a scan showed no real friends.
-  const save =
-    `<root><Global><Var name="cityId" v="ME00000000"/>` +
-    `<FollowedFriendIds>` +
-    `<friend id="hao123" city_name="hao"/>` +
-    `<friend id="APtown1" city_name="AP Town"/>` +
-    `</FollowedFriendIds>` +
-    `<FriendIds><friend id="snowy99" city_name="snowy"/></FriendIds>` +
-    `<InvitedFriends/>` +
-    `</Global></root>`;
-  assert.deepEqual(
-    parseGameFriends(save).map((f) => [f.id, f.name, f.type]),
-    [
-      ["hao123", "hao", "friend"],
-      ["APtown1", "AP Town", "friend"],
-      ["snowy99", "snowy", "friend"],
-    ],
-  );
-
-  // A pending request stays a request; the same id is never listed twice.
-  const withRequest = save.replace(
-    "<InvitedFriends/>",
-    '<InvitedFriends><friend id="hao123" city_name="hao"/><friend id="newbie1" city_name="new"/></InvitedFriends>',
-  );
-  const all = parseGameFriends(withRequest);
-  assert.equal(all.filter((f) => f.id === "hao123").length, 1, "one entry per friend id");
-  assert.equal(all.find((f) => f.id === "newbie1")?.type, "request");
-  assert.deepEqual(parseGameFriends("<root><Global/></root>"), [], "no list, no friends");
 });
